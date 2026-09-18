@@ -102,10 +102,14 @@
     if (!spec) return;
     if (spec.tab) clickWhenReady(STEP_SEL.tab(spec.tab));
 
-    if (spec.prod || spec.gfx) {
+    if (spec.prod) {
       clickWhenReady(STEP_SEL.tab('produccion'));
-      callWhenReady('_pdShow', spec.gfx ? 'graphics' : spec.prod);
-      if (spec.gfx) clickWhenReady(STEP_SEL.gfx(spec.gfx));
+      callWhenReady('_pdShow', spec.prod);
+    }
+    // The Graphics hub is a Dashboard section now (Production dropped its Graphics pane).
+    if (spec.gfx) {
+      clickWhenReady(STEP_SEL.tab('principal'));
+      clickWhenReady(STEP_SEL.gfx(spec.gfx));
     }
     if (spec.ev)      { clickWhenReady(STEP_SEL.tab('events')); clickWhenReady(STEP_SEL.ev(spec.ev)); }
     if (spec.talent)  {
@@ -116,6 +120,7 @@
     if (spec.assets)  { clickWhenReady(STEP_SEL.tab('media')); callWhenReady('_assetsShow', spec.assets); }
     if (spec.stats)   { clickWhenReady(STEP_SEL.tab('stats')); clickWhenReady(STEP_SEL.stats(spec.stats)); }
     if (spec.integ)   { clickWhenReady(STEP_SEL.tab('integrations')); clickWhenReady(STEP_SEL.integ(spec.integ)); }
+    if (spec.game)    { callWhenReady('_ghOpen', spec.game); }
     if (spec.dash)    { clickWhenReady(STEP_SEL.tab('principal')); callWhenReady('_dccSetRole', spec.dash); }
     if (spec.replays) { clickWhenReady(STEP_SEL.tab('replays')); clickWhenReady(STEP_SEL.replays(spec.replays)); }
     // The quick rail is always on screen — its tabs are destinations in their own right. But a
@@ -172,7 +177,7 @@
   // destination spec (see nav()); entries whose target does not exist on this install are dropped
   // at build time rather than shipping a result that goes nowhere.
   const FEATURES = [
-    // Production > Graphics scenes
+    // Graphics scenes (Dashboard ▸ Graphics hub)
     { n: 'Break / Starting Soon', w: 'Graphics', k: 'countdown timer standby intermission starting soon brb bottom bar replay', to: { gfx: 'break' } },
     { n: 'Team Intro / Line-up', w: 'Graphics', k: 'lineup line-up starting roster real names footer lower third', to: { gfx: 'intro' } },
     { n: 'Ticker', w: 'Graphics', k: 'crawl scores news bottom line lower third strap sponsor', to: { gfx: 'ticker' } },
@@ -187,33 +192,34 @@
     { n: 'Spotlight', w: 'Graphics', k: 'spotlight player spotlight team spotlight watchlist teams to watch stat card', to: { gfx: 'spotlight' } },
     { n: 'Stream Credits', w: 'Graphics', k: 'credits roll thanks for watching staff supporters outro sponsors', to: { gfx: 'credits' } },
     // Production panes
-    { n: 'Production Deck', w: 'Production', k: 'deck buttons grid stream deck board triggers cockpit', to: { prod: 'deck' } },
-    { n: 'Match \u2014 Teams & Scorecard', w: 'Production', k: 'match teams score series best of bo3 bo5 blue orange swap smash stocks scoreboard scorecard', to: { prod: 'deck' } },
+    { n: 'Deck', w: 'Dashboard', k: 'deck buttons grid stream deck board triggers cockpit production', to: { tab: 'principal' } },
+    { n: 'Match \u2014 Teams & Scorecard', w: 'Dashboard', k: 'match teams score series best of bo3 bo5 blue orange swap smash stocks scoreboard scorecard', to: { tab: 'principal' } },
     { n: 'Rundown / Run of Show', w: 'Production', k: 'rundown run of show segments order', to: { prod: 'rundown' } },
     { n: 'Flows', w: 'Production', k: 'flows automation macro actions triggers', to: { prod: 'flows' } },
     { n: 'Hotkeys', w: 'Production', k: 'hotkeys keyboard shortcuts keys bindings', to: { prod: 'hotkeys' } },
     { n: 'NEURAL AI / Director', w: 'Production', k: 'ai director auto switch shield neural', to: { prod: 'director' } },
     // Dashboard
     { n: 'Show Deck (tonight\u2019s desk)', w: 'Dashboard', k: 'show deck shift preset casters slots allocation handover roles rotation', to: { dash: 'showdeck' } },
+    { n: 'Game Settings', w: 'Dashboard', k: 'game settings rocket league hud overlay style scoreboard style replay style overtime sponsor slots player cams smash stocks fighters tokon format layout', to: { tab: 'principal', flash: 'game-settings-section' } },
+    { n: 'Sponsors (desk footer)', w: 'Dashboard', k: 'sponsors desk footer lower third logos active brand ad slots', to: { tab: 'principal', flash: 'adslot-footer' } },
     { n: 'On-Air Talent', w: 'Dashboard', k: 'hosts monitor talent connection status cams live on air', to: { dash: 'hosts' } },
     { n: 'Player Cams', w: 'Dashboard', k: 'players cams in-game player cam mapping', to: { dash: 'players' } },
     { n: 'Team Staging', w: 'Dashboard', k: 'staging teams hosts waiting', to: { dash: 'staging' } },
     { n: 'Lobby / Waiting Room', w: 'Dashboard', k: 'lobby waiting room guests green room', to: { dash: 'lobby' } },
     { n: 'Stream Queue', w: 'Dashboard', k: 'stream queue startgg live next sets push auto follow on deck order', to: { tab: 'principal', flash: 'ev-queue-block' } },
     // Esports
-    { n: 'Tournaments (start.gg)', w: 'ESPORTS', k: 'startgg start.gg tournament event import challonge nxgen faceit', to: { ev: 'startgg' } },
-    { n: 'Leagues', w: 'ESPORTS', k: 'league season standings points schedule weekly fixtures record', to: { ev: 'leagues' } },
-    { n: 'My Events', w: 'ESPORTS', k: 'my events saved events history', to: { ev: 'myevents' } },
-    { n: 'Seeding', w: 'ESPORTS', k: 'seeding seed rank elo 6mans tier ladder resolve tracker', to: { ev: 'seeding' } },
+    { n: 'Tournaments (start.gg)', w: 'Events', k: 'startgg start.gg tournament event import challonge nxgen faceit', to: { ev: 'startgg' } },
+    { n: 'Leagues', w: 'Events', k: 'league season standings points schedule weekly fixtures record', to: { ev: 'leagues' } },
+    { n: 'My Events', w: 'Events', k: 'my events saved events history', to: { ev: 'myevents' } },
     { n: 'Event Ops', w: 'Analytics', k: 'event ops checklist operations tasks check-in csv spreadsheet seeding challonge mirror', to: { stats: 'eventops' } },
     // Talent / cameras
     { n: 'Teams & Rosters', w: 'Talent', k: 'teams roster players logos import csv export library', to: { talent: 'teams', talentSub: 'saved' } },
     { n: 'Event Roster', w: 'Talent', k: 'event teams roster entrants', to: { talent: 'teams', talentSub: 'event' } },
     { n: 'Crew / Talent Profiles', w: 'Talent', k: 'crew casters host observer profiles staff country social gamertag', to: { talent: 'crew' } },
-    { n: 'Camera Feeds', w: 'Cameras', k: 'cameras vdo ninja feeds rooms invite links talent rooms observers stations', to: { tab: 'facecams' } },
+    { n: 'Camera Feeds', w: 'Production', k: 'cameras vdo ninja feeds rooms invite links talent rooms observers stations', to: { prod: 'cameras' } },
     // Video editor
-    { n: 'Replay Editor', w: 'Video Editor', k: 'replays clips trim editor highlights playlists montage buffer', to: { replays: 'editor' } },
-    { n: 'Exports', w: 'Video Editor', k: 'export render encode mp4', to: { replays: 'exports' } },
+    { n: 'Replays', w: 'Replays', k: 'replays capture clips trim video editor highlights playlists montage buffer instant replay', to: { replays: 'editor' } },
+    { n: 'Exports', w: 'Replays', k: 'export render encode mp4', to: { replays: 'exports' } },
     // Assets
     { n: 'Media Library', w: 'Assets', k: 'media images assets uploads library stingers', to: { assets: 'media' } },
     { n: 'Scene / Overlay Sources', w: 'Assets', k: 'scenes overlays browser source url obs background fill opacity edit html preview', to: { assets: 'overlays' } },
@@ -224,14 +230,16 @@
     { n: 'Audience', w: 'Analytics', k: 'audience viewers twitch followers chat', to: { stats: 'audience' } },
     { n: 'Event Stats', w: 'Analytics', k: 'event results stats records head to head', to: { stats: 'event' } },
     { n: 'Player Stats', w: 'Analytics', k: 'player stats search history goals assists saves', to: { stats: 'players' } },
-    // Integrations
-    { n: 'Twitch', w: 'Integrations', k: 'twitch chat predictions polls alerts clips ads commands bot', to: { integ: 'twitch' } },
-    { n: 'Tournament Platforms', w: 'Integrations', k: 'startgg challonge nxgen faceit api token connect', to: { integ: 'tournaments' } },
-    { n: 'Cameras / VDO', w: 'Integrations', k: 'vdo ninja cameras api key stations', to: { integ: 'cameras' } },
-    { n: 'Switcher (OBS / vMix)', w: 'Integrations', k: 'obs vmix websocket switcher connect scenes audio sources mute setup', to: { integ: 'switcher' } },
-    { n: 'Games & GSI', w: 'Integrations', k: 'games maps roles characters config builder gsi rl cs2 valorant overwatch', to: { integ: 'games' } },
-    { n: 'Store', w: 'Integrations', k: 'store marketplace packages buy browse', to: { integ: 'store' } },
-    { n: 'Chat Games', w: 'Integrations', k: 'chat games minigames wheel predictions viewers', to: { tab: 'integrations', flash: 'integration-chatgames' } },
+    // Marketplace
+    { n: 'Twitch', w: 'Marketplace', k: 'twitch chat predictions polls alerts clips ads commands bot', to: { integ: 'twitch' } },
+    { n: 'Tournament Platforms', w: 'Marketplace', k: 'startgg challonge nxgen faceit api token connect', to: { integ: 'tournaments' } },
+    { n: 'Cameras / VDO', w: 'Marketplace', k: 'vdo ninja cameras api key stations', to: { integ: 'cameras' } },
+    { n: 'Switcher (OBS / vMix)', w: 'Marketplace', k: 'obs vmix websocket switcher connect scenes audio sources mute setup', to: { integ: 'switcher' } },
+    { n: 'Game setup', w: 'Settings', k: 'games setup connection gsi stats api overlay layout browser source automation scoring maps roles characters custom content rl cs2 valorant league apex fortnite', to: { settings: 'games' } },
+    { n: 'Integrations', w: 'Marketplace', k: 'integrations store apps connect platforms browse', to: { integ: 'store' } },
+    { n: 'Plugins', w: 'Marketplace', k: 'plugins marketplace store buy sell extensions addons community packages', to: { integ: 'plugins' } },
+    { n: 'API', w: 'Marketplace', k: 'api key developers websocket custom overlay build sdk rest endpoints feed format google sheet columns bot script', to: { integ: 'api' } },
+    { n: 'Chat Games', w: 'Marketplace', k: 'chat games minigames wheel predictions viewers', to: { tab: 'integrations', flash: 'integration-chatgames' } },
     // Quick rail
     { n: 'Quick Rail \u2014 On Air', w: 'Quick rail', k: 'quick on air 2air cockpit put on air punch', to: { rail: 'quick' } },
     { n: 'Quick Rail \u2014 Next / Rundown', w: 'Quick rail', k: 'rundown segments run of show next', to: { rail: 'ros' } },
@@ -241,9 +249,10 @@
     { n: 'Quick Rail \u2014 Stream / Chat', w: 'Quick rail', k: 'stream twitch chat multichat highlight feature message', to: { rail: 'twitch' } },
     { n: 'Quick Rail \u2014 Notes', w: 'Quick rail', k: 'notes scratchpad reminders', to: { rail: 'notes' } },
     // Settings (scroll-to)
+    { n: 'Walkthroughs', w: 'Settings', k: 'tour walkthrough help getting started tutorial guide onboarding quick start how to learn', to: { settings: 'general', flash: 'tour-section' } },
     { n: 'Appearance & Accent', w: 'Settings', k: 'theme colour color accent appearance dark light mode skin brand look', to: { settings: 'appearance', flash: 'settings-appearance' } },
     { n: 'Broadcast Defaults', w: 'Settings', k: 'default best of series overlay font clock defaults auto reload', to: { settings: 'broadcast', flash: 'settings-broadcast-defaults' } },
-    { n: 'Rocket League Automation', w: 'Settings', k: 'rl rocket league kickoff scene scoreboard replay transitions stats api pause', to: { settings: 'games', flash: 'set-sec-rl' } },
+    { n: 'Rocket League Automation', w: 'Settings', k: 'rl rocket league kickoff scene scoreboard replay transitions stats api pause', to: { game: 'rocket-league:automation' } },
     { n: 'Replays & Clips', w: 'Settings', k: 'replay buffer clips montage encoder folders staging', to: { settings: 'replays', flash: 'set-sec-replays' } },
     { n: 'Brand Kits', w: 'Settings', k: 'brand kit sponsors packages logo colours colors', to: { settings: 'brandkits', flash: 'set-sec-brandkits' } },
     { n: 'Settings', w: 'Settings', k: 'settings preferences options organization org cloud account update bug report tour getting started', to: { tab: 'ajustes' } },
@@ -353,7 +362,7 @@
           w: p.kind || 'Caster',
           group: 'People',
           k: [p.handle, p.kind, p.country].filter(Boolean).join(' '),
-          go: () => nav({ tab: 'facecams', filter: { id: 'caster-lib-search', value: p.name } })
+          go: () => nav({ prod: 'cameras', filter: { id: 'caster-lib-search', value: p.name } })
         });
       });
       return out.slice(0, 2000);
@@ -364,13 +373,12 @@
         n: l.name || 'League',
         sub: ((l.teams || []).length) + ' teams' + (l.game ? ' · ' + l.game : ''),
         w: 'League',
-        group: 'Esports',
+        group: 'Events',
         k: (l.teams || []).map((t) => t.teamName || t.name || '').join(' ') + ' ' + (l.season || ''),
         go: () => {
           nav({ ev: 'leagues' });
-          // The league list renders after the tab does, so wait for this league's own row.
-          const sel = '.lg-list-item[data-id="' + String(l.id).replace(/"/g, '') + '"]';
-          waitFor(() => document.querySelector(sel), (n) => n.click(), sel);
+          // The Leagues header switcher renders after the tab does, so wait for it, then select.
+          waitFor(() => document.getElementById('lg-switch') && typeof lgRender === 'function', () => { lgActiveId = l.id; lgRender(); }, '#lg-switch');
         }
       }));
     },
@@ -384,7 +392,7 @@
         const key = S.norm(name) + '|' + S.norm(slug);
         if (!name || seen.has(key)) return;
         seen.add(key);
-        out.push({ n: name, sub: slug || where, w: 'Event', group: 'Esports', k: slug || '', go: () => nav({ ev: 'startgg' }) });
+        out.push({ n: name, sub: slug || where, w: 'Event', group: 'Events', k: slug || '', go: () => nav({ ev: 'startgg' }) });
       };
       add(sg.eventName || sg.tournamentName, sg.eventSlug, 'Loaded event');
       (sg.savedEvents || sg.myEvents || []).forEach((e) => e && add(e.name || e.tournamentName, e.slug || e.eventSlug, 'Saved event'));
@@ -440,21 +448,21 @@
     },
 
     // Live OBS scenes, sources and audio inputs — searching "cam 2" should reach the source.
-    // They land on Production ▸ Deck, which is where scenes/audio/sources are driven from.
+    // They land on the Dashboard deck, which is where scenes/audio/sources are driven from.
     function obs() {
       const o = st().obs || {};
       const out = [];
       (o.availableScenes || []).forEach((s) => out.push({
-        n: s, sub: (o.currentScene === s ? 'On air' : 'OBS scene'), w: 'Scene', group: 'Production',
-        k: 'obs scene', go: () => nav({ prod: 'deck' })
+        n: s, sub: (o.currentScene === s ? 'On air' : 'OBS scene'), w: 'Scene', group: 'Dashboard',
+        k: 'obs scene', go: () => nav({ tab: 'principal' })
       }));
       (o.audioInputs || []).forEach((a) => a && a.name && out.push({
-        n: a.name, sub: a.muted ? 'Muted' : 'Audio input', w: 'Audio', group: 'Production',
-        k: 'obs audio volume mute', go: () => nav({ prod: 'deck' })
+        n: a.name, sub: a.muted ? 'Muted' : 'Audio input', w: 'Audio', group: 'Dashboard',
+        k: 'obs audio volume mute', go: () => nav({ tab: 'principal' })
       }));
       (o.sources || []).slice(0, 800).forEach((s) => s && s.source && out.push({
-        n: s.source, sub: s.scene || 'OBS source', w: 'Source', group: 'Production',
-        k: 'obs source show hide ' + (s.scene || ''), go: () => nav({ prod: 'deck' })
+        n: s.source, sub: s.scene || 'OBS source', w: 'Source', group: 'Dashboard',
+        k: 'obs source show hide ' + (s.scene || ''), go: () => nav({ tab: 'principal' })
       }));
       return out;
     },
@@ -482,17 +490,17 @@
       const g = st().games || {};
       return Object.keys(g).map((id) => ({
         n: (g[id] && g[id].name) || id,
-        sub: id === st().activeGame ? 'Active game' : 'Game config',
+        sub: id === st().activeGame ? 'Active game' : 'Game setup',
         w: 'Game', group: 'Assets',
-        k: id + ' maps roles characters config',
-        go: () => nav({ integ: 'games' })
+        k: id + ' setup connection overlay maps roles characters config',
+        go: () => nav({ game: id })
       }));
     }
   ];
 
   // Group display order — Panels first because a bare word like "bracket" almost always means the
   // panel, then people/teams, then the bulkier libraries.
-  const GROUP_ORDER = ['Panels', 'Graphics', 'Teams', 'People', 'Players', 'Esports', 'Replays', 'Automation', 'Switcher', 'Assets'];
+  const GROUP_ORDER = ['Panels', 'Graphics', 'Teams', 'People', 'Players', 'Events', 'Replays', 'Automation', 'Switcher', 'Assets'];
   const GROUP_CAP = { Players: 6, Replays: 6, Switcher: 6, Assets: 5 };
   const DEFAULT_CAP = 8;
   const TOTAL_CAP = 28;

@@ -2395,7 +2395,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       ph: phases.map((p) => p.id + p.name), ap: b.activePhaseId, apl: b.activePoolId,
       pl: pools.map((p) => [p.id, p.name, JSON.stringify(p.winners || ''), JSON.stringify(p.losers || ''), JSON.stringify(p.finals || '')].join('~')),
       lg: logoByName, vw: view, rn: ROUNDS_N, ft: focusTeam, lp: _livePair, nl: hideLogos, wm: noWatermark,
-      sa: swAdvance, se: swEliminate, av: b.advancesTo, sc: b.swissColors !== false,
+      sa: swAdvance, se: swEliminate, av: b.advancesTo, swc: b.swissColors !== false,
       // Stream-queue assignment/live-state feeds the pairings channel labels — re-render when it moves.
       qs: Object.keys(pairStreamIdx).map((k) => { const p = pairStreamIdx[k]; return k + (p.live ? '1' : '0') + p.stream + p.date + p.time; }).join(','),
       bl: ((data.brand && data.brand.logo) || '').slice(0, 48) });

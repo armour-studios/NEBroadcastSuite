@@ -259,7 +259,9 @@ body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
   function _num(v) { return (typeof v === 'number' && isFinite(v)) ? v : (v != null && v !== '' && !isNaN(+v) ? +v : null); }
   function buildMatches(queue, manual, maps, source, showResults) {
     // TEAM mode: the board follows the searched team's own matches only — ignore the stream queue.
-    if (source === 'team') {
+    // LEAGUE mode (the live competition) is the same shape: the server builds the rows from the
+    // league, and they REPLACE the start.gg queue rather than being appended to it.
+    if (source === 'team' || source === 'league') {
       var tm = (manual || []).filter(function (m) {
         var s = typeof m.state === 'number' ? m.state : 2;
         return s !== 3 || showResults;   // hide completed unless "keep finished (with score)" is on
@@ -270,7 +272,8 @@ body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
           stream: !!(m.stream), live: !!(m.state === 2 || m.live), done: s === 3, scoreA: _num(m.scoreA), scoreB: _num(m.scoreB),
           date: m.date || '', time: m.time || '', scheduledTime: m.scheduledTime || '' };
       });
-      tm.sort(function (a, b) { return (b.live ? 1 : 0) - (a.live ? 1 : 0) || (a.done ? 1 : 0) - (b.done ? 1 : 0); });
+      // The league rows arrive already in broadcast order (live, soonest next, latest results).
+      if (source === 'team') tm.sort(function (a, b) { return (b.live ? 1 : 0) - (a.live ? 1 : 0) || (a.done ? 1 : 0) - (b.done ? 1 : 0); });
       return tm.slice(0, 12);
     }
     var auto = (queue || []).filter(function (m) {

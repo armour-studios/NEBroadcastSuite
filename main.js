@@ -458,6 +458,38 @@ function setupPopoutHandler() {
     });
   });
 
+  // Twitch OAuth — same idea as Discord. The panel used to window.open('') a BLANK popup and then
+  // point it at Twitch; the control panel's window-open handler denies every non-http URL, so the
+  // blank popup was always refused and "Continue with Twitch" did nothing. The callback page
+  // (localhost:3000/api/oauth/twitch/callback) finishes the sign-in itself and window.close()s.
+  ipcMain.handle('open-twitch-oauth', (_event, url) => {
+    if (!url || !url.startsWith('https://id.twitch.tv/')) return false;
+    const authWin = new BrowserWindow({
+      width: 520, height: 780,
+      title: 'Sign in with Twitch',
+      icon: path.join(__dirname, 'assets', 'icon.png'),
+      backgroundColor: '#18181b',
+      parent: controlPanel,
+      modal: false,
+      webPreferences: { nodeIntegration: false, contextIsolation: true }
+    });
+    authWin.setMenuBarVisibility(false);
+    // Links inside Twitch's page (help, sign-up) go to the real browser, never a stray popup.
+    authWin.webContents.setWindowOpenHandler(({ url: u }) => {
+      if (u.startsWith('http')) require('electron').shell.openExternal(u);
+      return { action: 'deny' };
+    });
+    authWin.on('closed', () => {
+      if (controlPanel && !controlPanel.isDestroyed()) {
+        controlPanel.show();
+        if (controlPanel.isMinimized()) controlPanel.restore();
+        controlPanel.focus();
+      }
+    });
+    authWin.loadURL(url);
+    return true;
+  });
+
   ipcMain.handle('open-popout-window', (_event, page) => {
     if (!page || typeof page !== 'string') return;
     // Re-focus if already open

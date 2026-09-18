@@ -125,10 +125,6 @@
       box-shadow: inset 0 0 0 2px rgba(0,0,0,.55);
     }
     .p--b { background: linear-gradient(270deg, var(--pc-deep) 0%, var(--pc) 62%, var(--pc-lite) 100%); }
-    /* The OUTER end of each plate is cut on an angle so the board tapers into the feed instead
-       of ending on a hard vertical edge. The inner end stays square — it butts the score cap. */
-    .p--a { clip-path: polygon(26px 0, 100% 0, 100% 100%, 0 100%); }
-    .p--b { clip-path: polygon(0 0, calc(100% - 26px) 0, 100% 100%, 0 100%); }
     .p--a { --score-c: var(--score-a); --score-c-deep: var(--score-a-deep); grid-column: 1; --pc-mid: var(--a-mid); --pc: var(--a); --pc-glow: var(--a-glow); --pc-deep: var(--a-deep);
             --pc-lite: var(--a-lite); --pc-ink: var(--a-ink); --pc-ink-soft: var(--a-ink-soft); --pc-shadow: var(--a-shadow); }
     .p--b { --score-c: var(--score-b); --score-c-deep: var(--score-b-deep); grid-column: 3; --pc-mid: var(--b-mid); --pc: var(--b); --pc-glow: var(--b-glow); --pc-deep: var(--b-deep);
@@ -149,6 +145,19 @@
     .p--a .portrait { right: 0; -webkit-mask-image: linear-gradient(270deg, #000 22%, transparent 92%); }
     .p--b .portrait { left: 0;  -webkit-mask-image: linear-gradient(90deg, #000 22%, transparent 92%); }
     .portrait.is-hidden { display: none; }
+    /* Doubles: the partner's fighter, ghosted just outboard of the first one. */
+    .p--a .portrait--2 { right: 190px; }
+    .p--b .portrait--2 { left: 190px; }
+    body:not(.flat) .p--a .portrait--2 { right: 170px; }
+    body:not(.flat) .p--b .portrait--2 { left: 170px; }
+    /* Doubles plate: "DDOG / PIGGY" - the pair, a thin rule between them, a size down so two tags
+       fit where one did. */
+    .name .amp { color: var(--pc-ink-soft, rgba(255,255,255,.72)); margin: 0 .3em; font-weight: 600; }
+    body.doubles .name { font-size: 24px; }
+    /* ...and a second flag when the partners represent different countries */
+    /* markup order = partner order; side B's body is row-reversed, so it tucks the other way */
+    .flag + .flag { margin-left: -6px; }
+    .p--b .flag + .flag { margin-left: 0; margin-right: -6px; }
 
     .pbody {
       position: relative; z-index: 1; flex: 1 1 auto; min-width: 0;
@@ -326,15 +335,120 @@
     .sub-frame.link::before      { content: "\f0c1"; font-family: 'Font Awesome 6 Free'; font-weight: 900;
                                    color: rgba(255,255,255,.6); }
 
+
+    /* ── Slant ────────────────────────────────────────────────────────────
+       The board is cut on a fighting-game lean instead of stacked rectangles: each side is SKEWED
+       (A leans "/", B mirrors it "\") so the two plates open into a V around the brand mark, and
+       the score caps, sub-bars and edges all share the one angle. Skew, not clip-path, so every
+       inset outline, seam and gradient follows the angle for free; the content inside is skewed
+       back upright.
+
+       All pieces skew about ONE horizontal line — the middle of bar 1 — so the plate's edge and
+       the sub-bar's edge read as one continuous cut. The plate's own centre is that line; the
+       sub-bar sits --sub-gap below bar 1, so its origin is (gap + bar-h/2) ABOVE its own top edge.
+       Written as a literal (--sub-origin) rather than calc(var()+var()/2): nested calc through var()
+       substitution silently evaluates to zero on Electron 18 (see --brand-y above).
+       Around the middle line the inner edge only leans ~11px into the gutter at the top, which the
+       brand mark's 16px margin already clears. ?shape=flat restores the square board. */
+    :root { --lean: -18deg; --unlean: 18deg; --sub-origin: -38px; }
+    body:not(.flat) .p--a, body:not(.flat) .sub--a { --sk: var(--lean);   --usk: var(--unlean); }
+    body:not(.flat) .p--b, body:not(.flat) .sub--b { --sk: var(--unlean); --usk: var(--lean); }
+    body:not(.flat) .p   { transform: skewX(var(--sk)); }
+    body:not(.flat) .sub { transform: skewX(var(--sk)); transform-origin: 50% var(--sub-origin); border-radius: 0; }
+    body:not(.flat) .pbody, body:not(.flat) .pscore > *,
+    body:not(.flat) .portrait, body:not(.flat) .sub-frame { transform: skewX(var(--usk)); }
+    /* a counter-skewed portrait is narrower than its box — overscan it so no plate shows past it */
+    body:not(.flat) .portrait { width: 280px; }
+    body:not(.flat) .p--a .portrait { right: -20px; }
+    body:not(.flat) .p--b .portrait { left: -20px; }
+
+    /* Outer end: a pair of speed slashes, then a fine hatch that fades toward the name. Both are
+       plain vertical stripes — the plate's skew is what turns them into slashes at the same angle
+       as every edge on the board. */
+    body:not(.flat) .p::before {
+      content: ''; position: absolute; top: 0; bottom: 0; width: 150px; z-index: 0; pointer-events: none;
+      background:
+        /* --pc-ink: white on a saturated kit, near-black on a white/pastel one, so the slashes
+           never vanish into the plate (a white kit is common — the plate IS the team colour). */
+        linear-gradient(90deg, transparent 9px, var(--pc-ink, #fff) 9px 14px, transparent 14px 20px,
+                               var(--pc-ink, #fff) 20px 23px, transparent 23px),
+        repeating-linear-gradient(90deg, rgba(0,0,0,.14) 0 2px, transparent 2px 7px);
+      -webkit-mask-image: linear-gradient(90deg, #000 18%, transparent 100%);
+      opacity: .8;
+    }
+    body:not(.flat) .p--a::before { left: 0; }
+    body:not(.flat) .p--b::before { right: 0; transform: scaleX(-1); }
+    /* the name clears the slashes */
+    body:not(.flat) .pbody { padding-left: 38px; }
+    body:not(.flat) .p--b .pbody { padding-left: 15px; padding-right: 38px; }
+
+    /* Score cap: a bright slash seam where it meets the plate (the leaning edge the eye tracks),
+       dark rim behind it so it still separates on a pale kit. */
+    body:not(.flat) .pscore { width: 70px;
+      box-shadow: inset 3px 0 0 rgba(255,255,255,.92), inset 5px 0 0 rgba(0,0,0,.45),
+                  inset 0 2px 0 rgba(0,0,0,.5), inset 0 -2px 0 rgba(0,0,0,.5); }
+    body:not(.flat) .p--b .pscore {
+      box-shadow: inset -3px 0 0 rgba(255,255,255,.92), inset -5px 0 0 rgba(0,0,0,.45),
+                  inset 0 2px 0 rgba(0,0,0,.5), inset 0 -2px 0 rgba(0,0,0,.5); }
+
+    /* Game count: ROUND MARKERS under the score, not squeezed into it. Fighting games put the
+       rounds-won markers beside the timer, just under the health bar — the same spot here: the
+       score cap continues DOWN into bar 2 as its own slanted block (same x-range, same skew origin,
+       so its edges are the cap's edges carried on), and the info bar shortens to end one seam
+       before it. The block is N segments, one per game needed to take the set; a won game lights
+       white with a glow in that player's colour, a game still to win is an empty slot. The cap
+       above is left with nothing but the number. ?shape=flat keeps the old dots in the cap. */
+    .tally { display: none; }
+    body:not(.flat) .tally {
+      grid-row: 2; align-self: start; position: relative; z-index: 2;
+      display: flex; align-items: center;
+      margin-top: var(--sub-gap); height: var(--sub-h); width: 70px; padding: 0 10px;
+      background: linear-gradient(180deg, #14161f, #06070c);
+      transform: skewX(var(--sk)); transform-origin: 50% var(--sub-origin);
+    }
+    body:not(.flat) .tally.is-hidden { display: none; }
+    body:not(.flat) .tally--a { grid-column: 1; justify-self: end; --sk: var(--lean);
+      --tc: var(--score-a); box-shadow: inset 0 2px 0 var(--score-a), inset 0 0 0 1px rgba(0,0,0,.55); }
+    body:not(.flat) .tally--b { grid-column: 3; justify-self: start; --sk: var(--unlean);
+      --tc: var(--score-b); box-shadow: inset 0 2px 0 var(--score-b), inset 0 0 0 1px rgba(0,0,0,.55); }
+    body:not(.flat) .sb.show .tally { animation: wipe-mid .45s cubic-bezier(.2, .8, .3, 1) .46s both; }
+    body:not(.flat) .sb:not(.show) .tally { opacity: 0; }
+    /* segments lean with the block (not skewed back) — each one a small cut of the same angle */
+    body:not(.flat) .tally .pscore-pips { flex: 1 1 auto; height: 10px; gap: 4px; margin-top: 2px; }
+    /* both sides fill from the OUTER end toward the logo, as the cap dots did */
+    body:not(.flat) .tally--b .pscore-pips { flex-direction: row-reverse; }
+    body:not(.flat) .tally .pscore-pip {
+      flex: 1 1 0; width: auto; height: 10px; border-radius: 0;
+      background: rgba(255,255,255,.07); box-shadow: inset 0 0 0 1px rgba(255,255,255,.22);
+      transition: background .3s ease, box-shadow .3s ease;
+    }
+    body:not(.flat) .tally .pscore-pip.won {
+      background: linear-gradient(180deg, #fff 0%, #fff 55%, var(--tc) 100%);
+      box-shadow: 0 0 9px var(--tc), 0 0 2px rgba(255,255,255,.9);
+    }
+    /* the info bar gives the tally its column (block width + one seam) */
+    body:not(.flat) .sb.has-tally .sub { width: calc(100% - 74px); }
+    body:not(.flat) .sb.has-tally .sub--a { justify-self: start; }
+    body:not(.flat) .sb.has-tally .sub--b { justify-self: end; }
+    /* ...and tracks its caps a touch tighter to give those 74px back: a full start.gg event title
+       ("$100 | FIGHT NIGHTS #1 - NAMELESS ESPORTS X VALIANT SMASH") was clipping at both ends. */
+    body:not(.flat) .sb.has-tally .sub-frame { letter-spacing: .1em; padding: 0 10px; }
+
+    /* Sub-bar: the same lean, with a P1-red / P2-blue top rule so each strip reads as that
+       player's without borrowing the (possibly pale) team colour. */
+    body:not(.flat) .sub--a { box-shadow: inset 0 2px 0 var(--score-a), inset 0 0 0 1px rgba(0,0,0,.55); }
+    body:not(.flat) .sub--b { box-shadow: inset 0 2px 0 var(--score-b), inset 0 0 0 1px rgba(0,0,0,.55); }
   </style>
 </head>
 <body>
   <div class="sb" id="sb">
     <div class="p p--a">
       <img class="portrait is-hidden" id="portraitA" alt="">
+      <img class="portrait portrait--2 is-hidden" id="portraitA2" alt="">
       <div class="pbody">
         <div class="name" id="nameA">PLAYER 1</div>
         <img class="flag is-hidden" id="flagA" alt="">
+        <img class="flag is-hidden" id="flagA2" alt="">
       </div>
       <div class="pscore">
         <span class="pscore-n" id="scoreA">0</span>
@@ -352,8 +466,10 @@
 
     <div class="p p--b">
       <img class="portrait is-hidden" id="portraitB" alt="">
+      <img class="portrait portrait--2 is-hidden" id="portraitB2" alt="">
       <div class="pbody">
         <div class="name" id="nameB">PLAYER 2</div>
+        <img class="flag is-hidden" id="flagB2" alt="">
         <img class="flag is-hidden" id="flagB" alt="">
       </div>
       <div class="pscore">
@@ -364,6 +480,8 @@
 
     <div class="sub sub--a is-hidden" id="subA"></div>
     <div class="sub sub--b is-hidden" id="subB"></div>
+    <div class="tally tally--a is-hidden" id="tallyA"></div>
+    <div class="tally tally--b is-hidden" id="tallyB"></div>
   </div>
 
   <script src="/scene-base.js"></script>
@@ -375,7 +493,13 @@
     // ?chips=0 is the old name for this; keep honouring it so saved OBS sources don't break.
     const SHOW_INFO = QP.get('info') !== '0' && QP.get('chips') !== '0';
     if (QP.get('anim') === '0') document.body.classList.add('no-anim');
+    // ?shape=flat — the old square board, for sources that were framed around it.
+    if (QP.get('shape') === 'flat') document.body.classList.add('flat');
     const el = (id) => document.getElementById(id);
+    const FLAT = document.body.classList.contains('flat');
+    // Slanted board: the game pips live in their own round-marker block under the score (see
+    // .tally). Moving the existing rows keeps every id, so the render code below doesn't change.
+    if (!FLAT) ['A', 'B'].forEach((k) => el('tally' + k).appendChild(el('pips' + k)));
 
     // The board is deliberately narrow so it clears the in-game UI; ?w= widens it per venue.
     const W = Math.max(900, Math.min(1920, Number(QP.get('w')) || 1280));
@@ -477,6 +601,9 @@
       if (org) return org;
       let nm = str(team && team.name);
       if (!nm) return '';
+      // "12YOweaboo / Grab" is a doubles PAIR, not an org - initialising it printed "1/G" in front
+      // of the name. A slash-joined entrant name never becomes the org tag.
+      if (/\s\/\s/.test(nm)) return '';
       const cut = nm.split(/\s*[|｜]\s*/);
       if (cut.length > 1) {
         // "MVG | Zain" → keep the half that is NOT the name already on the plate
@@ -484,6 +611,19 @@
         nm = (keep.length ? keep[0] : cut[0]).trim();
       }
       return nm.toLowerCase() === str(shownName).toLowerCase() ? '' : abbrev(nm);
+    }
+
+    // The plate prints the org and the gamertag as two separate pieces, but a start.gg ENTRANT name
+    // is already the two mashed together ("Agency | Morris"). A side with no roster to read a bare
+    // gamertag off falls back to that entrant name, so the sponsor was printed twice and never came
+    // off the name itself - "AGENCY  AGENCY | MORRIS". Drop only a half that IS the org (or the long
+    // name the org tag was initialised from); a gamertag that merely contains a bar is left alone.
+    function stripOrg(name, org) {
+      const parts = str(name).split(/\s*[|\uFF5C]\s*/).filter(Boolean);
+      if (parts.length < 2 || !str(org)) return str(name);
+      const o = str(org).toLowerCase();
+      const keep = parts.filter((x) => x.toLowerCase() !== o && abbrev(x).toLowerCase() !== o);
+      return keep.length ? keep.join(' | ') : str(name);
     }
 
     /* ── Sub-bar frames, SIDE-ALIGNED ────────────────────────────────────
@@ -555,12 +695,73 @@
     }
 
 
+    function setPortrait(id, charName) {
+      const img = el(id);
+      const f = fighter(charName);
+      if (f) {
+        const url = SmashFighters.renderUrl(f.slug);
+        if (img.getAttribute('src') !== url) img.src = url;
+        img.classList.remove('is-hidden');
+      } else img.classList.add('is-hidden');
+      return f;
+    }
+    function setFlag(id, cc) {
+      const img = el(id);
+      if (cc) {
+        const url = FLAG_BASE + cc + '.svg';
+        if (img.getAttribute('src') !== url) img.src = url;
+        img.classList.remove('is-hidden');
+      } else img.classList.add('is-hidden');
+    }
+
+    /* DOUBLES: both partners on the plate. The roster's first two players are the pair (start.gg
+       lists a doubles entrant's two participants in order); their fighters come from the per-player
+       characters[] the Doubles controls fill, the singles fighter standing in for player 1 if those
+       are empty. The team's own name leads as the small prefix - but only when it is a real name,
+       not just the two tags again ("Ddog / piggy"), and short enough to leave room for the pair. */
+    function renderDoublesSide(suffix, team, smashSide, seriesScore, profiles, record) {
+      const roster = Array.isArray(team.players) ? team.players.filter(Boolean) : [];
+      const pair = roster.slice(0, 2);
+      const tags = pair.map((x) => {
+        const prof = profiles[firstNonEmpty(x.gamertag, x.name).toLowerCase()] || null;
+        const tag = firstNonEmpty(x.gamertag, x.name);
+        return { p: x, prof, tag: stripOrg(tag, firstNonEmpty(x.prefix, prof && prof.prefix)) };
+      }).filter((t) => t.tag);
+      const tn = str(team.name);
+      const squash = (v) => str(v).toLowerCase().replace(/[^a-z0-9]/g, '');
+      const teamIsTags = !tn || squash(tn) === squash(tags.map((t) => t.tag).join(''))
+                      || tags.some((t) => squash(tn) === squash(t.tag));
+      const pre = (!teamIsTags && tn.length <= 14) ? tn : '';
+      const namesHtml = tags.length
+        ? tags.map((t) => esc(t.tag)).join('<span class="amp">/</span>')
+        : esc(tn || ('TEAM ' + (suffix === 'A' ? '1' : '2')));
+      el('name' + suffix).innerHTML = (pre ? `<span class="pre">${esc(pre)}</span>` : '') + namesHtml;
+      el('score' + suffix).textContent = String(Number(seriesScore) || 0);
+
+      const chars = Array.isArray(smashSide.characters) ? smashSide.characters : [];
+      const f = setPortrait('portrait' + suffix, firstNonEmpty(chars[0], smashSide.character));
+      setPortrait('portrait' + suffix + '2', chars[1]);
+
+      // One flag per partner; two only when they differ, so a same-country pair isn't doubled up.
+      const cc1 = tags[0] ? countryCode(tags[0].p, tags[0].prof) : '';
+      const cc2 = tags[1] ? countryCode(tags[1].p, tags[1].prof) : '';
+      setFlag('flag' + suffix, cc1 || cc2);
+      setFlag('flag' + suffix + '2', (cc1 && cc2 && cc1 !== cc2) ? cc2 : '');
+
+      const lead = tags[0] || {};
+      return { team, p: lead.p || null, prof: lead.prof || null, f, rawChar: chars[0], name: tags.map((t) => t.tag).join(' / '), record };
+    }
+
     function renderSide(suffix, team, smashSide, seriesScore, activeId, startStocks, profiles, record) {
       team = team || {}; smashSide = smashSide || {};
+      if (MODE === 'doubles') return renderDoublesSide(suffix, team, smashSide, seriesScore, profiles, record);
+      setPortrait('portrait' + suffix + '2', '');
+      setFlag('flag' + suffix + '2', '');
       const p = activePlayer(team, activeId);
-      const name = firstNonEmpty(p && (p.gamertag || p.name), team.name) || ('PLAYER ' + (suffix === 'A' ? '1' : '2'));
+      const raw = firstNonEmpty(p && (p.gamertag || p.name), team.name) || ('PLAYER ' + (suffix === 'A' ? '1' : '2'));
       const prof = p ? (profiles[firstNonEmpty(p.gamertag, p.name).toLowerCase()] || null) : null;
-      const org = orgOf(p, prof, team, name);
+      const org = orgOf(p, prof, team, raw);
+      const name = stripOrg(raw, org);
       el('name' + suffix).innerHTML = (org ? `<span class="pre">${esc(org)}</span>` : '') + esc(name);
       el('score' + suffix).textContent = String(Number(seriesScore) || 0);
 
@@ -592,8 +793,23 @@
       return { team, p, prof, f, rawChar: smashSide.character, name, record };
     }
 
+    // 'singles' | 'doubles' | 'team' - the Smash format picked in Game Settings ▸ Smash.
+    let MODE = 'singles';
+    // ?follow=0 pins this source to the singles/doubles board even while the format is Crew.
+    const FOLLOW = QP.get('follow') !== '0';
+
     function render(data) {
       data = data || {};
+      const smashMode = ((data.smash || {}).mode) || 'singles';
+      // CREW is its own board (smash-team.html). Follow the format picker there, carrying every URL
+      // param, so switching the format in Game Settings changes what is on air without the producer
+      // having to swap browser sources. smash-team.html sends singles/doubles back here.
+      if (FOLLOW && smashMode === 'team' && !SceneBase.preview) {
+        location.replace('/smash-team.html' + location.search);
+        return;
+      }
+      MODE = smashMode === 'doubles' ? 'doubles' : 'singles';
+      document.body.classList.toggle('doubles', MODE === 'doubles');
       const teams = data.teams || {};
       const series = data.series || {};
       const smash = data.smash || { blue: {}, orange: {}, startStocks: 3 };
@@ -678,14 +894,17 @@
         }
         [].forEach.call(row.children, (pip, i) => pip.classList.toggle('won', i < won));
         row.classList.toggle('is-hidden', need < 2);
+        el('tally' + sfx).classList.toggle('is-hidden', FLAT || need < 2);
       });
+      el('sb').classList.toggle('has-tally', !FLAT && need >= 2);
 
       /* Centre the brand mark on the WHOLE stack, not on bar 1. Measured rather than assumed, so
          it stays true if a bar's height changes — and when the sub-bars are hidden (nothing to
          say) the stack IS just bar 1, so the offset correctly falls to 0. */
       {
-        const sub = el('subA');
-        const on = sub && !sub.classList.contains('is-hidden');
+        const vis = (n) => n && !n.classList.contains('is-hidden') && getComputedStyle(n).display !== 'none';
+        const sub = vis(el('subA')) ? el('subA') : el('tallyA');
+        const on = vis(sub);
         const h = on ? (sub.offsetHeight + (parseFloat(getComputedStyle(sub).marginTop) || 0)) : 0;
         root.setProperty('--brand-y', (h / 2) + 'px');
       }
@@ -699,7 +918,20 @@
     // with the scoreboard's left edge so it tracks ?w= and ?top=.
     if (typeof CasterRail !== 'undefined') CasterRail.mount({
       variant: 'chip', bottom: 30, anchor: '#sb', vAnchor: '.brandmark',
-      posFrom: function (d) { return ((d || {}).smash || {}).railPos; }
+      // the slanted plate's sub-bar leans ~21px out past the board's box at its foot
+      gap: FLAT ? 22 : 36,
+      // Beside the board (doubles / crew) the card is built from the board's rows: plate-high
+      // sponsor row, the 4px seam, sub-bar-high talent row, leaning like player 1 when slanted.
+      dock: { a: 68, b: 28, gap: 4, lean: !FLAT },
+      // the board's lean, one sponsor at a time over the talent strip (?shape=flat = the old pill)
+      slant: !FLAT,
+      // 'auto': bottom-centre for singles, beside player 1 for doubles/crew - four player HUDs fill
+      // the bottom of the frame and the centred card sat right on top of them.
+      posFrom: function (d) {
+        const sm = (d || {}).smash || {};
+        if (sm.railPos === 'bottom' || sm.railPos === 'topleft') return sm.railPos;
+        return (sm.mode === 'doubles' || sm.mode === 'team') ? 'topleft' : 'bottom';
+      }
     });
 
     if (typeof SceneBase !== 'undefined') {

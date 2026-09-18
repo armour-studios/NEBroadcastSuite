@@ -21,172 +21,121 @@
   }
   .hidden { display: none !important; }
 
-  /* ── Unified head: event title + scoreboard + round graph as one system ── */
-  .cs-head { position: absolute; top: 0; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center;
-    animation: headIn 0.5s cubic-bezier(.2,.7,.3,1) backwards; }
-  @keyframes headIn { from { opacity: 0; transform: translateX(-50%) translateY(-18px); } }
-  /* Score / count pop on change */
-  .sc.bump, .av-num.bump { animation: numBump 0.5s ease-out; }
-  @keyframes numBump { 0% { transform: scale(1); } 35% { transform: scale(1.12); } 100% { transform: scale(1); } }
-  .scorebar {
-    position: relative;
-    background: linear-gradient(180deg, var(--panel-1), var(--panel-2));
-    border: 1px solid rgba(255,255,255,0.12); border-top: none; border-radius: 0 0 14px 14px;
-    overflow: hidden; box-shadow: 0 12px 34px rgba(0,0,0,0.55);
-  }
-  /* Animated light that travels around the header border: top-left → around → top-right, pause, repeat */
-  .head-beam { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 40; pointer-events: none; overflow: visible; }
-  .head-beam path { fill: none; vector-effect: non-scaling-stroke; }
-  .head-beam .hb-base { stroke: rgba(255,255,255,0.10); stroke-width: 1.5; }
-  .head-beam .hb-beam { stroke: #fff; stroke-width: 2; stroke-linecap: round;
-    stroke-dasharray: 13 87; filter: drop-shadow(0 0 4px rgba(255,255,255,0.85));
-    animation: headBeam 9s linear infinite; }
-  @keyframes headBeam {
-    0%   { stroke-dashoffset: 0;   opacity: 1; }   /* start: top-left */
-    58%  { stroke-dashoffset: -87; opacity: 1; }   /* arrived: top-right */
-    64%  { stroke-dashoffset: -87; opacity: 0; }   /* fade out */
-    100% { stroke-dashoffset: -87; opacity: 0; }   /* hold (pause) before repeating */
-  }
-  .event-title {
-    position: relative; box-sizing: border-box; width: 960px;   /* = full scorebar width, never resizes */
-    text-align: center; padding: 5px 48px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    background: rgba(0,0,0,0.5);
-    font-size: 13px; font-weight: 700; letter-spacing: 3px; color: #d7dae0; text-transform: uppercase;
-  }
-  /* Divider under the header: bright white in the middle, fading out toward each edge */
-  .event-title::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 1.5px;
-    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.92) 50%, transparent 100%); }
-  .topbar { display: flex; align-items: stretch; height: 76px; }
-  .team { display: flex; align-items: center; gap: 13px; padding: 0 20px; width: 360px; position: relative; overflow: hidden; }
-  .team.t-t { justify-content: flex-end; }
-  .team::after { content: ''; position: absolute; bottom: 4px; left: 0; right: 0; height: 4px; opacity: 1; transition: opacity 0.35s ease; }
-  .team.t-ct::after { background: var(--ct); } .team.t-t::after { background: var(--t); }
-  /* Bomb countdown "fuse": the team underline becomes the timer. While active the
-     team-colour accent is hidden so only the fuse shows behind it. */
-  .team.fused::after { opacity: 0; }
-  .team .fuse { position: absolute; bottom: 4px; height: 4px; width: 0; display: none; z-index: 2;
-    background: linear-gradient(90deg, #ff5a2c, #ff1414); box-shadow: 0 0 12px rgba(255,40,30,0.9); }
-  .team.t-ct .fuse { right: 0; left: auto; }   /* PLANTED (red): inner anchor → drains toward centre */
-  .team.t-t  .fuse { left: 0; right: auto; }
-  .team .fuse.danger { animation: barflash 0.4s steps(2) infinite; }
-  /* DEFUSING (green): outer anchor → grows toward centre as the defuse completes */
-  .team .fuse.defuse { background: linear-gradient(90deg, #2cff8a, #14d96e); box-shadow: 0 0 12px rgba(40,230,120,0.9); animation: none; }
-  .team.t-ct .fuse.defuse { left: 0; right: auto; }
-  .team.t-t  .fuse.defuse { right: 0; left: auto; }
-  .tlogo { width: 46px; height: 46px; object-fit: contain; flex-shrink: 0; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.5)); }
-  .team-mid { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 4px; }
-  .team.t-t .team-mid { align-items: flex-end; }
-  .team .nm { font-weight: 700; font-size: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-  .team.t-t .nm { text-align: right; }
-  /* Series — maps won this Bo-N (one dot per map needed to win the series) */
+  /* ── Top bar ────────────────────────────────────────────────────────────────────────────
+     After drweissbrot/cs-hud (fennec) and Lexogrine's matchbar: team plates slant into
+     team-coloured score blocks around a centre clock, and state panels (plant, bomb, defuse,
+     timeout, round winner, match point) slide out UNDER the team they belong to rather than
+     stacking callouts in the middle of the screen. Left = CT = blue team, right = T = orange. */
+  .cs-head { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 1100px; z-index: 20;
+    display: flex; flex-direction: column; align-items: center; filter: drop-shadow(0 10px 22px rgba(0,0,0,0.55)); }
+  .tb-event { box-sizing: border-box; min-width: 340px; max-width: 640px; padding: 4px 30px 3px; margin-bottom: -1px;
+    text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-size: 12px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; color: #d7dae0;
+    background: rgba(8,10,15,0.92); clip-path: polygon(0 0, 100% 0, calc(100% - 14px) 100%, 14px 100%); }
+  .tb-row { display: flex; align-items: flex-start; width: 100%; }
+  .tb-team { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .tb-name { position: relative; height: 64px; display: flex; align-items: center; gap: 14px; overflow: hidden;
+    background: linear-gradient(180deg, rgba(21,24,32,0.97), rgba(9,11,16,0.97)); }
+  .tb-left .tb-name { padding: 0 40px 0 22px; clip-path: polygon(0 0, 100% 0, calc(100% - 22px) 100%, 0 100%); }
+  .tb-right .tb-name { padding: 0 22px 0 40px; flex-direction: row-reverse; clip-path: polygon(0 0, 100% 0, 100% 100%, 22px 100%); }
+  /* team-colour wash rising from the inner edge — a mask, not color-mix(): Electron 18 has no color-mix */
+  .tb-name::before { content: ''; position: absolute; inset: 0; opacity: 0.3; pointer-events: none; }
+  .tb-left .tb-name::before  { background: var(--ct); -webkit-mask-image: linear-gradient(90deg, transparent 30%, #000); }
+  .tb-right .tb-name::before { background: var(--t);  -webkit-mask-image: linear-gradient(270deg, transparent 30%, #000); }
+  .tb-name::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; }
+  .tb-left .tb-name::after { background: var(--ct); } .tb-right .tb-name::after { background: var(--t); }
+  .tb-logo { position: relative; width: 44px; height: 44px; object-fit: contain; flex-shrink: 0; filter: drop-shadow(0 2px 5px rgba(0,0,0,0.6)); }
+  .tb-namecol { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+  .tb-right .tb-namecol { align-items: flex-end; }
+  .tb-nm { font-weight: 800; font-size: 24px; line-height: 1; letter-spacing: 0.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .tb-meta { display: flex; align-items: center; gap: 9px; }
+  .tb-right .tb-meta { flex-direction: row-reverse; }
+  /* Series: one bar per map needed to win the Bo-N */
   .cs-series { display: flex; gap: 4px; }
-  .cs-series .sdot { width: 9px; height: 9px; border-radius: 50%; background: rgba(255,255,255,0.16); transition: background 0.2s; }
-  .cs-series.ct .sdot.won { background: var(--ct); box-shadow: 0 0 6px rgba(106,168,230,0.7); }
-  .cs-series.t  .sdot.won { background: var(--t);  box-shadow: 0 0 6px rgba(224,179,90,0.7); }
-  /* Season / league record beside the series pips (toggle in control panel) */
+  .cs-series .sdot { width: 16px; height: 5px; border-radius: 1px; background: rgba(255,255,255,0.18); }
+  .cs-series.ct .sdot.won { background: var(--ct); } .cs-series.t .sdot.won { background: var(--t); }
+  /* Season / league record beside the series bars (toggle in control panel) */
   .cs-record { font-weight: 600; font-size: 11px; letter-spacing: .04em; line-height: 1;
-    text-transform: uppercase; color: rgba(255,255,255,.85); white-space: nowrap;
-    text-shadow: 0 1px 3px rgba(0,0,0,.7); }
+    text-transform: uppercase; color: rgba(255,255,255,.85); white-space: nowrap; text-shadow: 0 1px 3px rgba(0,0,0,.7); }
   .cs-record.hidden { display: none; }
-  .team .sc { font-weight: 700; font-size: 40px; font-variant-numeric: tabular-nums; min-width: 46px; text-align: center; }
-  .team.t-ct .sc { color: var(--ct); text-shadow: 0 0 20px rgba(106,168,230,0.45); }
-  .team.t-t .sc  { color: var(--t);  text-shadow: 0 0 20px rgba(224,179,90,0.45); }
-  /* Fixed width so the header NEVER resizes as the centre content changes (clock ↔ bomb ↔ defuse) */
-  .mid { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 20px; background: rgba(0,0,0,0.3); width: 240px; flex: 0 0 240px; overflow: hidden; }
-  /* Bomb: C4 icon + big seconds sit side-by-side so the centre block stays short */
-  .bombrow { display: flex; align-items: center; justify-content: center; gap: 10px; }
-  /* While a bomb is down the map/best-of line is hidden so it can't crowd the event title */
-  .mid.planted-glow .cs-map, .mid.defusing-glow .cs-map { display: none; }
-  .timer { font-weight: 700; font-size: 27px; font-variant-numeric: tabular-nums; }
-  .timer.bomb { color: #ff4133; font-size: 30px; text-shadow: 0 0 14px rgba(255,65,51,0.7); animation: pulse 1s ease-in-out infinite; }
-  /* Defuse: green countdown number, steady (no red urgency pulse) */
-  .timer.bomb.def { color: #4ad991; text-shadow: 0 0 14px rgba(74,217,145,0.6); animation: none; }
-  @keyframes pulse { 50% { opacity: 0.55; } }
-  /* Planted: the centre block glows + pulses red so the bomb state is unmistakable */
-  .mid.planted-glow { background: rgba(120,16,12,0.55); box-shadow: inset 0 0 26px rgba(255,50,40,0.5); animation: midPulse 1s ease-in-out infinite; }
-  .mid.defusing-glow { background: rgba(10,60,38,0.5); box-shadow: inset 0 0 24px rgba(60,220,130,0.4); }
-  @keyframes midPulse { 0%,100% { box-shadow: inset 0 0 22px rgba(255,50,40,0.4); } 50% { box-shadow: inset 0 0 34px rgba(255,60,50,0.75); } }
-  .cs-map { font-size: 12px; font-weight: 700; letter-spacing: 2px; color: #cdd2da; text-transform: uppercase; margin-bottom: 4px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-  .cs-map:empty { display: none; }
+  /* Score blocks — solid team colour, slanted to meet the plate's edge */
+  .tb-score { position: relative; box-sizing: content-box; width: 70px; height: 64px; flex-shrink: 0; isolation: isolate; z-index: 1;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 42px; font-weight: 800; font-variant-numeric: tabular-nums; color: #fff; text-shadow: 0 2px 6px rgba(0,0,0,0.45); }
+  .tb-score::after { content: ''; position: absolute; inset: 0; z-index: -1; background: linear-gradient(180deg, rgba(255,255,255,0.14), rgba(0,0,0,0.24)); }
+  .tb-score.tb-left  { background: var(--ct); margin-left: -22px; padding-left: 22px; clip-path: polygon(22px 0, 100% 0, 100% 100%, 0 100%); }
+  .tb-score.tb-right { background: var(--t); margin-right: -22px; padding-right: 22px; clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 100%, 0 100%); }
+  .tb-score.bump, .av-num.bump { animation: numBump 0.5s ease-out; }
+  @keyframes numBump { 0% { transform: scale(1); } 35% { transform: scale(1.12); } 100% { transform: scale(1); } }
+  /* Centre: clock + round, or the planted bomb + its site */
+  .tb-center { position: relative; width: 168px; height: 64px; flex-shrink: 0; z-index: 2;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    background: linear-gradient(180deg, rgba(10,12,17,0.99), rgba(4,5,9,0.99)); transition: background 0.3s ease; }
+  .tb-clock { font-size: 34px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+  .tb-clock.red { color: #ff4b3e; }
+  .tb-clock.word { font-size: 17px; letter-spacing: 3px; }
+  .tb-round { font-size: 11px; font-weight: 700; letter-spacing: 2px; color: #9aa0aa; white-space: nowrap; }
+  .tb-round:empty { display: none; }
+  .tb-bomb { display: none; align-items: center; gap: 9px; }
+  .tb-bomb .bomb-ic { width: 32px; height: 32px; color: #ff4b3e; filter: drop-shadow(0 0 6px rgba(255,65,51,0.7)); }
+  .tb-bomb .ic-bomb { animation: bombpulse 1.6s ease-in-out infinite; }   /* the ONE loop a planted bomb keeps */
+  @keyframes bombpulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+  .tb-bomb .ic-defuse { display: none; }
+  .tb-site { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 5px;
+    background: #fff; color: #0b0d12; font-size: 19px; font-weight: 900; line-height: 1; }
+  .tb-center.planted  { background: linear-gradient(180deg, rgba(122,18,14,0.98), rgba(56,8,6,0.98)); }
+  .tb-center.defusing { background: linear-gradient(180deg, rgba(12,72,46,0.98), rgba(5,34,20,0.98)); }
+  .tb-center.planted .tb-clock, .tb-center.defusing .tb-clock { display: none; }
+  .tb-center.planted .tb-bomb, .tb-center.defusing .tb-bomb { display: flex; }
+  .tb-center.defusing .ic-bomb { display: none; }
+  .tb-center.defusing .ic-defuse { display: block; color: #5af0a8; filter: drop-shadow(0 0 6px rgba(74,217,145,0.7)); }
+  .tb-center.planted .tb-round { color: #ffb3ad; } .tb-center.defusing .tb-round { color: #9ff3c9; }
+  /* Map / best-of strip under the clock */
+  .tb-sub { box-sizing: border-box; min-width: 168px; padding: 3px 20px 4px; margin-top: -1px; text-align: center;
+    background: rgba(8,10,15,0.92); clip-path: polygon(0 0, 100% 0, calc(100% - 12px) 100%, 12px 100%); }
+  .cs-map { font-size: 11px; font-weight: 700; letter-spacing: 2px; color: #cdd2da; text-transform: uppercase; white-space: nowrap; }
   .cs-map .bo { color: #8b909a; }
-  .roundlbl { font-size: 12px; letter-spacing: 2px; color: #8b909a; margin-top: 3px; white-space: nowrap; }
-  .roundlbl.planted { font-size: 14px; font-weight: 900; letter-spacing: 2.5px; color: #ff4133;
-    text-shadow: 0 0 12px rgba(255,65,51,0.8); animation: pulse 0.7s ease-in-out infinite; }
-  .roundlbl.defusing { font-size: 13px; font-weight: 800; letter-spacing: 2px; color: #4ad991; animation: pulse 1s ease-in-out infinite; }
-  .roundlbl.ot { color: #ffd34d; font-weight: 800; letter-spacing: 2px; }   /* OVERTIME text */
-
-  /* ── Bomb-planted visual: pulsing C4 + draining red bar (no numbers) ── */
-  .bombvis { display: none; flex-direction: column; align-items: center; gap: 5px; height: 38px; justify-content: center; }
-  .bombvis.show { display: flex; }
-  .bomb-ic { width: 24px; height: 24px; color: #ff4133; filter: drop-shadow(0 0 7px rgba(255,65,51,0.75)); animation: bombpulse 1s ease-in-out infinite; }
-  .bombvis.danger .bomb-ic { animation-duration: 0.38s; }
-  @keyframes bombpulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.18); opacity: 0.65; } }
-  /* Planted: the central timer bar is replaced by the team-underline fuses;
-     with the bar gone, show a larger C4 icon */
-  .bombvis.nobar .bomb-bar { display: none; }
-  .bombvis.nobar { height: 44px; }
-  .bombvis.nobar .bomb-ic { width: 38px; height: 38px; }
-  /* Two icons share the slot: C4 while planted, wire-cutters while defusing */
-  .ic-defuse { display: none; }
-  .bombvis.defusing .ic-bomb { display: none; }
-  .bombvis.defusing .ic-defuse { display: block; }
-  .bomb-bar { position: relative; width: 138px; height: 9px; border-radius: 5px; background: rgba(255,255,255,0.12);
-    border: 1px solid rgba(255,80,70,0.35); box-shadow: 0 0 10px rgba(255,65,51,0.3) inset; overflow: hidden; }
-  .bomb-bar-fill { height: 100%; width: 100%; border-radius: 5px;
-    background: linear-gradient(90deg, #ff6a3d, #ff2020);
-    box-shadow: 0 0 12px rgba(255,65,51,0.85); transition: width 0.25s linear; }
-  .bombvis.danger .bomb-bar-fill { background: linear-gradient(90deg, #ff3b3b, #ff0000); animation: barflash 0.38s steps(2) infinite; }
-  @keyframes barflash { 50% { opacity: 0.5; } }
-  /* Defuse progress: neutral GREY loading fill growing over the (hidden) red bar */
-  .bomb-defuse-fill { position: absolute; left: 0; top: 0; height: 100%; width: 0;
-    background: linear-gradient(90deg, #9aa0ab, #d6dae1);
-    box-shadow: 0 0 8px rgba(210,215,225,0.55); transition: width 0.2s linear; display: none; }
-  .bombvis.defusing .bomb-defuse-fill { display: block; }
-  /* Defuse in progress: hide the red drain, show a grey loading bar + grey cutters */
-  .bombvis.defusing .bomb-bar-fill { display: none; }
-  .bombvis.defusing .bomb-ic { color: #d6dae1; filter: drop-shadow(0 0 6px rgba(210,215,225,0.6)); animation: none; }
-  .bombvis.defusing .bomb-bar { border-color: rgba(210,215,225,0.4); box-shadow: 0 0 10px rgba(210,215,225,0.25) inset; }
-
-  /* ── Bomb result flash: explosion / defuse banner across the scorebar ── */
-  .bomb-flash { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
-    pointer-events: none; overflow: hidden; z-index: 30; }
-  .bomb-flash.show { display: flex; }
-  /* While the flash plays, fade the underlying scoreboard so the banner stands alone */
-  .topbar, .event-title { transition: opacity 0.2s ease; }
-  .scorebar.flashing .topbar,
-  .scorebar.flashing .event-title { opacity: 0.1; }
-  .bomb-flash .bf-label { position: relative; z-index: 2; font-weight: 900; white-space: nowrap; }
-  /* Explosion */
-  .bomb-flash.explode { animation: bfShake 0.5s ease-in-out; }
-  .bomb-flash.explode::before { content: ''; position: absolute; left: 50%; top: 50%; width: 120%; padding-bottom: 120%;
-    transform: translate(-50%,-50%) scale(0.2); border-radius: 50%;
-    background: radial-gradient(circle, rgba(255,228,140,0.98) 0%, rgba(255,140,40,0.92) 28%, rgba(196,46,12,0.55) 55%, rgba(0,0,0,0) 74%);
-    animation: bfBlast 1.5s ease-out forwards; }
-  .bomb-flash.explode .bf-label { font-size: 26px; letter-spacing: 4px; color: #fff;
-    text-shadow: 0 0 18px rgba(255,130,40,0.95), 0 2px 5px rgba(0,0,0,0.85); animation: bfPop 1.5s ease-out forwards; }
-  /* Defused */
-  .bomb-flash.defused { background: linear-gradient(90deg, rgba(10,42,28,0) 0%, rgba(13,74,46,0.92) 50%, rgba(10,42,28,0) 100%);
-    animation: bfFade 2s ease-out forwards; }
-  .bomb-flash.defused .bf-label { font-size: 24px; letter-spacing: 5px; color: #5af0a8;
-    text-shadow: 0 0 16px rgba(74,217,145,0.9), 0 2px 4px rgba(0,0,0,0.7); animation: bfSlide 2s ease-out forwards; }
-  @keyframes bfBlast { 0% { transform: translate(-50%,-50%) scale(0.15); opacity: 0; } 12% { opacity: 1; } 100% { transform: translate(-50%,-50%) scale(1.7); opacity: 0; } }
-  @keyframes bfPop { 0% { transform: scale(0.5); opacity: 0; } 16% { transform: scale(1.14); opacity: 1; } 78% { opacity: 1; } 100% { transform: scale(1.05); opacity: 0; } }
-  @keyframes bfShake { 0%,100%{transform:translateX(0);} 18%{transform:translateX(-6px);} 38%{transform:translateX(6px);} 58%{transform:translateX(-4px);} 78%{transform:translateX(4px);} }
-  @keyframes bfFade { 0%,80% { opacity: 1; } 100% { opacity: 0; } }
-  @keyframes bfSlide { 0% { transform: translateX(-22px); opacity: 0; } 16% { transform: translateX(0); opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
-
-  /* ── Corner red pulse on bomb plant (a few seconds) ── */
-  #corner-pulse { position: fixed; inset: 0; pointer-events: none; opacity: 0; z-index: 50;
-    background:
-      radial-gradient(circle at 0% 0%,    rgba(255,28,28,0.55), rgba(255,28,28,0) 22%),
-      radial-gradient(circle at 100% 0%,  rgba(255,28,28,0.55), rgba(255,28,28,0) 22%),
-      radial-gradient(circle at 0% 100%,  rgba(255,28,28,0.55), rgba(255,28,28,0) 22%),
-      radial-gradient(circle at 100% 100%,rgba(255,28,28,0.55), rgba(255,28,28,0) 22%); }
-  #corner-pulse.show { animation: cornerPulse 1.05s ease-in-out 4; }
-  @keyframes cornerPulse { 0%,100% { opacity: 0; } 50% { opacity: 1; } }
+  /* State panels — slide down from under a team plate (max-height), steady inside */
+  /* Out of flow: an opening panel must not grow the row and push the map strip / alive count down */
+  .tb-panels { position: absolute; top: 100%; left: 0; right: 0; display: flex; flex-direction: column; }
+  .tb-left .tb-panels  { padding-right: 22px; }
+  .tb-right .tb-panels { padding-left: 22px; }
+  .tp { position: relative; max-height: 0; overflow: hidden; transition: max-height 0.28s ease;
+    background: linear-gradient(180deg, rgba(15,17,24,0.96), rgba(8,9,14,0.96)); }
+  .tp.open { max-height: 40px; }
+  .tb-left .tp  { border-left: 3px solid var(--ct); }
+  .tb-right .tp { border-right: 3px solid var(--t); }
+  .tp-inner { display: flex; align-items: center; justify-content: space-between; gap: 14px; height: 32px; padding: 0 16px;
+    font-size: 13px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; white-space: nowrap; }
+  .tb-right .tp-inner { flex-direction: row-reverse; }
+  .tp-label { color: #e9ecf1; flex-shrink: 0; }
+  .tp-value { color: #aeb4bf; font-variant-numeric: tabular-nums; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .tp-bar { display: none; height: 4px; background: rgba(255,255,255,0.08); }
+  .tp.has-bar .tp-bar { display: flex; }
+  .tb-right .tp-bar { justify-content: flex-end; }
+  .tp-fill { height: 100%; width: 0; transition: width 0.12s linear; }
+  .tb-left .tp-fill { background: var(--ct); } .tb-right .tp-fill { background: var(--t); }
+  .tp-plant .tp-fill, .tp-bomb .tp-fill { background: #ff4b3e !important; }
+  .tp-bomb .tp-label { color: #ff8a80; }
+  .tp-bomb.danger .tp-fill { background: #ff1a1a !important; box-shadow: 0 0 10px rgba(255,30,20,0.9); }
+  .tp-bomb.danger .tp-value { color: #ff6b61; }
+  .tp-defuse .tp-fill { background: #3ee08f !important; }
+  .tp-defuse .tp-label { color: #7ff0b8; }
+  .tb-left .tp-winner  { background: var(--ct); }
+  .tb-right .tp-winner { background: var(--t); }
+  .tp-winner .tp-label, .tp-winner .tp-value { color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.5); }
+  .tp-match .tp-label { color: #ffd34d; }
+  /* One-shot result under the strip: detonated / defused */
+  .bomb-flash { display: none; margin-top: 6px; padding: 7px 26px; border-radius: 4px; white-space: nowrap;
+    font-size: 17px; font-weight: 900; letter-spacing: 4px; }
+  .bomb-flash.show { display: block; animation: bfIn 2.6s ease forwards; }
+  .bomb-flash.explode { background: rgba(122,18,14,0.96); color: #fff; }
+  .bomb-flash.defused { background: rgba(12,72,46,0.96); color: #9ff3c9; }
+  @keyframes bfIn { 0% { opacity: 0; transform: translateY(-6px); } 10% { opacity: 1; transform: none; } 85% { opacity: 1; } 100% { opacity: 0; } }
+  .tb-logo.cs-fallback { opacity: 0.9; }
 
   /* ── Round history — separate overlay, slides in/out when toggled ── */
-  .round-dots { position: absolute; top: 108px; left: 50%; display: flex; gap: 3px;
+  .round-dots { position: absolute; top: 118px; left: 50%; display: flex; gap: 3px;
     padding: 7px 14px 6px; background: rgba(13,15,21,0.96); border: 1px solid rgba(255,255,255,0.12);
     border-radius: 12px; box-shadow: 0 8px 22px rgba(0,0,0,0.5);
     transform: translateX(-50%) translateY(-14px); opacity: 0; pointer-events: none;
@@ -208,8 +157,6 @@
   .col-ct { left: 0; } .col-t { right: 0; }
   /* The right column shares its lane with the sponsor banner + partner rail — lift it clear
      for as long as either is on air (the rail sits higher, so it wins when both are up). */
-  body.has-banner .col-t { bottom: 132px; }
-  body.has-sprail .col-t { bottom: 188px; }
   .players { display: flex; flex-direction: column; gap: 6px; }
 
   /* Team header card: logo + name + total cash, with a utility tally row beneath */
@@ -273,10 +220,13 @@
   .prow.active { transform: scale(1.03); z-index: 2; }
   .players.ct .prow.active { border-color: var(--ct); box-shadow: 0 0 0 1px var(--ct), 0 6px 18px rgba(0,0,0,0.5), 0 0 16px rgba(106,168,230,0.4); }
   .players.t  .prow.active { border-color: var(--t);  box-shadow: 0 0 0 1px var(--t),  0 6px 18px rgba(0,0,0,0.5), 0 0 16px rgba(224,179,90,0.4); }
-  /* Firing: a soft amber glow that breathes over the nameplate (smooth, no strobe) */
-  .prow.firing::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 3;
-    box-shadow: inset 0 0 0 2px rgba(255,200,80,0.5), inset 0 0 14px rgba(255,170,40,0.3); animation: rowFire 1s ease-in-out infinite; }
-  @keyframes rowFire { 0%,100% { opacity: 0.45; } 50% { opacity: 0.9; } }
+  /* Firing: a steady amber edge while the player is shooting. The edge is always there at opacity 0
+     and the class fades it, so a burst reads as one state; the old breathing loop restarted on every
+     shot (~6x/s per player in a firefight). */
+  .prow::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 3;
+    box-shadow: inset 0 0 0 2px rgba(255,200,80,0.55), inset 0 0 14px rgba(255,170,40,0.28); opacity: 0; transition: opacity 0.25s ease; }
+  .prow.firing::after { opacity: 1; }
+  .prow.dead::after { opacity: 0; }
 
   /* HP box (inner edge — toward screen centre on both columns). Neutral grey on both sides. */
   .hpbox { width: 52px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
@@ -307,6 +257,11 @@
   .pnum:empty { display: none; }
   .players.ct .pnum { background: var(--ct); } .players.t .pnum { background: var(--t); }
   .pname { font-weight: 700; font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  /* Kills this round (JT's and Lexogrine's HUDs both carry it), only once the player has one */
+  .prk { flex-shrink: 0; font-size: 12px; font-weight: 800; line-height: 1; padding: 3px 5px; border-radius: 4px;
+    color: #fff; background: rgba(255,255,255,0.1); font-variant-numeric: tabular-nums; }
+  .prk:empty { display: none; }
+  .players.ct .prk { box-shadow: inset 0 0 0 1px var(--ct); } .players.t .prk { box-shadow: inset 0 0 0 1px var(--t); }
   .psub { display: flex; align-items: center; gap: 13px; }
   .players.t .psub { flex-direction: row-reverse; }
   .pkad { display: flex; align-items: center; gap: 3px; font-weight: 600; font-size: 14px; color: #c4c9d2; font-variant-numeric: tabular-nums; }
@@ -322,6 +277,10 @@
   .pwpn .putil { gap: 4px; }
   /* Gun points toward centre: T column (right of screen) flips so the muzzle faces inward */
   .players.t .pwpn > .wimg img { transform: scaleX(-1); }
+  /* The slot shows the gun a player OWNS; dim it while it's holstered (knife/nade/bomb out). */
+  .pwpn > .wimg.holstered { opacity: 0.45; }
+  /* The grenade currently in hand. */
+  .wimg.nade.inhand img { filter: drop-shadow(0 0 3px #6ee7a0) drop-shadow(0 0 1px #6ee7a0); transform: scale(1.12); }
 
   /* Bomb carrier — highlighted C4 badge next to the name */
   .pbomb { display: inline-flex; align-items: center; }
@@ -331,28 +290,23 @@
   .pstatus { display: flex; align-items: center; gap: 4px; }
   .pstatus:empty { display: none; }
   .fx { width: 15px; height: 15px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; }
-  .fx.flash { background: rgba(245,245,255,0.92); color: #222; box-shadow: 0 0 9px rgba(255,255,255,0.85); animation: fxblink 0.5s steps(2) infinite; }
-  .fx.fire  { background: rgba(224,90,30,0.92); color: #fff; box-shadow: 0 0 9px rgba(255,120,40,0.8); animation: fxblink 0.45s steps(2) infinite; }
-  .fx.smoke { background: rgba(140,148,160,0.95); color: #fff; box-shadow: 0 0 9px rgba(170,176,188,0.7); animation: fxsmoke 1.6s ease-in-out infinite; }
-  @keyframes fxblink { 50% { opacity: 0.45; } }
-  @keyframes fxsmoke { 0%,100% { transform: scale(1); opacity: 0.95; } 50% { transform: scale(1.18); opacity: 0.6; } }
+  .fx.flash { background: rgba(245,245,255,0.92); color: #222; box-shadow: 0 0 9px rgba(255,255,255,0.85); }
+  .fx.fire  { background: rgba(224,90,30,0.92); color: #fff; box-shadow: 0 0 9px rgba(255,120,40,0.8); }
+  .fx.smoke { background: rgba(140,148,160,0.95); color: #fff; box-shadow: 0 0 9px rgba(170,176,188,0.7); }
 
   /* ── Status condition: smooth animated tint BEHIND the card + an icon left of the HP box ── */
-  /* Animations are intentionally slow + low-contrast (no strobe/steps) to avoid seizure risk. */
+  /* Steady states only, no loops. Each condition fades in/out through the .pfx opacity transition. */
   .prow > .pfx { position: absolute; top: 0; bottom: 0; left: -14px; right: -14px; z-index: 0;
     pointer-events: none; opacity: 0; transition: opacity 0.5s ease; }
   .prow > .pbody, .prow > .hpbox { position: relative; z-index: 1; }
   .prow > .hpbar { z-index: 1; }
   /* keep text crisp over any tint */
   .pbody, .hpbox { text-shadow: 0 1px 2px rgba(0,0,0,0.55); }
-  /* Blind = a white sheen that fades in/out over the (still-visible) dark card — not a whiteout.
-     The gradient fades to transparent at the edges so the black card always shows behind it. */
-  .pfx.flash { background: radial-gradient(circle at 50% 50%, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.32) 48%, rgba(255,255,255,0) 82%); animation: pfxFlash 1.7s ease-out infinite; }
-  .pfx.fire  { background: linear-gradient(0deg, rgba(255,68,12,0.6) 0%, rgba(255,150,45,0.26) 62%, transparent 100%); animation: pfxFire 1.6s ease-in-out infinite; }
-  .pfx.smoke { background: rgba(120,126,140,0.85); animation: pfxSmoke 3.4s ease-in-out infinite; }
-  @keyframes pfxFlash { 0% { opacity: 0.2; } 16% { opacity: 0.5; } 100% { opacity: 0.2; } }
-  @keyframes pfxFire  { 0%,100% { opacity: 0.5; } 50% { opacity: 0.66; } }
-  @keyframes pfxSmoke { 0%,100% { opacity: 0.16; transform: translateX(-2%); } 50% { opacity: 0.42; transform: translateX(2%); } }
+  /* Blind = a steady white wash over the (still-visible) dark card; its strength follows the flash
+     (--fxi, set per tick) and eases out as the flash wears off. JT shows blindness the same way. */
+  .pfx.flash { background: radial-gradient(circle at 50% 50%, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.32) 48%, rgba(255,255,255,0) 82%); opacity: var(--fxi, 0.5); }
+  .pfx.fire  { background: linear-gradient(0deg, rgba(255,68,12,0.6) 0%, rgba(255,150,45,0.26) 62%, transparent 100%); opacity: 0.55; }
+  .pfx.smoke { background: rgba(120,126,140,0.85); opacity: 0.3; }
 
   /* Condition icon — slides in just left of the HP box, no flashing */
   .prow > .pcond { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center;
@@ -360,13 +314,18 @@
     transition: width 0.35s ease, opacity 0.35s ease; }
   .prow > .pcond:not(:empty) { width: 24px; opacity: 1; }
   .pcond svg { width: 17px; height: 17px; }
-  .pcond.flash { color: #ffffff; filter: drop-shadow(0 0 6px rgba(255,255,255,0.9)); animation: condPulse 1.8s ease-in-out infinite; }
-  .pcond.fire  { color: #ff8636; filter: drop-shadow(0 0 6px rgba(255,120,40,0.9)); animation: condPulse 1.6s ease-in-out infinite; }
-  .pcond.smoke { color: #cfd4dd; filter: drop-shadow(0 0 5px rgba(180,186,196,0.7)); animation: condPulse 3.4s ease-in-out infinite; }
-  @keyframes condPulse { 0%,100% { opacity: 0.7; } 50% { opacity: 1; } }
+  .pcond.flash { color: #ffffff; filter: drop-shadow(0 0 6px rgba(255,255,255,0.9)); }
+  .pcond.fire  { color: #ff8636; filter: drop-shadow(0 0 6px rgba(255,120,40,0.9)); }
+  .pcond.smoke { color: #cfd4dd; filter: drop-shadow(0 0 5px rgba(180,186,196,0.7)); }
 
   .wimg { display: inline-flex; align-items: center; }
   .wimg img { display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6)); }
+  /* Category silhouette, drawn when we ship no artwork for the item in hand.
+     Custom knives fold onto the default knife icon, so this is only reached by
+     Wingman / Danger Zone tools and anything Valve adds after this build. */
+  .wicon { display: inline-flex; align-items: center; color: #cfd4dd; opacity: 0.9; }
+  .wicon svg { display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6)); }
+  .players.t .pwpn > .wimg .wicon svg { transform: scaleX(-1); }
 
   /* Utility icons (defuse kit / bomb) */
   .putil { display: flex; align-items: center; gap: 5px; }
@@ -393,19 +352,6 @@
   /* The strip takes the radar's corner, so drop the radar below it while it's up. */
   body.has-veto .cs-radar { top: 50px; }
 
-  /* ── Bomb action caption — who is planting / defusing, with a progress bar.
-        Hangs under the head; only up while the action is in progress. ── */
-  .bomb-act { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 5px;
-    display: flex; flex-direction: column; align-items: center; gap: 3px; width: 300px; z-index: 41;
-    animation: radarIn 0.2s ease backwards; }
-  .ba-bar { width: 100%; height: 5px; border-radius: 3px; overflow: hidden; background: rgba(0,0,0,0.6);
-    border: 1px solid rgba(255,255,255,0.14); }
-  .ba-fill { height: 100%; width: 0; border-radius: 3px; transition: width 0.12s linear;
-    background: linear-gradient(90deg, #ff6a3d, #ff2020); box-shadow: 0 0 10px rgba(255,65,51,0.8); }
-  .bomb-act.defusing .ba-fill { background: linear-gradient(90deg, #9aa0ab, #d6dae1); box-shadow: 0 0 8px rgba(210,215,225,0.6); }
-  .ba-text { font-size: 12px; font-weight: 900; letter-spacing: 3px; text-transform: uppercase; color: #ff6a52;
-    text-shadow: 0 2px 8px rgba(0,0,0,0.9); white-space: nowrap; }
-  .bomb-act.defusing .ba-text { color: #d6dae1; }
 
   .cs-radar { position: absolute; top: 14px; left: 72px; width: 360px; height: 360px; background: transparent;
     animation: radarIn 0.45s ease backwards; }
@@ -425,18 +371,27 @@
     transform: scale(var(--rk, 1)); transform-origin: center;
     transition: left 0.25s linear, top 0.25s linear, transform 0.22s ease-out, opacity 0.2s ease, filter 0.2s ease; }
   .rdot.ct { background: var(--ct); } .rdot.t { background: var(--t); }
-  .rdot.me { width: 19px; height: 19px; margin: -9.5px 0 0 -9.5px; box-shadow: 0 0 0 2px #fff, 0 1px 4px rgba(0,0,0,0.8); z-index: 3; animation: rdotMe 1.4s ease-in-out infinite; }
-  @keyframes rdotMe { 0%,100% { box-shadow: 0 0 0 2px #fff, 0 1px 4px rgba(0,0,0,0.8); } 50% { box-shadow: 0 0 0 3px #fff, 0 0 10px rgba(255,255,255,0.85); } }
+  .rdot.me { width: 19px; height: 19px; margin: -9.5px 0 0 -9.5px; box-shadow: 0 0 0 2px #fff, 0 1px 4px rgba(0,0,0,0.8); z-index: 3; }
   .rdot.smoked { opacity: 0.4; filter: grayscale(0.75); }   /* hidden in smoke */
   /* Bomb carrier — gold ring */
   .rdot.carry { box-shadow: 0 0 0 2px #ffce47, 0 0 9px rgba(255,200,60,0.95); z-index: 3; }
   /* Low HP — red ring */
   .rdot.low { box-shadow: 0 0 0 2px #ff5a5a, 0 0 7px rgba(255,70,70,0.85); }
-  /* Firing: a smooth expanding ring over the dot so a shooting player is easy to flick to */
-  .rdot.firing::before { content: ''; position: absolute; left: 50%; top: 50%; width: 100%; height: 100%;
+  /* Firing: a steady gold ring around the dot while shooting, faded in/out rather than looped
+     (the old expanding ring restarted on every shot) */
+  .rdot::before { content: ''; position: absolute; left: 50%; top: 50%; width: 100%; height: 100%; box-sizing: border-box;
     margin: -50% 0 0 -50%; border-radius: 50%; border: 2px solid #ffd23d; box-shadow: 0 0 6px rgba(255,200,40,0.7);
-    animation: rdotFire 0.85s ease-out infinite; pointer-events: none; }
-  @keyframes rdotFire { 0% { transform: scale(0.75); opacity: 0.85; } 100% { transform: scale(2.3); opacity: 0; } }
+    transform: scale(1.7); opacity: 0; transition: opacity 0.25s ease; pointer-events: none; }
+  .rdot.firing::before { opacity: 0.9; }
+  /* Other floor on multi-level maps (Nuke, Vertigo, Train, Palais): hollow team-colour ring + ▲/▼.
+     CS2's overview gives the height band the radar image shows; outside it is another floor. */
+  .rdot.lvl-below, .rdot.lvl-above { background: rgba(8,10,15,0.92) !important; }
+  .rdot.ct.lvl-below, .rdot.ct.lvl-above { box-shadow: inset 0 0 0 3px var(--ct), 0 1px 3px rgba(0,0,0,0.7); }
+  .rdot.t.lvl-below,  .rdot.t.lvl-above  { box-shadow: inset 0 0 0 3px var(--t),  0 1px 3px rgba(0,0,0,0.7); }
+  .rdot.lvl-below::after, .rdot.lvl-above::after { position: absolute; left: 100%; top: -5px; margin-left: 1px;
+    font-size: 9px; line-height: 1; color: #fff; text-shadow: 0 1px 2px #000; }
+  .rdot.lvl-below::after { content: '▼'; } .rdot.lvl-above::after { content: '▲'; }
+  .rbomb.lvl-below, .rbomb.lvl-above { background: rgba(8,10,15,0.92); box-shadow: inset 0 0 0 2px #ff3b2f, 0 0 8px rgba(255,60,40,0.9); }
   /* Dead — faded X at the death spot, no circle/arrow */
   .rdot.dead { background: transparent !important; border: none; box-shadow: none; opacity: 0.5; animation: none; z-index: 1; }
   .rdot.dead .rdot-nose { display: none !important; }
@@ -468,13 +423,13 @@
     border: 1px solid rgba(255,255,255,0.35); }
   .gren.inferno, .gren.firebomb { width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%;
     background: radial-gradient(circle, rgba(255,140,40,0.85), rgba(220,70,20,0.4) 70%, transparent);
-    box-shadow: 0 0 10px rgba(255,110,30,0.7); animation: fxblink 0.5s steps(2) infinite; }
+    box-shadow: 0 0 10px rgba(255,110,30,0.7); }
   .gren.frag { width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%; background: #cfd6df; border: 1px solid rgba(0,0,0,0.5); }
   .gren.flashbang { width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%; background: #fff7c2; box-shadow: 0 0 7px rgba(255,247,160,0.9); }
   .gren.decoy { width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%; background: #4aa3b0; border: 1px solid rgba(0,0,0,0.5); }
 
   /* ── Kill feed (top-right): Killer [weapon][HS] Victim, slides in, auto-expires ── */
-  .cs-killfeed { position: absolute; top: 120px; right: 28px; display: flex; flex-direction: column;
+  .cs-killfeed { position: relative; display: flex; flex-direction: column;
     align-items: flex-end; gap: 6px; pointer-events: none; z-index: 6; }
   .kf-row { display: flex; align-items: center; gap: 9px; padding: 4px 11px; border-radius: 7px;
     background: linear-gradient(180deg, rgba(16,18,25,0.92), rgba(9,11,16,0.92)); border: 1px solid rgba(255,255,255,0.08);
@@ -562,6 +517,8 @@
   .cb-armor { width: 16px; height: 18px; object-fit: contain; flex-shrink: 0; }
   .cb-weap { flex: 0 0 104px; width: 104px; height: 22px; object-fit: contain; opacity: 0.95; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6)); }
   .cb-cell.t .cb-weap { transform: scaleX(-1); }   /* both teams' guns point inward toward centre */
+  span.cb-weap { display: flex; align-items: center; justify-content: center; color: #cfd4dd; }
+  .cb-util span { display: inline-flex; align-items: center; color: #cfd4dd; }
   /* player (name + K/D/A) */
   .cb-player { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-left: 1px solid rgba(255,255,255,0.07); }
   .cb-cell.t .cb-player { flex-direction: row-reverse; border-left: none; border-right: 1px solid rgba(255,255,255,0.07); }
@@ -574,10 +531,11 @@
   .cb-kda .k { color: #fff; } .cb-kda .d { color: #9aa0aa; }
   /* Hide the live side columns + bottom focus while the buy board is up */
   body.buying .col,
+  body.buying .cs-alive,
   body.buying .focus { opacity: 0; pointer-events: none; transition: opacity 0.3s ease; }
 
   /* ── Live alive-player count — transient "X VS X", pops on a death ── */
-  .cs-alive { position: absolute; top: 156px; left: 50%; transform: translateX(-50%);
+  .cs-alive { position: absolute; top: 160px; left: 50%; transform: translateX(-50%);
     display: flex; align-items: center; gap: 14px; padding: 5px 18px;
     background: linear-gradient(180deg, rgba(20,23,31,0.93), rgba(11,13,19,0.93)); border: 1px solid rgba(255,255,255,0.1);
     border-radius: 11px; box-shadow: 0 8px 22px rgba(0,0,0,0.5); }
@@ -689,10 +647,14 @@
     padding: 11px 38px; border-radius: 12px; font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #fff;
     background: rgba(10,12,18,0.9); border: 1px solid rgba(255,255,255,0.18); box-shadow: 0 12px 36px rgba(0,0,0,0.6); }
 
-  /* Sponsor rail — bottom-right corner bug, rotates through the brand's partners */
-  /* partner rail sits ABOVE the sponsor banner in the bottom-right */
-  .cs-sponsors { position: absolute; right: 40px; bottom: 128px; display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
-    padding: 7px 12px; border-radius: 9px; background: linear-gradient(180deg, rgba(20,23,31,0.9), rgba(11,13,19,0.9));
+  /* ── Top-right stack: partner rail, sponsor banner, kill feed — one flowing column ──
+     Sponsors used to sit bottom-right and lifted the whole T roster out of their way whenever they
+     showed (has-sprail / has-banner). Up here they share the corner with the kill feed and the
+     player columns never move. */
+  .cs-topright { position: absolute; top: 20px; right: 28px; width: 440px; z-index: 6; pointer-events: none;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+  .cs-sponsors { position: relative; display: flex; flex-direction: row; align-items: center; gap: 12px;
+    padding: 6px 14px; border-radius: 8px; background: linear-gradient(180deg, rgba(20,23,31,0.92), rgba(11,13,19,0.92));
     border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 8px 22px rgba(0,0,0,0.5); }
   .sp-label { font-size: 9px; font-weight: 700; letter-spacing: 2px; color: #8b909a; text-transform: uppercase; }
   .sp-slot { display: flex; align-items: center; justify-content: center; min-width: 96px; height: 26px; }
@@ -701,12 +663,11 @@
   /* Subtle cross-fade only (no pop) — runs only when the sponsor actually changes */
   @keyframes spFade { from { opacity: 0; } to { opacity: 1; } }
 
-  /* ── Sponsor banner (bottom-right) — producer-controlled rotating images (state.banner) ── */
-  .cs-banner { position: absolute; right: 40px; bottom: 30px; width: 380px; height: 86px; border-radius: 10px; overflow: hidden;
+  /* ── Sponsor banner (top-right stack) — producer-controlled rotating images (state.banner) ── */
+  .cs-banner { position: relative; width: 380px; height: 86px; border-radius: 10px; overflow: hidden;
     background: linear-gradient(180deg, rgba(20,23,31,0.95), rgba(11,13,19,0.95)); border: 1px solid rgba(255,255,255,0.1);
-    box-shadow: 0 8px 24px rgba(0,0,0,0.55); opacity: 0; transform: translateY(10px);
-    transition: opacity 0.4s ease, transform 0.4s ease; pointer-events: none; }
-  .cs-banner.show { opacity: 1; transform: translateY(0); }
+    box-shadow: 0 8px 24px rgba(0,0,0,0.55); pointer-events: none; }
+  .cs-banner:not(.show) { display: none; }   /* out of the stack entirely, so the kill feed rises into its place */
   .cs-banner .cbn-label { position: absolute; top: 5px; left: 13px; font-size: 8px; font-weight: 700; letter-spacing: 2px; color: #7d828c; text-transform: uppercase; }
   .cs-banner .cbn-imgs { position: absolute; left: 14px; right: 14px; top: 18px; bottom: 10px; }
   .cs-banner .cbn-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity 0.6s ease; }
@@ -716,69 +677,49 @@
 <body>
 
 <div class="cs-head">
-  <div class="scorebar">
-    <div id="cs-event" class="event-title hidden"></div>
-    <div class="topbar">
-      <div class="team t-ct">
-        <img id="ct-logo" class="tlogo" alt="">
-        <div class="team-mid">
-          <span class="nm" id="ct-name">TEAM A</span>
-          <div class="cs-series ct" id="series-ct"></div>
-          <span id="ct-record" class="cs-record hidden"></span>
+  <div id="cs-event" class="tb-event hidden"></div>
+  <div class="tb-row">
+    <div class="tb-team tb-left">
+      <div class="tb-name">
+        <img id="ct-logo" class="tb-logo" alt="">
+        <div class="tb-namecol">
+          <span class="tb-nm" id="ct-name">TEAM A</span>
+          <div class="tb-meta"><div class="cs-series ct" id="series-ct"></div><span id="ct-record" class="cs-record hidden"></span></div>
         </div>
-        <span class="sc" id="ct-score">0</span>
-        <div class="fuse" id="fuse-ct"></div>
       </div>
-      <div class="mid" id="cs-mid">
-        <span class="cs-map" id="cs-map"></span>
-        <div class="bombrow">
-        <div class="bombvis" id="cs-bombvis">
-          <!-- Authentic CS2 C4 icon — shown while the bomb is planted -->
-          <svg class="bomb-ic ic-bomb" viewBox="0 0 32 32" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M18.304 7.498l-.101-3.303v-.284c0-.287.026-.849-.083-1.034-.109-.184-.454-.478-.835-.383a.741.741 0 00-.55.566l-.017.983c-.057.264-.033.622-.033.901v.317c-.037.173.025.423-.017.616-.038.173.024.424-.017.618-.06.275-.036.697-.034 1.001h1.687zm-7.207-.718c.115.221.304.462.367.718h1.902c-.039-.115-.125-.206-.184-.301-.126-.203-.245-.405-.367-.601-.355-.564-.684-1.144-1.034-1.701-.211-.334-.343-.695-.884-.7-.052.036-.127.032-.184.066-.147.087-.332.219-.401.384-.158.38.074.732.218.968.225.37.366.783.567 1.167zm12.677-2.585c-.146.114-.327.163-.434.316-.176.254-.303.523-.467.784-.259.409-.543.824-.801 1.234l-.45.717c-.049.077-.066.161-.134.217v.034c.647.002 1.396-.053 1.835.149.177-.363.377-.728.584-1.067.119-.195.181-.404.301-.6.146-.241.347-.521.433-.802.173-.555-.375-.995-.867-.982zm2.853 7.607c.592-.367 1.198-.708 1.785-1.067.248-.153.524-.258.75-.435.273-.213.293-.813.084-1.101-.134-.185-.408-.204-.734-.2-.043.032-.097.025-.149.05-.144.064-.301.155-.45.233-.488.254-.994.483-1.485.751-.283.154-.587.296-.884.45-.111.058-.22.152-.351.184v1.985c.183-.051.336-.191.484-.284.315-.196.64-.374.95-.566zm-3.386 11.026c.262-.394.2-1.128.2-1.785v-9.241c0-.824.093-1.753-.367-2.118-.48-.383-1.046-.301-1.885-.301H2.123l-.334.099c-.283.123-.547.415-.668.701-.145.344-.065 1.299-.065 1.785v10.358c.079.325.281.613.517.784.424.308.901.25 1.617.25h18.083c.994.001 1.556.086 1.968-.532zM8.444 18.157c-.132.213-.282.446-.417.666-.139.231-.238.583-.417.768v.034h1.234v-1.619c.05-.228.052-.48.051-.75h-.05c-.136.283-.233.631-.401.901z"/></svg>
-          <!-- Wire-cutters / defuse tool — shown while defusing -->
-          <svg class="bomb-ic ic-defuse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <div class="tb-panels" id="panels-ct"></div>
+    </div>
+    <div class="tb-score tb-left" id="ct-score">0</div>
+    <div class="tb-center" id="cs-mid">
+      <span class="tb-clock" id="cs-timer">--</span>
+      <div class="tb-bomb">
+        <svg class="bomb-ic ic-bomb" viewBox="0 0 32 32" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M18.304 7.498l-.101-3.303v-.284c0-.287.026-.849-.083-1.034-.109-.184-.454-.478-.835-.383a.741.741 0 00-.55.566l-.017.983c-.057.264-.033.622-.033.901v.317c-.037.173.025.423-.017.616-.038.173.024.424-.017.618-.06.275-.036.697-.034 1.001h1.687zm-7.207-.718c.115.221.304.462.367.718h1.902c-.039-.115-.125-.206-.184-.301-.126-.203-.245-.405-.367-.601-.355-.564-.684-1.144-1.034-1.701-.211-.334-.343-.695-.884-.7-.052.036-.127.032-.184.066-.147.087-.332.219-.401.384-.158.38.074.732.218.968.225.37.366.783.567 1.167zm12.677-2.585c-.146.114-.327.163-.434.316-.176.254-.303.523-.467.784-.259.409-.543.824-.801 1.234l-.45.717c-.049.077-.066.161-.134.217v.034c.647.002 1.396-.053 1.835.149.177-.363.377-.728.584-1.067.119-.195.181-.404.301-.6.146-.241.347-.521.433-.802.173-.555-.375-.995-.867-.982zm2.853 7.607c.592-.367 1.198-.708 1.785-1.067.248-.153.524-.258.75-.435.273-.213.293-.813.084-1.101-.134-.185-.408-.204-.734-.2-.043.032-.097.025-.149.05-.144.064-.301.155-.45.233-.488.254-.994.483-1.485.751-.283.154-.587.296-.884.45-.111.058-.22.152-.351.184v1.985c.183-.051.336-.191.484-.284.315-.196.64-.374.95-.566zm-3.386 11.026c.262-.394.2-1.128.2-1.785v-9.241c0-.824.093-1.753-.367-2.118-.48-.383-1.046-.301-1.885-.301H2.123l-.334.099c-.283.123-.547.415-.668.701-.145.344-.065 1.299-.065 1.785v10.358c.079.325.281.613.517.784.424.308.901.25 1.617.25h18.083c.994.001 1.556.086 1.968-.532zM8.444 18.157c-.132.213-.282.446-.417.666-.139.231-.238.583-.417.768v.034h1.234v-1.619c.05-.228.052-.48.051-.75h-.05c-.136.283-.233.631-.401.901z"/></svg>
+        <svg class="bomb-ic ic-defuse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <circle cx="12" cy="13.2" r="1.5" fill="currentColor" stroke="none"/>
             <path d="M11 11.8 4.4 5.2"/>
             <path d="M13 11.8 19.6 5.2"/>
             <path d="M11.2 14.5 7 21"/>
             <path d="M12.8 14.5 17 21"/>
           </svg>
-          <div class="bomb-bar">
-            <div class="bomb-bar-fill" id="bomb-bar-fill"></div>
-            <div class="bomb-defuse-fill" id="bomb-defuse-fill"></div>
-          </div>
-        </div>
-        <span class="timer" id="cs-timer">--</span>
-        </div>
-        <span class="roundlbl" id="cs-round">WARMUP</span>
+        <span class="tb-site hidden" id="tb-site"></span>
       </div>
-      <div class="team t-t">
-        <span class="sc" id="t-score">0</span>
-        <div class="team-mid">
-          <span class="nm" id="t-name">TEAM B</span>
-          <div class="cs-series t" id="series-t"></div>
-          <span id="t-record" class="cs-record hidden"></span>
-        </div>
-        <img id="t-logo" class="tlogo" alt="">
-        <div class="fuse" id="fuse-t"></div>
-      </div>
+      <span class="tb-round" id="cs-round">WARMUP</span>
     </div>
-    <!-- Bomb result flash: explosion / "BOMB DEFUSED", auto-clears after ~2s -->
-    <div id="bomb-flash" class="bomb-flash"></div>
-
-    <!-- Light that travels around the border (left → bottom → right), pauses, repeats -->
-    <svg class="head-beam" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true">
-      <path class="hb-base" d="M 2 2 L 2 86 Q 2 99 15 99 L 985 99 Q 998 99 998 86 L 998 2" pathLength="100"></path>
-      <path class="hb-beam" d="M 2 2 L 2 86 Q 2 99 15 99 L 985 99 Q 998 99 998 86 L 998 2" pathLength="100"></path>
-    </svg>
+    <div class="tb-score tb-right" id="t-score">0</div>
+    <div class="tb-team tb-right">
+      <div class="tb-name">
+        <img id="t-logo" class="tb-logo" alt="">
+        <div class="tb-namecol">
+          <span class="tb-nm" id="t-name">TEAM B</span>
+          <div class="tb-meta"><div class="cs-series t" id="series-t"></div><span id="t-record" class="cs-record hidden"></span></div>
+        </div>
+      </div>
+      <div class="tb-panels" id="panels-t"></div>
+    </div>
   </div>
-
-  <!-- Who is planting / defusing, with a progress bar — hangs under the head while the
-       action runs (GSI bomb.player + bomb.state 'planting'/'defusing'). -->
-  <div id="cs-bombact" class="bomb-act hidden">
-    <div class="ba-bar"><div class="ba-fill" id="ba-fill"></div></div>
-    <div class="ba-text" id="ba-text"></div>
-  </div>
+  <div class="tb-sub hidden" id="tb-sub"><span class="cs-map" id="cs-map"></span></div>
+  <!-- Bomb result: "BOMB DETONATED" / "BOMB DEFUSED", clears itself -->
+  <div id="bomb-flash" class="bomb-flash"></div>
 </div>
 
 <!-- Series map strip (top-left): the veto's picked maps in play order -->
@@ -787,13 +728,23 @@
 <!-- Round history — separate overlay, toggled show/hide from the control panel (animated) -->
 <div id="round-dots" class="round-dots"></div>
 
-<!-- Kill feed (top-right): inferred from GSI counter diffs -->
-<div id="cs-killfeed" class="cs-killfeed"></div>
+<!-- Top-right stack: partner rail, sponsor banner, then the kill feed (inferred from GSI counter diffs) -->
+<div class="cs-topright">
+  <div id="cs-sponsors" class="cs-sponsors hidden">
+    <span class="sp-label" id="sp-label">PARTNERS</span>
+    <div class="sp-slot" id="sp-slot"></div>
+  </div>
+  <div id="cs-banner" class="cs-banner">
+    <span class="cbn-label">SPONSORED BY</span>
+    <div class="cbn-imgs" id="cs-banner-imgs"></div>
+  </div>
+  <div id="cs-killfeed" class="cs-killfeed"></div>
+</div>
 
 <!-- Buy / freeze phase board: full-width loadout+economy lower-third during freezetime -->
 <div id="cs-buy" class="cs-buy"></div>
 
-<!-- Live alive-player count: pops up briefly on a death -->
+<!-- Live alive-player count: X VS X through the round -->
 <div id="cs-alive" class="cs-alive hidden">
   <span class="av-num av-num-ct" id="alive-ct">5</span>
   <span class="av-vs">VS</span>
@@ -844,22 +795,9 @@
 <div id="cs-clutch" class="cs-clutch hidden"></div>
 <div id="cs-phase" class="cs-phase hidden"></div>
 
-<!-- Sellable sponsor rail (driven by the active client brand kit) -->
-<div id="cs-sponsors" class="cs-sponsors hidden">
-  <span class="sp-label" id="sp-label">PARTNERS</span>
-  <div class="sp-slot" id="sp-slot"></div>
-</div>
-
-<!-- Sponsor banner (bottom-right) — producer-controlled, rotating images from full_state.banner -->
-<div id="cs-banner" class="cs-banner">
-  <span class="cbn-label">SPONSORED BY</span>
-  <div class="cbn-imgs" id="cs-banner-imgs"></div>
-</div>
 
 <div id="preview-badge" class="preview-badge">● PREVIEW — waiting for CS2 (GSI)</div>
 
-<!-- Full-screen corner red pulse, fired briefly when the bomb is planted -->
-<div id="corner-pulse"></div>
 
 <!-- Dev event tester (browser only — hidden inside OBS browser sources) -->
 <div id="dev-panel">
@@ -887,6 +825,9 @@
 function _esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
 
 function el(id){ return document.getElementById(id); }
+// Write text only when it changed. render() runs every 100ms GSI tick, and an unconditional
+// textContent write swaps the text node each time even when the value is identical.
+function setText(e, v){ v = String(v == null ? '' : v); if (e.textContent !== v) e.textContent = v; }
 
 /* Distinct weapon silhouettes by category (clean inline SVG, no external assets) */
 const WEAPON_ICONS = {
@@ -918,28 +859,82 @@ function weaponCategory(n){
   return 'rifle';
 }
 
-function weaponIconSpan(name, cls){
-  const cat = weaponCategory(name);
-  const inner = WEAPON_ICONS[cat] || WEAPON_ICONS.rifle;
+// Category silhouette as markup — shared by the DOM builders and the buy board,
+// which assembles its cells as an HTML string. `h` is the icon height the caller
+// asked for, so a fallback sits at the same weight as the artwork it replaces.
+function weaponIconSvg(name, h){
+  const inner = WEAPON_ICONS[weaponCategory(name)] || WEAPON_ICONS.rifle;
+  const ht = h || 12, w = Math.round(ht * 64 / 24);   // viewBox is 64x24
+  return '<svg viewBox="0 0 64 24" width="' + w + '" height="' + ht + '" fill="currentColor">' + inner + '</svg>';
+}
+
+function weaponIconSpan(name, cls, h){
   const s = document.createElement('span');
   s.className = cls || 'wicon';
-  s.innerHTML = '<svg viewBox="0 0 64 24" width="30" height="12" fill="currentColor">' + inner + '</svg>';
+  s.innerHTML = weaponIconSvg(name, h);
   return s;
 }
 
+// ── Weapon artwork resolution ────────────────────────────────────────────────
+// CS2 reports the player's ACTUAL item, so a Karambit arrives as "knife_karambit"
+// and a Talon as "knife_widowmaker". We only ship the two default knife icons, so
+// any custom knife used to request an SVG that isn't there — a 404 in the console
+// and a broken-image glyph on the buy board. Same story for Wingman/Danger-Zone
+// items and the handful of weapons whose GSI name differs from our filename.
+//
+// Fix: resolve every name against the set of icons we actually bundle. Anything
+// that doesn't resolve returns '' and the caller draws the category silhouette
+// instead, so we never issue a request for a file we know we don't have.
+const WEAPON_SVGS = new Set([
+  'ak47','aug','awp','bizon','c4','cz75a','deagle','decoy','elite','famas','fiveseven',
+  'flashbang','g3sg1','galilar','glock','healthshot','hegrenade','hkp2000','incgrenade',
+  'knife','knife_t','m249','m4a1','m4a1_silencer','mac10','mag7','molotov','mp5sd','mp7',
+  'mp9','negev','nova','p250','p90','revolver','sawedoff','scar20','sg556','smokegrenade',
+  'ssg08','taser','tec9','ump45','usp_silencer','xm1014'
+]);
+
+// Names GSI can emit that don't match our filenames one-for-one.
+const WEAPON_ALIAS = {
+  m4a4:'m4a1', m4a1_s:'m4a1_silencer', sg553:'sg556', galil:'galilar', scar:'scar20',
+  zeus:'taser', zeus_x27:'taser', r8revolver:'revolver', usp:'usp_silencer',
+  usps:'usp_silencer', p2000:'hkp2000', cz75:'cz75a', cz:'cz75a', mp5:'mp5sd',
+  ssg:'ssg08', dualberettas:'elite', duals:'elite',
+  frag_grenade:'hegrenade', firebomb:'molotov', diversion:'decoy', inferno:'molotov'
+};
+
+// Every melee item — the 20-odd knife skins plus the arms-race golden knife, the
+// Danger Zone tools and bare fists — collapses onto the side's default knife icon.
+const MELEE_RE = /^(knife|knifegg|bayonet|melee|fists|axe|hammer|spanner)/;
+
+function weaponAsset(weapon, team){
+  const n = String(weapon || '').toLowerCase().replace(/^weapon_/, '');
+  if (!n) return '';
+  if (MELEE_RE.test(n)){
+    // knife_t is the T-side default; for a skin we go by whose hands it's in.
+    const t = team ? String(team).toUpperCase() === 'T' : n === 'knife_t';
+    return t ? 'knife_t' : 'knife';
+  }
+  const a = WEAPON_ALIAS[n] || n;
+  return WEAPON_SVGS.has(a) ? a : '';
+}
+
 // Real weapon artwork (bundled SVGs); falls back to the silhouette if missing.
-function weaponImg(weapon, h, cls){
+function weaponImg(weapon, h, cls, team){
   const span = document.createElement('span');
   span.className = 'wimg' + (cls ? ' ' + cls : '');
   if (!weapon) return span;
+  const asset = weaponAsset(weapon, team);
+  // Unknown item (a Wingman/DZ tool, or something added in a future update):
+  // draw the silhouette rather than firing off a request that 404s.
+  if (!asset){ span.appendChild(weaponIconSpan(weapon, 'wicon', h)); return span; }
   const img = document.createElement('img');
-  img.src = '/assets/weapons/' + weapon + '.svg';
+  img.src = '/assets/weapons/' + asset + '.svg';
   img.alt = '';
   img.style.height = (h || 16) + 'px';
   // Square-box icons (grenades) get a fixed width + contain so they're all the same size,
   // regardless of each SVG's own aspect ratio / padding.
   if (cls && cls.indexOf('nade') !== -1) { img.style.width = (h || 16) + 'px'; img.style.objectFit = 'contain'; }
-  img.addEventListener('error', () => { span.innerHTML = ''; span.appendChild(weaponIconSpan(weapon, 'wicon')); });
+  img.addEventListener('error', () => { span.innerHTML = ''; span.appendChild(weaponIconSpan(weapon, 'wicon', h)); });
   span.appendChild(img);
   return span;
 }
@@ -1020,9 +1015,6 @@ function renderVetoStrip(cs){
   box.innerHTML = html;
 }
 
-// Overtime label: OT1 → OVERTIME, OT2 → DOUBLE OVERTIME, …
-const OT_NAMES = ['', 'OVERTIME', 'DOUBLE OVERTIME', 'TRIPLE OVERTIME', 'QUADRUPLE OVERTIME', 'QUINTUPLE OVERTIME'];
-function otLabel(n){ return n <= 0 ? '' : (OT_NAMES[n] || (n + 'X OVERTIME')); }
 
 // Grenade categories tracked in the team utility tally (molotov + incgrenade = one "fire" group).
 const NADE_CATS = [
@@ -1092,7 +1084,8 @@ function fmtClock(sec){
 const MAP_NAMES = {
   de_dust2:'DUST II', de_mirage:'MIRAGE', de_inferno:'INFERNO', de_nuke:'NUKE',
   de_overpass:'OVERPASS', de_vertigo:'VERTIGO', de_ancient:'ANCIENT', de_anubis:'ANUBIS',
-  de_train:'TRAIN', de_cache:'CACHE', de_cbble:'COBBLESTONE', cs_office:'OFFICE', cs_italy:'ITALY'
+  de_train:'TRAIN', de_cache:'CACHE', de_cbble:'COBBLESTONE', cs_office:'OFFICE', cs_italy:'ITALY',
+  de_basalt:'BASALT', de_edin:'EDIN', de_palais:'PALAIS', de_whistle:'WHISTLE'
 };
 function mapLabel(n){
   if (!n) return '';
@@ -1141,7 +1134,7 @@ function nowMs(){ return Date.now(); }
 
 // Firing latch: the server flags p.firing on the tick a clip drops; we hold the visual
 // for a short window so sustained fire reads as a steady pulse (sidebar + radar).
-const FIRE_HOLD = 350;
+const FIRE_HOLD = 900;   // ms a shot keeps the firing edge lit: longer than the gap between shots, so a burst holds steady
 let fireHoldTs = {};
 function noteFiring(players){ const t = nowMs(); (players || []).forEach(p => { if (p.firing) fireHoldTs[p.steamid] = t; }); }
 function isFiring(sid){ return (nowMs() - (fireHoldTs[sid] || 0)) < FIRE_HOLD; }
@@ -1149,63 +1142,21 @@ function isFiring(sid){ return (nowMs() - (fireHoldTs[sid] || 0)) < FIRE_HOLD; }
 // Bomb result flash (explosion / "BOMB DEFUSED") across the top overlay, fired on state change.
 let prevBombState = '';
 let bombFlashTimer = null;
-let bombFlashActive = false;   // keep team-colour bars hidden until the banner finishes
-function clearFused(){ document.querySelectorAll('.team.fused').forEach(t => t.classList.remove('fused')); }
+// One-shot result under the top bar when the bomb resolves.
 function triggerBombFlash(kind){
   const f = el('bomb-flash'); if (!f) return;
-  const sb = f.parentElement;   // .scorebar — fade its content while the banner plays
-  if (bombFlashTimer) { clearTimeout(bombFlashTimer); bombFlashTimer = null; }
-  bombFlashActive = true;
-  f.className = 'bomb-flash';   // reset any prior run
-  f.innerHTML = '<span class="bf-label">' + (kind === 'explode' ? 'BOMB DETONATED' : 'BOMB DEFUSED') + '</span>';
-  void f.offsetWidth;          // force reflow so the CSS animation restarts
-  f.classList.add('show', kind);
-  if (sb) sb.classList.add('flashing');
-  bombFlashTimer = setTimeout(() => {
-    f.classList.remove('show', 'explode', 'defused'); f.innerHTML = '';
-    if (sb) sb.classList.remove('flashing');
-    bombFlashActive = false;
-    clearFused();   // fade the team-colour underlines back in now the animation is done
-  }, kind === 'explode' ? 1700 : 2000);
-}
-// Corner red pulse, fired briefly on plant.
-let cornerTimer = null;
-function triggerCornerPulse(){
-  const c = el('corner-pulse'); if (!c) return;
-  if (cornerTimer) { clearTimeout(cornerTimer); cornerTimer = null; }
-  c.classList.remove('show'); void c.offsetWidth; c.classList.add('show');
-  cornerTimer = setTimeout(() => { c.classList.remove('show'); }, 4300);
-}
-function stopCornerPulse(){
-  if (cornerTimer) { clearTimeout(cornerTimer); cornerTimer = null; }
-  const c = el('corner-pulse'); if (c) c.classList.remove('show');
+  if (bombFlashTimer) clearTimeout(bombFlashTimer);
+  setText(f, kind === 'explode' ? 'BOMB DETONATED' : 'BOMB DEFUSED');
+  f.className = 'bomb-flash'; void f.offsetWidth;          // restart the one-shot animation
+  f.className = 'bomb-flash show ' + (kind === 'explode' ? 'explode' : 'defused');
+  bombFlashTimer = setTimeout(() => { f.className = 'bomb-flash'; }, 2600);
 }
 // Ease-out so the fuse moves fast at first and crawls in the final moments (anticipation).
 function easeOutCubic(x){ x = Math.max(0, Math.min(1, x)); return 1 - Math.pow(1 - x, 3); }
-// Team-underline fuses toward centre. mode 'planted' = red drains, 'defuse' = green grows,
-// 'off' hides them. While active the team-colour accent is hidden (.fused).
-function setFuse(width, mode, danger){
-  [el('fuse-ct'), el('fuse-t')].forEach(f => {
-    if (!f) return;
-    const team = f.parentElement;
-    if (mode === 'off' || width <= 0) {
-      f.style.display = 'none'; f.style.width = '0%'; f.classList.remove('danger', 'defuse');
-      // Keep the team colour hidden while the detonate/defuse banner plays; the flash
-      // timeout restores it. Otherwise (round ended without a result) restore immediately.
-      if (team && !bombFlashActive) team.classList.remove('fused');
-      return;
-    }
-    f.style.display = 'block'; f.style.width = width + '%';
-    f.classList.toggle('defuse', mode === 'defuse');
-    f.classList.toggle('danger', !!danger && mode !== 'defuse');
-    if (team) team.classList.add('fused');
-  });
-}
 function handleBombResult(stateNow){
   if (stateNow === prevBombState) return;
   if (stateNow === 'exploded') triggerBombFlash('explode');
   else if (stateNow === 'defused') triggerBombFlash('defused');
-  else if (stateNow === 'planted') triggerCornerPulse();
   prevBombState = stateNow;
 }
 
@@ -1215,28 +1166,6 @@ function handleBombResult(stateNow){
 // them and fills a bar over the real action time: 3.2s to plant, 5s/10s to defuse (kit).
 const PLANT_TIME = 3.2;
 let plantStart = null;   // ms timestamp when the current plant began
-function renderBombAct(cs, bombState){
-  const box = el('cs-bombact'); if (!box) return;
-  const planting = bombState === 'planting';
-  const defusing = bombState === 'defusing';
-  if (!planting && !defusing){
-    plantStart = null;
-    box.classList.add('hidden');
-    return;
-  }
-  const actor = (cs.players || []).find(p => p.steamid === (cs.bomb && cs.bomb.player));
-  if (planting && plantStart === null) plantStart = nowMs();
-  const start = planting ? plantStart : defuseStart;
-  const dur = planting ? PLANT_TIME : ((actor && actor.hasKit) ? 5 : DEFUSE_TIME);
-  const frac = start === null ? 0 : Math.min(1, (nowMs() - start) / (dur * 1000));
-
-  box.classList.remove('hidden');
-  box.classList.toggle('defusing', defusing);
-  el('ba-fill').style.width = (frac * 100).toFixed(1) + '%';
-  el('ba-text').textContent = actor && actor.name
-    ? `${actor.name} is ${planting ? 'planting' : 'defusing'}`
-    : (planting ? 'Planting the bomb' : 'Defusing the bomb');
-}
 
 const DEMO = {
   connected: false,
@@ -1278,23 +1207,29 @@ DEMO.killfeed = [   // preview the kill feed (live feed comes from the server)
   { killer:'Player 5', killerTeam:'CT', victim:'Player 6', victimTeam:'T',  weapon:'m4a1',  hs:false, ts: 3 }
 ];
 
-// Shrink a team name's font until it fits its panel (no mid-name cut-off)
-function fitName(elx, text){
-  elx.textContent = (text || '').toUpperCase();
-  let size = 30;
+// Shrink a team name to fit its plate. Measuring forces layout, so only re-fit when the name
+// changes (render() runs every GSI tick), and once more when the web font finishes loading.
+function fitName(elx, text, max){
+  const t = (text || '').toUpperCase(); max = max || 30;
+  if (elx.dataset.fit === t + '|' + max) return;
+  elx.dataset.fit = t + '|' + max;
+  elx.textContent = t;
+  let size = max;
   elx.style.fontSize = size + 'px';
   let guard = 0;
-  while (elx.scrollWidth > elx.clientWidth && size > 14 && guard++ < 40){
+  while (elx.scrollWidth > elx.clientWidth && size > 13 && guard++ < 40){
     size -= 1;
     elx.style.fontSize = size + 'px';
   }
 }
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => document.querySelectorAll('[data-fit]').forEach(e => { e.dataset.fit = ''; }));
 
 function setTeamPanel(side, team, score){
-  fitName(el(side + '-name'), team.name || (side === 'ct' ? 'TEAM A' : 'TEAM B'));
-  el(side + '-score').textContent = score;
+  fitName(el(side + '-name'), team.name || (side === 'ct' ? 'TEAM A' : 'TEAM B'), 24);
+  setText(el(side + '-score'), score);
   const logo = el(side + '-logo');
-  logo.src = team.logo || CS_LOGO_FALLBACK; logo.style.display = '';
+  const url = team.logo || CS_LOGO_FALLBACK;
+  if (logo.getAttribute('src') !== url) logo.src = url;
   logo.classList.toggle('cs-fallback', !team.logo);
 }
 
@@ -1312,7 +1247,8 @@ function createRow(){
   const name = document.createElement('div'); name.className = 'pname';
   const bomb = document.createElement('div'); bomb.className = 'pbomb';
   const status = document.createElement('div'); status.className = 'pstatus';
-  l1.appendChild(pnum); l1.appendChild(name); l1.appendChild(bomb); l1.appendChild(status);
+  const prk = document.createElement('div'); prk.className = 'prk';   // kills this round
+  l1.appendChild(pnum); l1.appendChild(name); l1.appendChild(prk); l1.appendChild(bomb); l1.appendChild(status);
   // Line 2: K/D (kill icon + skull icon) + money — icons built once, numbers update each tick
   const sub = document.createElement('div'); sub.className = 'psub';
   const kad = document.createElement('div'); kad.className = 'pkad';
@@ -1336,7 +1272,7 @@ function createRow(){
   const cond = document.createElement('div'); cond.className = 'pcond';
   // fx first → behind; body/HP carry z-index so the text stays crisp over the tint.
   el.appendChild(fx); el.appendChild(body); el.appendChild(cond); el.appendChild(hpbox); el.appendChild(hpbar);
-  return { el, side: '', wasAlive: true, refs: { hpbox, name, money, dmg, status, kadK, kadD, wpn, hpfill, bomb, fx, cond, pnum } };
+  return { el, side: '', wasAlive: true, refs: { hpbox, name, money, dmg, status, kadK, kadD, wpn, hpfill, bomb, fx, cond, pnum, prk } };
 }
 
 function updateRow(entry, p, activeId, number){
@@ -1349,14 +1285,15 @@ function updateRow(entry, p, activeId, number){
   if (!dead) el.classList.remove('just-died');
   entry.wasAlive = p.alive;
 
-  refs.hpbox.textContent = dead ? '☠' : p.health;
-  refs.pnum.textContent = (p.slot != null && p.slot < 99) ? String(p.slot) : '';   // 0–9, matches the map
-  refs.name.textContent = p.name;
-  refs.money.textContent = '$' + p.money;
+  setText(refs.hpbox, dead ? '☠' : p.health);
+  setText(refs.pnum, (p.slot != null && p.slot < 99) ? String(p.slot) : '');   // 0–9, matches the map
+  setText(refs.name, p.name);
+  setText(refs.prk, (p.roundKills || 0) > 0 ? p.roundKills + 'K' : '');
+  setText(refs.money, '$' + p.money);
   // Dead rows drop money/loadout, so fill that space with what they did this round.
-  refs.dmg.textContent = (dead && (p.roundDmg || 0) > 0) ? ('DMG ' + p.roundDmg) : '';
-  refs.kadK.textContent = p.kills;
-  refs.kadD.textContent = p.deaths;
+  setText(refs.dmg, (dead && (p.roundDmg || 0) > 0) ? ('DMG ' + p.roundDmg) : '');
+  setText(refs.kadK, p.kills);
+  setText(refs.kadD, p.deaths);
   const hp = Math.max(0, Math.min(100, p.health || 0));
   refs.hpfill.style.width = (dead ? 0 : hp) + '%';
   // HP-by-health colouring (warn when low) — applied to bar + number.
@@ -1364,9 +1301,9 @@ function updateRow(entry, p, activeId, number){
   el.classList.remove('hp-ok', 'hp-low', 'hp-crit');
   if (hpClass) el.classList.add(hpClass);
 
-  // Status FX — a smooth animated tint behind the card + a condition icon left of the HP box
+  // Status FX — a steady tint behind the card (a flash's strength follows its intensity) + a condition icon left of the HP box
   // (flashed → fire → smoke priority). Only re-set when it changes (no per-tick churn).
-  const fxState = dead ? '' : (p.flashed || 0) > 120 ? 'flash'
+  const fxState = dead ? '' : (p.flashed || 0) > 40 ? 'flash'
     : (p.burning || 0) > 0 ? 'fire'
     : (p.smoked || 0) > 80 ? 'smoke' : '';
   if (entry.lastFxSig !== fxState){
@@ -1375,6 +1312,7 @@ function updateRow(entry, p, activeId, number){
     refs.cond.className = 'pcond' + (fxState ? ' ' + fxState : '');
     refs.cond.innerHTML = fxState ? FX_ICONS[fxState] : '';
   }
+  if (fxState === 'flash') refs.fx.style.setProperty('--fxi', Math.min(0.8, (p.flashed || 0) / 255 * 0.8).toFixed(2));
 
   // Bomb-carrier badge next to the name (guarded so it doesn't re-create the <img> each tick).
   const bombSig = (!dead && p.hasBomb) ? '1' : '0';
@@ -1385,18 +1323,19 @@ function updateRow(entry, p, activeId, number){
   }
 
   // Weapon + full loadout (grenade/kit images, bigger) — only rebuild when it changes.
-  const wpnSig = dead ? 'x' : `${p.weapon}|${(p.nades||[]).join(',')}|${p.hasKit?1:0}`;
+  const shown = shownWeapon(p);
+  const wpnSig = dead ? 'x' : `${shown.name}|${shown.inHand?1:0}|${(p.nades||[]).join(',')}|${p.activeNade||''}|${p.hasKit?1:0}`;
   if (entry.lastWpnSig !== wpnSig){
     entry.lastWpnSig = wpnSig;
     refs.wpn.innerHTML = '';
     // Utils OUTER (farther from centre), gun INNER (closest to centre / HP box).
     if (!dead){
       const util = document.createElement('div'); util.className = 'putil';
-      (p.nades || []).forEach(n => util.appendChild(weaponImg(nadeSvg(n), 20, 'nade')));
+      nadeImgs(p, 20, util);
       if (p.hasKit) util.appendChild(utilImg('shield', 20, 'kit'));
       if (util.childNodes.length) refs.wpn.appendChild(util);
     }
-    if (!dead && p.weapon) refs.wpn.appendChild(weaponImg(p.weapon, 27));
+    if (!dead && shown.name) refs.wpn.appendChild(weaponImg(shown.name, 27, shown.inHand ? '' : 'holstered', p.team));
   }
 }
 
@@ -1409,10 +1348,39 @@ const NADE_SVG = {
 };
 function nadeSvg(n){ return NADE_SVG[n] || NADE_SVG[(n || '').toUpperCase()] || n; }
 
+// The gun a player's weapon slot shows: what they OWN — primary, else pistol, else zeus —
+// never the knife or grenade in their hand (JT's HUD rule; freezetime is all knives).
+// `inHand` says whether that gun is the one currently out. A server that hasn't been
+// restarted since the loadout fields were added sends no `primary`, so fall back to the
+// active weapon there rather than showing an empty slot.
+function shownWeapon(p){
+  if (p.primary === undefined) return { name: p.weapon || '', inHand: true };
+  const name = p.primary || p.secondary || (p.hasTaser ? 'taser' : '');
+  return { name, inHand: !!name && name === p.weapon };
+}
+// Grenade icons in a row, marking the one in hand (only the first of a flashbang pair).
+function nadeImgs(p, h, into){
+  let marked = false;
+  (p.nades || []).forEach(n => {
+    const inhand = !marked && !!p.activeNade && n === p.activeNade;
+    if (inhand) marked = true;
+    into.appendChild(weaponImg(nadeSvg(n), h, 'nade' + (inhand ? ' inhand' : '')));
+  });
+}
+
+// <img> for a bundled icon, silhouette markup when we don't have one. Used by the
+// buy board, which builds its cells as an HTML string rather than DOM nodes.
+function weaponImgHtml(weapon, team, cls, h){
+  const asset = weaponAsset(weapon, team);
+  const c = cls ? ' class="' + cls + '"' : '';
+  if (asset) return '<img' + c + ' src="/assets/weapons/' + asset + '.svg" alt="">';
+  return '<span' + c + '>' + weaponIconSvg(weapon, h) + '</span>';
+}
+
 // Build a loadout icon row: grenades + defuse kit + bomb, as real images.
 function loadoutIcons(p, h){
   const util = document.createElement('div'); util.className = 'putil';
-  (p.nades || []).forEach(n => util.appendChild(weaponImg(nadeSvg(n), h, 'nade')));
+  nadeImgs(p, h, util);
   if (p.hasKit)  util.appendChild(utilImg('shield', h, 'kit'));
   if (p.hasBomb) util.appendChild(utilImg('bomb_c4', h, 'bomb'));
   return util;
@@ -1560,11 +1528,11 @@ function renderFocus(o){
   r.moneyN.textContent = '$' + o.money;
 
   // Loadout: rebuild weapon/grenade images only when they change; ammo text updates each tick.
-  const loadSig = `${o.weapon}|${(o.nades||[]).join(',')}|${o.hasKit?1:0}|${o.hasBomb?1:0}`;
+  const loadSig = `${o.weapon}|${(o.nades||[]).join(',')}|${o.activeNade||''}|${o.hasKit?1:0}|${o.hasBomb?1:0}`;
   if (r.lastLoad !== loadSig){
     r.lastLoad = loadSig;
     r.fload.innerHTML = '';
-    if (o.weapon) r.fload.appendChild(weaponImg(o.weapon, 24));
+    if (o.weapon) r.fload.appendChild(weaponImg(o.weapon, 24, '', o.team));
     const ammo = document.createElement('span'); ammo.className = 'fammo'; r.fload.appendChild(ammo); r.ammoEl = ammo;
     const util = loadoutIcons(o, 16);
     if (util.childNodes.length) r.fload.appendChild(util);
@@ -1577,35 +1545,41 @@ function renderFocus(o){
 
 const BOMB_TIME = 40; // CS2 C4 detonation time (seconds) — drives the drain bar
 
-// ── Radar: world→image calibration per map (radar PNG is 1024×1024).
-//    Exact CS2 overview pos_x / pos_y / scale, from the .txt files that ship
-//    with the radar images (github.com/2mlml/cs2-radar-images). ──
-const RADAR_CAL = {
-  de_dust2:    { x: -2476, y: 3239, scale: 4.4 },
-  de_mirage:   { x: -3230, y: 1713, scale: 5.0 },
-  de_inferno:  { x: -2087, y: 3870, scale: 4.9 },
-  de_nuke:     { x: -3453, y: 2887, scale: 7.0 },
-  de_overpass: { x: -4831, y: 1781, scale: 5.2 },
-  de_vertigo:  { x: -3168, y: 1762, scale: 4.0 },
-  de_ancient:  { x: -2953, y: 2164, scale: 5.0 },
-  de_anubis:   { x: -2796, y: 3328, scale: 5.22 },
-  de_train:    { x: -2308, y: 2078, scale: 4.082077 }
+// Radar data per map, generated from CS2's own resource/overviews/*.txt (read out of pak01_dir.vpk):
+// pos_x/pos_y/scale calibration, the height band the radar image shows (`level`: [min, max], null =
+// unbounded) and the official bombsite label positions (`sites.*.l/t`, % of the 1024px image). World
+// site centres (`w`) come from drweissbrot/cs-hud's bombsites.json; Basalt, Edin, Palais and Whistle
+// calibration from its radars.json (see assets/csgo/maps/LICENSE-cs-hud.txt).
+// Train is the exception to the overview's levels: its file says the image covers z >= -50, but both
+// bombsites sit below that (-160 / -303) on the floor the image actually shows, so the band is
+// inverted here (drweissbrot/cs-hud inverts it the same way).
+const CS_MAPS = {
+  de_ancient:  { x: -2953, y: 2164, scale: 5, level: null, sites: { A: { l: 31, t: 25, w: [-1406, 862, 68] }, B: { l: 80, t: 40, w: [797, 62, 144] } } },
+  de_anubis:   { x: -2796, y: 3328, scale: 5.22, level: null, sites: { A: { l: 75.5, t: 25.6, w: [1238, 1960, -192.5] }, B: { l: 32.8, t: 49.3, w: [-1044, 692, -4] } } },
+  de_dust2:    { x: -2476, y: 3239, scale: 4.4, level: null, sites: { A: { l: 80, t: 16, w: [1112, 2480, 144] }, B: { l: 21, t: 12, w: [-1536, 2680, 48] } } },
+  de_inferno:  { x: -2087, y: 3870, scale: 4.9, level: null, sites: { A: { l: 81, t: 69, w: [1976, 434, 180] }, B: { l: 49, t: 22, w: [368, 2776, 192] } } },
+  de_mirage:   { x: -3230, y: 1713, scale: 5, level: null, sites: { A: { l: 54, t: 76, w: [-440, -2168, -168] }, B: { l: 23, t: 28, w: [-2048, 256, -151] } } },
+  de_nuke:     { x: -3453, y: 2887, scale: 7, level: [-495, null], sites: { A: { l: 58, t: 48, w: [688.5, -719, -367.5] }, B: { l: 58, t: 58, w: [592, -1008, -748] } } },
+  de_overpass: { x: -4831, y: 1781, scale: 5.2, level: null, sites: { A: { l: 55, t: 23, w: [-2136, 662, 502] }, B: { l: 70, t: 31, w: [-1104, 64, 104] } } },
+  de_train:    { x: -2308, y: 2078, scale: 4.08208, level: [null, -50], sites: { A: { l: 63, t: 49, w: [568, -17.5, -160.5] }, B: { l: 52, t: 76, w: [52, -1279, -303] } } },
+  de_vertigo:  { x: -3168, y: 1762, scale: 4, level: [11700, null], sites: { A: { l: 70.5, t: 58.5, w: [-293.5, -621, 11791.5] }, B: { l: 22.2, t: 22.3, w: [-2248, 797.5, 11758] } } },
+  de_basalt:   { x: -2345.6, y: 2391.8, scale: 4.37, level: null, sites: {  } },
+  de_edin:     { x: -383.3, y: 4420.21, scale: 4.80372, level: null, sites: {  } },
+  de_palais:   { x: -1353.24, y: 2044.81, scale: 2.80034, level: [null, 48], sites: {  } },
+  de_whistle:  { x: -1825.6, y: 1104.82, scale: 2.8, level: null, sites: {  } },
+  de_cache:    { x: -2000, y: 3250, scale: 5.5, level: null, sites: { A: { l: 32.5, t: 26, w: [-239.5, 1754.5, 1703.5] }, B: { l: 34.5, t: 79, w: [-46.5, -1260, 1677] } } },
+  cs_office:   { x: -1838, y: 1858, scale: 4.1, level: null, sites: {  } },
+  cs_italy:    { x: -2647, y: 2592, scale: 4.6, level: null, sites: {  } }
 };
 
-// Bombsite label positions in radar-image space (left%, top%). Read off the radar
-// PNGs — approximate; nudge per map if a letter sits off its site.
-const SITE_POS = {
-  de_dust2:    { A: { l: 80, t: 16 }, B: { l: 18, t: 13 } },
-  de_mirage:   { A: { l: 23, t: 28 }, B: { l: 52, t: 77 } },
-  de_inferno:  { A: { l: 48, t: 22 }, B: { l: 82, t: 67 } },
-  de_nuke:     { A: { l: 58, t: 50 }, B: { l: 55, t: 62 } },
-  de_overpass: { A: { l: 42, t: 20 }, B: { l: 36, t: 52 } },
-  de_vertigo:  { A: { l: 21, t: 25 }, B: { l: 70, t: 59 } },
-  de_ancient:  { A: { l: 28, t: 27 }, B: { l: 75, t: 42 } },
-  de_anubis:   { A: { l: 76, t: 26 }, B: { l: 33, t: 49 } },
-  de_train:    { A: { l: 50, t: 40 }, B: { l: 52, t: 78 } }
-};
 
+// Multi-level maps: a position outside the height band the radar image shows is on another floor.
+function levelClass(pos, cal){
+  const lv = cal && cal.level; if (!lv || !pos || pos.z == null) return '';
+  if (lv[0] != null && pos.z < lv[0]) return ' lvl-below';
+  if (lv[1] != null && pos.z >= lv[1]) return ' lvl-above';
+  return '';
+}
 function imgCoord(pos, cal){            // world → radar image space (0..1024)
   return { x: (pos.x - cal.x) / cal.scale, y: (cal.y - pos.y) / cal.scale };
 }
@@ -1621,6 +1595,7 @@ function radarViewportTarget(players, bomb, cal){
   return { x0: 0, y0: 0, size: 1024 };
 }
 
+const grenReg = new Map();   // radar grenade markers by key (see renderRadar)
 const dotReg = new Map(); // steamid (or '__bomb__') -> dot element
 
 function renderRadar(cs){
@@ -1628,7 +1603,7 @@ function renderRadar(cs){
   // Built-in radar off → boltobserv (or another external radar source) owns the top-left.
   if (!builtinRadar){ box.classList.add('hidden'); return; }
   const all = cs.players || [];
-  const cal = RADAR_CAL[cs.map && cs.map.name];
+  const cal = CS_MAPS[cs.map && cs.map.name];
   // Show the map whenever we know which map it is. Player dots need observer/spectator
   // GSI (positions) — but the map + A/B labels render regardless so it's never blank.
   if (!cal){ box.classList.add('hidden'); return; }
@@ -1643,7 +1618,7 @@ function renderRadar(cs){
     img.src = '/assets/csgo/maps/' + cs.map.name + '.png';
 
     const sites = el('radar-sites'); sites.innerHTML = '';
-    const sp = SITE_POS[cs.map.name];
+    const sp = cal.sites;
     if (sp) ['A', 'B'].forEach(k => {
       if (!sp[k]) return;
       const s = document.createElement('div'); s.className = 'rsite'; s.textContent = k;
@@ -1662,15 +1637,24 @@ function renderRadar(cs){
   world.style.transform = `scale(${k.toFixed(4)}) translate(${(-radarVP.x0 / 1024 * 100).toFixed(3)}%, ${(-radarVP.y0 / 1024 * 100).toFixed(3)}%)`;
   world.style.setProperty('--rk', (radarVP.size / 1024).toFixed(4));   // counter-scale point markers
 
-  // Grenades / smokes / molotovs — transient, rebuilt each tick (scale with the world).
-  const fx = el('radar-fx'); fx.innerHTML = '';
+  // Grenades / smokes / molotovs, reconciled by key rather than rebuilt. Rebuilding every 100ms tick
+  // re-created each marker and restarted its styling: the radar's constant flicker. Key = the GSI
+  // grenade id; a server from before ids were sent falls back to type + ordinal.
+  const fx = el('radar-fx');
+  const liveGren = new Set(), perType = {};
   (cs.grenades || []).forEach(g => {
     if (!g || g.x == null) return;
+    const type = g.type || '';
+    const key = g.id != null ? 'id:' + g.id : type + '#' + (perType[type] = (perType[type] || 0) + 1);
+    liveGren.add(key);
+    let d = grenReg.get(key);
+    if (!d){ d = document.createElement('div'); grenReg.set(key, d); fx.appendChild(d); }
+    const cls = 'gren ' + type;
+    if (d.className !== cls) d.className = cls;
     const c = worldToPct({ x: g.x, y: g.y }, cal);
-    const d = document.createElement('div'); d.className = 'gren ' + (g.type || '');
     d.style.left = c.left + '%'; d.style.top = c.top + '%';
-    fx.appendChild(d);
   });
+  for (const [key, d] of grenReg){ if (!liveGren.has(key)){ d.remove(); grenReg.delete(key); } }
 
   const layer = el('radar-dots');
   const activeId = (cs.observed && cs.observed.steamid) || '';
@@ -1697,7 +1681,8 @@ function renderRadar(cs){
       + (!p.alive ? ' dead' : '')
       + (p.alive && p.hasBomb ? ' carry' : '')               // bomb carrier ring
       + (p.alive && isFiring(p.steamid) ? ' firing' : '')    // fast pulse while shooting
-      + (low ? ' low' : '');                                  // low-HP ring
+      + (low ? ' low' : '')                                   // low-HP ring
+      + levelClass(p.pos, cal);                               // other floor (hollow + arrow)
     const c = worldToPct(p.pos, cal);
     d.style.left = c.left + '%'; d.style.top = c.top + '%';
     // Facing arrow from the view/forward vector (world→screen has Y flipped). Hidden when dead.
@@ -1712,7 +1697,7 @@ function renderRadar(cs){
   if (cs.bomb && cs.bomb.pos){
     let b = dotReg.get('__bomb__');
     if (!b){ b = document.createElement('div'); dotReg.set('__bomb__', b); layer.appendChild(b); }
-    b.className = 'rbomb'; b.textContent = 'C4';
+    b.className = 'rbomb' + levelClass(cs.bomb.pos, cal); b.textContent = 'C4';
     const c = worldToPct(cs.bomb.pos, cal);
     b.style.left = c.left + '%'; b.style.top = c.top + '%';
     seen.add('__bomb__');
@@ -1731,7 +1716,7 @@ function buildKillRow(k){
     ks.textContent = k.killer; row.appendChild(ks);
   }
   const wpn = document.createElement('span'); wpn.className = 'kf-wpn';
-  if (k.killer && k.weapon){ wpn.appendChild(weaponImg(k.weapon, 18)); }
+  if (k.killer && k.weapon){ wpn.appendChild(weaponImg(k.weapon, 18, '', k.killerTeam)); }
   else { wpn.classList.add('kf-skull'); wpn.innerHTML = DEATH_SVG; }   // world / suicide
   row.appendChild(wpn);
   if (k.hs){ const hs = document.createElement('span'); hs.className = 'kf-hs'; row.appendChild(hs); }
@@ -1764,13 +1749,14 @@ function buyCell(p){
   const equip = p.equip ? ('≈$' + (p.equip || 0).toLocaleString()) : '';
   // util column: grenades + kit + bomb
   let util = '';
-  if (!dead) (p.nades || []).forEach(n => { util += `<img src="/assets/weapons/${nadeSvg(n)}.svg" alt="">`; });
+  if (!dead) (p.nades || []).forEach(n => { util += weaponImgHtml(nadeSvg(n), p.team, '', 19); });
   if (!dead && p.hasKit)  util += `<img src="/assets/csgo/shield.svg" alt="">`;
   if (!dead && p.hasBomb) util += `<img src="/assets/csgo/bomb_c4.svg" alt="">`;
   // gear column: armor + weapon (weapon sits in a fixed-width slot for row alignment)
   const armor = (!dead && (p.helmet || (p.armor || 0) > 0))
     ? `<img class="cb-armor" src="/assets/csgo/${p.helmet ? 'armor_helmet' : 'armor'}.svg" alt="">` : '';
-  const weap = (!dead && p.weapon) ? `<img class="cb-weap" src="/assets/weapons/${p.weapon}.svg" alt="">` : '<span class="cb-weap"></span>';
+  const owned = shownWeapon(p).name;
+  const weap = (!dead && owned) ? weaponImgHtml(owned, p.team, 'cb-weap', 22) : '<span class="cb-weap"></span>';
   const kda = `<span class="k">${p.kills||0}</span>/<span class="d">${p.deaths||0}</span>/${p.assists||0}`;
   return `<div class="cb-cell ${side}">
     <div class="cb-money"><span class="cb-cash">${money}</span><span class="cb-equip">${equip}</span></div>
@@ -1785,7 +1771,7 @@ function renderBuyPhase(cs){
   const ct = all.filter(p => p.team === 'CT');
   const t  = all.filter(p => p.team === 'T');
   // Rebuild only when buy-relevant data changes (players keep buying through freezetime).
-  const sig = JSON.stringify(all.map(p => [p.steamid, p.money, p.equip, p.weapon, p.hasKit, p.hasBomb, p.helmet, p.armor, (p.nades||[]).join(','), p.kills, p.deaths, p.assists, p.alive])
+  const sig = JSON.stringify(all.map(p => [p.steamid, p.money, p.equip, shownWeapon(p).name, p.hasKit, p.hasBomb, p.helmet, p.armor, (p.nades||[]).join(','), p.kills, p.deaths, p.assists, p.alive])
     .concat([cs.ct.score, cs.t.score, cs.round.number, appTeams.blue.name, appTeams.orange.name,
       (appTeams.blue.logo || '').slice(20, 44), (appTeams.orange.logo || '').slice(20, 44)]));
   if (sig === _buySig) return;
@@ -1826,21 +1812,17 @@ function renderBuyPhase(cs){
 
 // Live "X VS X" — flashes up for ~2.5s whenever a player dies, then hides. No bars.
 let prevTotalAlive = null;
-let aliveHideTimer = null;
 function renderAlive(players){
   const list = players || [];
-  const box = el('cs-alive');
   const ctAlive = list.filter(p => p.team === 'CT' && p.alive).length;
   const tAlive  = list.filter(p => p.team === 'T'  && p.alive).length;
-  el('alive-ct').textContent = ctAlive;
-  el('alive-t').textContent  = tAlive;
+  setText(el('alive-ct'), ctAlive);
+  setText(el('alive-t'), tAlive);
+  // Stays up through the round, as in JT's and Lexogrine's HUDs. It used to pop in on each death
+  // and vanish 2.5s later, which read as one more thing flashing. A death still bumps the numbers.
+  el('cs-alive').classList.toggle('hidden', !list.length);
   const total = ctAlive + tAlive;
-  if (prevTotalAlive !== null && list.length && total < prevTotalAlive){   // a death happened
-    box.classList.remove('hidden');
-    bump('alive-ct'); bump('alive-t');
-    if (aliveHideTimer) clearTimeout(aliveHideTimer);
-    aliveHideTimer = setTimeout(() => box.classList.add('hidden'), 2500);
-  }
+  if (prevTotalAlive !== null && list.length && total < prevTotalAlive){ bump('alive-ct'); bump('alive-t'); }
   prevTotalAlive = list.length ? total : null;
 }
 
@@ -1865,20 +1847,12 @@ function renderCallouts(cs, live){
   const hist = cs.roundHistory || [];
   const roundEnd = (prevHistLen >= 0 && hist.length > prevHistLen) ? hist[hist.length - 1] : null;
   prevHistLen = hist.length;
-  if (roundEnd){
-    const w = roundEnd.winner === 'CT' ? 'ct' : 't';
-    const m = METHOD_WORD[roundEnd.method] || '';
-    showAnnounce(`<span class="an-win ${w}">${roundEnd.winner} WIN</span>` +
-      (m ? `<span class="an-sep">·</span><span class="an-method">${m}</span>` : ''), 4200);
-  }
+  if (roundEnd) openRoundWinner(roundEnd);   // shown as a panel under the winning team
 
   // Phase banner (halftime / timeout only). Warmup shows under the timer (round label), not centre-screen.
-  const ph = cs.phase || '';
-  const ptext = ph === 'intermission' ? 'HALFTIME'
-    : ph.indexOf('timeout') === 0 ? 'TACTICAL TIMEOUT'
-    : '';
+  // Halftime keeps the centre card; timeouts and pauses are shown in the top bar.
   const pe = el('cs-phase');
-  if (ptext){ pe.textContent = ptext; pe.classList.remove('hidden'); }
+  if ((cs.phase || '') === 'intermission'){ setText(pe, 'HALFTIME'); pe.classList.remove('hidden'); }
   else pe.classList.add('hidden');
 }
 
@@ -1956,6 +1930,142 @@ function applyBrand(){
   }
 }
 
+// ── Top bar state ──────────────────────────────────────────────────────────
+// MR12 with MR3 overtimes: 24 regulation rounds, overtimes of 6, first to 13 / 16 / 19 ...
+const MR_REG = 24, MR_OT = 6, TIMEOUT_TIME = 30;
+function roundInfo(cs){
+  const n = (cs.round && cs.round.number) || ((cs.ct.score || 0) + (cs.t.score || 0) + 1);
+  const ot = n > MR_REG ? Math.floor((n - MR_REG - 1) / MR_OT) + 1 : 0;
+  return {
+    ot,
+    label: ot ? `OT ${ot} · ROUND ${(n - MR_REG - 1) % MR_OT + 1} / ${MR_OT}` : `ROUND ${Math.min(n, MR_REG)} / ${MR_REG}`,
+    target: ot ? 13 + 3 * ot : 13
+  };
+}
+// Which site the bomb is on: nearest site centre in world space (height included, which is what
+// separates Nuke's A from the B site directly below it).
+function bombSite(cs){
+  const cal = CS_MAPS[cs.map && cs.map.name]; const b = cs.bomb && cs.bomb.pos;
+  if (!cal || !b) return '';
+  let best = '', bestD = Infinity;
+  Object.keys(cal.sites || {}).forEach(k => {
+    const w = cal.sites[k].w;
+    const dz = (b.z != null && w[2] != null) ? b.z - w[2] : 0;
+    const d = Math.hypot(b.x - w[0], b.y - w[1], dz);
+    if (d < bestD){ bestD = d; best = k; }
+  });
+  return best;
+}
+// Panels are built once per team and only toggled / re-texted per tick.
+const PANEL_KINDS = ['plant', 'bomb', 'defuse', 'timeout', 'winner', 'match'];
+let tbPanels = null;
+function buildTopPanels(){
+  tbPanels = {};
+  ['ct', 't'].forEach(side => {
+    const host = el('panels-' + side); host.innerHTML = '';
+    tbPanels[side] = {};
+    PANEL_KINDS.forEach(kind => {
+      const p = document.createElement('div'); p.className = 'tp tp-' + kind;
+      const inner = document.createElement('div'); inner.className = 'tp-inner';
+      const label = document.createElement('span'); label.className = 'tp-label';
+      const value = document.createElement('span'); value.className = 'tp-value';
+      const bar = document.createElement('div'); bar.className = 'tp-bar';
+      const fill = document.createElement('div'); fill.className = 'tp-fill';
+      inner.appendChild(label); inner.appendChild(value); bar.appendChild(fill);
+      p.appendChild(inner); p.appendChild(bar); host.appendChild(p);
+      tbPanels[side][kind] = { p, label, value, fill };
+    });
+  });
+}
+function setPanel(side, kind, on, label, value, frac){
+  const x = tbPanels[side][kind];
+  x.p.classList.toggle('open', !!on);
+  if (!on) return;
+  setText(x.label, label || '');
+  setText(x.value, value || '');
+  x.p.classList.toggle('has-bar', frac != null);
+  if (frac != null) x.fill.style.width = (Math.max(0, Math.min(1, frac)) * 100).toFixed(1) + '%';
+}
+let winnerShow = null;   // { side, text, until } — set when a round result lands (renderCallouts)
+function openRoundWinner(r){
+  winnerShow = { side: r.winner === 'CT' ? 'ct' : 't', text: METHOD_WORD[r.method] || '', until: nowMs() + 5000 };
+}
+let bombClock = null;    // last detonation countdown seen while planted: { remain, at } — GSI's countdown means the defuse time once a defuse starts
+
+function renderTopBar(cs, live){
+  if (!tbPanels) buildTopPanels();
+  setTeamPanel('ct', appTeams.blue, cs.ct.score);
+  setTeamPanel('t',  appTeams.orange, cs.t.score);
+  if (prevScore.ct !== undefined && prevScore.ct !== cs.ct.score) bump('ct-score');
+  if (prevScore.t  !== undefined && prevScore.t  !== cs.t.score)  bump('t-score');
+  prevScore.ct = cs.ct.score; prevScore.t = cs.t.score;
+
+  const ri = roundInfo(cs);
+  const phase = cs.phase || (cs.round && cs.round.phase) || '';
+  const warmup = (cs.map && cs.map.phase) === 'warmup';
+  const bombState = (cs.bomb && cs.bomb.state) || '';
+  handleBombResult(bombState);   // detonated / defused one-shot on the state change
+  const defusing = bombState === 'defusing';
+  const planted = bombState === 'planted' || defusing;
+  const site = planted ? bombSite(cs) : '';
+  const actor = (cs.players || []).find(p => p.steamid === (cs.bomb && cs.bomb.player));
+
+  // Centre
+  const mid = el('cs-mid');
+  mid.classList.toggle('planted', planted && !defusing);
+  mid.classList.toggle('defusing', defusing);
+  const clockEl = el('cs-timer');
+  const secs = cs.phaseEndsIn;
+  setText(clockEl, phase === 'paused' ? 'PAUSED' : warmup ? 'WARMUP' : fmtClock(secs));
+  clockEl.classList.toggle('word', phase === 'paused' || warmup);
+  clockEl.classList.toggle('red', !planted && phase === 'live' && secs != null && secs <= 10);
+  setText(el('tb-site'), site);
+  el('tb-site').classList.toggle('hidden', !site);
+  setText(el('cs-round'), planted ? (defusing ? 'DEFUSING' : 'BOMB PLANTED') : (warmup ? '' : ri.label));
+
+  // T side: planting, then the detonation countdown
+  if (bombState === 'planting'){
+    if (plantStart === null) plantStart = nowMs();
+    setPanel('t', 'plant', true, 'PLANTING', (actor && actor.name) || '', (nowMs() - plantStart) / (PLANT_TIME * 1000));
+  } else { plantStart = null; setPanel('t', 'plant', false); }
+  if (planted){
+    const gsi = Number(cs.bomb.countdown);
+    if (!defusing && !isNaN(gsi)) bombClock = { remain: gsi, at: nowMs() };
+    const remain = bombClock ? Math.max(0, bombClock.remain - (defusing ? (nowMs() - bombClock.at) / 1000 : 0)) : NaN;
+    setPanel('t', 'bomb', true, site ? 'BOMB · SITE ' + site : 'BOMB PLANTED',
+      isNaN(remain) ? '' : remain.toFixed(1), isNaN(remain) ? null : remain / BOMB_TIME);
+    tbPanels.t.bomb.p.classList.toggle('danger', !isNaN(remain) && remain <= 10);
+  } else { bombClock = null; setPanel('t', 'bomb', false); }
+
+  // CT side: the defuse, kit-aware
+  if (defusing){
+    if (defuseStart === null) defuseStart = nowMs();
+    const kit = !!(actor && actor.hasKit);
+    const dur = kit ? 5 : DEFUSE_TIME;
+    const left = Math.max(0, dur - (nowMs() - defuseStart) / 1000);
+    setPanel('ct', 'defuse', true, kit ? 'DEFUSING · KIT' : 'DEFUSING',
+      ((actor && actor.name) ? actor.name + '  ' : '') + left.toFixed(1), 1 - left / dur);
+  } else { defuseStart = null; setPanel('ct', 'defuse', false); }
+
+  // Timeout under the team that called it, with what they have left
+  ['ct', 't'].forEach(side => {
+    const on = phase === 'timeout_' + side;
+    const left = side === 'ct' ? cs.ct.timeouts : cs.t.timeouts;
+    setPanel(side, 'timeout', on, 'TACTICAL TIMEOUT',
+      on ? fmtClock(secs) + (left != null ? '  ·  ' + left + ' LEFT' : '') : '',
+      on && secs != null ? secs / TIMEOUT_TIME : null);
+  });
+
+  // Round winner (5s after the result lands) and match point (freezetime)
+  if (winnerShow && nowMs() > winnerShow.until) winnerShow = null;
+  const freeze = phase === 'freezetime';
+  [['ct', cs.ct.score || 0, cs.t.score || 0], ['t', cs.t.score || 0, cs.ct.score || 0]].forEach(([side, mine, theirs]) => {
+    const won = !!winnerShow && winnerShow.side === side;
+    setPanel(side, 'winner', won, 'WINS THE ROUND', won ? winnerShow.text : '');
+    setPanel(side, 'match', live && freeze && mine === ri.target - 1 && theirs < ri.target - 1, 'MATCH POINT', '');
+  });
+}
+
 function render(cs){
   const live = !!(cs && cs.connected);
   cs = live ? cs : DEMO;
@@ -1968,84 +2078,14 @@ function render(cs){
 
   renderVetoStrip(cs);   // sets vetoStripOn — the strip already carries the series format
   const mapTxt = mapLabel(cs.map && cs.map.name);
-  el('cs-map').innerHTML = (mapTxt || '') +
+  const mapHtml = (mapTxt || '') +
     ((bestOf && !vetoStripOn) ? `${mapTxt ? '  ·  ' : ''}<span class="bo">BEST OF ${bestOf}</span>` : '');
+  const mapEl = el('cs-map');
+  if (mapEl.dataset.html !== mapHtml){ mapEl.dataset.html = mapHtml; mapEl.innerHTML = mapHtml; }   // only touch the DOM on change
+  el('tb-sub').classList.toggle('hidden', !mapHtml);
   renderSeries();
 
-  setTeamPanel('ct', appTeams.blue, cs.ct.score);
-  setTeamPanel('t',  appTeams.orange, cs.t.score);
-  if (prevScore.ct !== undefined && prevScore.ct !== cs.ct.score) bump('ct-score');
-  if (prevScore.t  !== undefined && prevScore.t  !== cs.t.score)  bump('t-score');
-  prevScore.ct = cs.ct.score; prevScore.t = cs.t.score;
-
-  // Overtime: CS2 is MR12 (first to 13); 12–12 → OT, each OT is MR3 (+4 to win, tie at +3 → next OT).
-  const REG_WIN = 12;
-  const inOT = cs.ct.score >= REG_WIN && cs.t.score >= REG_WIN;
-  const otNum = inOT ? Math.floor((Math.min(cs.ct.score, cs.t.score) - REG_WIN) / 3) + 1 : 0;
-  const otName = otLabel(otNum);
-
-  const bombState = (cs.bomb && cs.bomb.state) || '';
-  handleBombResult(bombState);   // fire explosion / defuse banner on state transition
-  renderBombAct(cs, bombState);  // "NAME IS PLANTING / DEFUSING" caption under the head
-  const defusing = bombState === 'defusing';
-  const bombActive = bombState === 'planted' || defusing;
-  const timerEl = el('cs-timer');
-  const bombvis = el('cs-bombvis');
-  const roundEl = el('cs-round');
-  const midEl = el('cs-mid');
-  if (bombActive) {
-    bombvis.classList.add('show');
-    const remain = Number(cs.bomb.countdown);
-    const danger = !defusing && !isNaN(remain) && remain <= 10;
-    timerEl.classList.remove('hidden');
-    timerEl.classList.add('bomb');
-    // No central bar in either state — the countdown lives in the big number + team fuses.
-    bombvis.classList.add('nobar');
-    bombvis.classList.toggle('danger', danger);
-    bombvis.classList.toggle('defusing', defusing);
-    midEl.classList.toggle('planted-glow', !defusing);
-    midEl.classList.toggle('defusing-glow', defusing);
-    roundEl.classList.remove('ot');
-    if (defusing) {
-      // Defuse mirrors the plant layout: cutters icon + big GREEN number = defuse time left.
-      stopCornerPulse();                     // no red pulse during a defuse
-      if (defuseStart === null) defuseStart = nowMs();
-      const defuser = (cs.players || []).find(p => p.steamid === (cs.bomb && cs.bomb.player));
-      const dur = (defuser && defuser.hasKit) ? 5 : DEFUSE_TIME;
-      const elapsed = (nowMs() - defuseStart) / 1000;
-      const defLeft = Math.max(0, dur - elapsed);
-      // Eased: grows quickly, then slows toward completion
-      const fuseW = easeOutCubic(elapsed / dur) * 100;
-      setFuse(fuseW, 'defuse', false);       // green bars grow toward centre as defuse completes
-      timerEl.classList.add('def');
-      timerEl.textContent = defLeft.toFixed(1);
-      roundEl.textContent = 'DEFUSING';
-      roundEl.classList.add('defusing'); roundEl.classList.remove('planted');
-    } else {
-      defuseStart = null;
-      // Eased: drains fast early, then crawls in the last seconds before detonation
-      const elapsedFrac = isNaN(remain) ? 0 : (BOMB_TIME - remain) / BOMB_TIME;
-      const fuseW = (1 - easeOutCubic(elapsedFrac)) * 100;
-      setFuse(fuseW, 'planted', danger);     // red bars drain toward centre (time to explosion)
-      timerEl.classList.remove('def');
-      timerEl.textContent = isNaN(remain) ? '--' : Math.max(0, remain).toFixed(1);
-      roundEl.textContent = 'BOMB PLANTED';
-      roundEl.classList.add('planted'); roundEl.classList.remove('defusing');
-    }
-  } else {
-    timerEl.classList.remove('hidden', 'bomb', 'def');
-    bombvis.classList.remove('show', 'danger', 'defusing', 'nobar');
-    midEl.classList.remove('planted-glow', 'defusing-glow');
-    timerEl.textContent = fmtClock(cs.phaseEndsIn);
-    defuseStart = null;
-    el('bomb-defuse-fill').style.width = '0%';
-    setFuse(0, 'off');   // hide the team fuses when no bomb is down
-    const phase = (cs.round.phase || cs.phase || '').toUpperCase();
-    roundEl.textContent = inOT ? otName
-      : (cs.round.number ? `ROUND ${cs.round.number}${phase ? ' · ' + phase : ''}` : (phase || 'WARMUP'));
-    roundEl.classList.remove('planted', 'defusing');
-    roundEl.classList.toggle('ot', inOT);
-  }
+  renderTopBar(cs, live);
 
   renderRoundDots(cs.roundHistory);
   el('round-dots').classList.toggle('show', showHistory && (cs.roundHistory || []).length > 0);
@@ -2153,7 +2193,7 @@ function devReset(){
 }
 // Plant the bomb, drain the timer, then detonate — exercises the real render path.
 function devPlant(){
-  devStop(); prevBombState = 'carried'; defuseStart = null;   // ≠ 'planted' so the plant pulse fires
+  devStop(); prevBombState = 'carried'; defuseStart = null;
   const s = devBase(); s.round = Object.assign({}, s.round, { bomb: 'planted' });
   let t = 40; s.bomb = { state: 'planted', countdown: t, pos: s.bomb && s.bomb.pos, player: '' };
   devState = s; render(s);
@@ -2242,7 +2282,9 @@ function devAction(a){
 }
 (function initDevPanel(){
   // OBS browser sources expose window.obsstudio — keep the tester out of the broadcast.
-  if (window.obsstudio) return;
+  // Also never inside another page (live.html embeds this in an iframe): there the tester covered
+  // the CT column on the broadcast, since obsstudio can't be relied on to reach an embedded frame.
+  if (window.obsstudio || window.self !== window.top) return;
   const panel = el('dev-panel'), fab = el('dev-fab');
   if (!panel || !fab) return;
   panel.classList.add('open');

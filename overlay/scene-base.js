@@ -433,13 +433,24 @@
         ("RIP TWO-EM, YOU WILL BE MISSED") where the broadcast needs the competitor. Returns
         { name, sub } for those games — the gamertag, with their org/team for the second line — and
         null for squad games so every other scene keeps its team name untouched.
-        Smash runs both ways: a crew battle IS a team event, so only mode 'singles' collapses. */
+        Smash runs three ways: a crew battle IS a team event (null), doubles prints the PAIR, and
+        singles collapses to the one player. */
     soloIdentity(data, side, team) {
       const g = data && data.games && data.activeGame && data.games[data.activeGame];
       if (!g || g.format !== '1v1' || (Number(g.rosterSize) || 1) > 1) return null;
       if (data.activeGame === 'smash' && data.smash && data.smash.mode === 'team') return null;
       const str = (v) => (v == null ? '' : String(v)).trim();
       const roster = (team && Array.isArray(team.players)) ? team.players : [];
+      // Smash DOUBLES: the competitors are the PAIR - print both tags ("DDOG / PIGGY"), with the
+      // team's own name on the second line when it is a real name rather than the two tags again.
+      if (data.activeGame === 'smash' && data.smash && data.smash.mode === 'doubles') {
+        const tags = roster.slice(0, 2).map((x) => str(x && (x.gamertag || x.name))).filter(Boolean);
+        if (tags.length < 2) return null;   // only one player known - fall back to the team name
+        const name = tags.join(' / ');
+        const tn = str(team && team.name);
+        const same = tn.toLowerCase().replace(/[^a-z0-9]/g, '') === tags.join('').toLowerCase().replace(/[^a-z0-9]/g, '');
+        return { name, sub: same ? '' : tn };
+      }
       const activeId = (data.activePlayer && data.activePlayer[side]) || '';
       // activePlayer picks the competitor within a multi-entrant record; a stale id falls to the first.
       let p = activeId ? roster.find((x) => x && String(x.id) === String(activeId)) : null;

@@ -6,7 +6,7 @@
 
    Loads AFTER leagues.js and reuses its domain (lgActive/lgSave/lgRender/lgUid/lgStatus/
    lgResolveTeam/lgStandingsRow/lgApplyScoring/lgMatchTally/lgNewLeague/lgLeagues), plus
-   csvParse() from seeding-spotlight.js and anDownload()/toCSV() from stats-analytics.js. */
+   csvParse() from spotlight.js and anDownload()/toCSV() from stats-analytics.js. */
 
 // ── Name matching ────────────────────────────────────────────────────────────
 // Systems differ on case, punctuation, spacing and the decorative suffixes orgs tack on, so

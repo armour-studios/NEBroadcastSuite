@@ -481,7 +481,15 @@ function upsertFromLibrary(team, opts = {}) {
   _rename(rec, team.name);
   rec.pins.name = true;
 
-  if (team.logo  !== undefined && team.logo)  { _setLogo(rec, team.logo, { source: opts.source || 'library' }); rec.pins.logo = true; }
+  // A REMOVED logo has to reach the vault too. This only ever wrote a truthy logo, so clearing a
+  // crest in the team editor updated the library and left the vault holding the old one, still
+  // pinned - and the next event import handed it straight back (mergeEntrantsIntoLibrary prefers
+  // the vault crest over the library row). The producer deleted the same logo over and over.
+  // Guarded by an explicit opts.clearLogo rather than "falsy logo": most callers pass whatever the
+  // library row happens to hold, and a save that simply has no logo must not wipe the vault's.
+  // Unpinning is deliberate - "I have no crest of my own" means start.gg's may fill the gap again.
+  if (opts.clearLogo && !team.logo) { _setLogo(rec, null, { source: opts.source || 'library' }); rec.pins.logo = false; }
+  else if (team.logo !== undefined && team.logo) { _setLogo(rec, team.logo, { source: opts.source || 'library' }); rec.pins.logo = true; }
   if (team.color !== undefined && team.color) { rec.color = team.color; rec.pins.color = true; }
   if (team.abbr  !== undefined && team.abbr)  { rec.abbr  = team.abbr;  rec.pins.abbr  = true; }
   if (typeof team.favorite === 'boolean') rec.favorite = team.favorite;

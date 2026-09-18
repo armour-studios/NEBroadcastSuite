@@ -38,7 +38,8 @@
   Params honoured off the scene's own URL:  ?rail=0  ?casters=0  ?sponsors=0  ?anim=0
                                             ?railrotate=8 (sponsor page seconds)
                                             ?railmode=static|cycle (overrides the kit's sponsorMode)
-                                            ?railpos=topleft|bottom (overrides the producer's pick)
+                                            ?railpos=topleft|bottom|bottomleft|bottomright
+                                              (overrides the producer's pick)
   Sponsor pool follows the kit's placement tags STRICTLY: rail-tagged sponsors win, then
   desk-tagged, and nothing else - no untagged fallback, so clearing a sponsor's placements in the
   brand kit actually takes it off the rail.
@@ -92,6 +93,10 @@
     '                          to   { opacity: 1; transform: translateY(0); } }',
     '.crail--br { left: auto; right: var(--crail-right, 44px); transform: none; }',
     '.crail--br.show { animation: crail-rise-r .45s cubic-bezier(.2, .8, .3, 1) .62s both; }',
+    '/* BOTTOM-LEFT: the mirror of --br, pinned by its LEFT edge so it grows rightward. For scenes',
+    '   whose game HUD owns the bottom-centre (Marvel Tokon), picked per show via posFrom. */',
+    '.crail--bl { left: var(--crail-left-edge, 44px); right: auto; transform: none; }',
+    '.crail--bl.show { animation: crail-rise-r .45s cubic-bezier(.2, .8, .3, 1) .62s both; }',
     '/* BARE: the logos and nothing else - no plate, no frame, no accent hairline. For boards that',
     '   already carry their own furniture (the bracket), where a dark pill under the board reads as',
     '   a second graphic competing with it rather than as a partner bug. The plate used to carry',
@@ -201,7 +206,95 @@
     '   flex: 0 0 auto keeps it from collapsing while sizeLogos() is measuring the page. */',
     '.crail-logo { flex: 0 0 auto; height: 36px; width: auto; max-width: 150px; object-fit: contain; display: block; }',
     '.crail--bar .crail-logos { height: 48px; }',
-    '.crail--bar .crail-logo { height: 46px; max-width: 230px; }'
+    '.crail--bar .crail-logo { height: 46px; max-width: 230px; }',
+
+    '/* -- SLANT (opt-in: mount({ slant: true })) -- the Smash board\'s fighting-game lean carried',
+    '   down to the rail, cut on BOTH sides: the left edge leans "/" and the right "\\", like the two',
+    '   player plates\' outer ends, so the card reads as a base the board stands on rather than a',
+    '   one-way parallelogram. TWO stacked cuts with a 4px seam, like a plate over its sub-bar up',
+    '   top - ONE sponsor at a time in the tall tile, the talent in the strip under it.',
+    '   The cut is ONE trapezoid across both rows: every inset below is that edge (18deg, so',
+    '   tan = .325) measured at the row\'s top and bottom over the 102px stack (66 tile + 4 seam +',
+    '   32 strip), which is why the tile\'s edges run straight on into the strip\'s. Both rows',
+    '   stretch to the same box width and have FIXED heights so those numbers stay true.',
+    '   clip-path, not skew: a skew can only lean one way. The card\'s drop shadow is a filter on',
+    '   the parent so it follows the cut. Sponsors page 1-up (see renderSponsors) and the tile is',
+    '   sized to the WIDEST logo, so a rotation never nudges the card\'s width. */',
+    '.crail--slant { background: none; box-shadow: none; border-radius: 0; overflow: visible;',
+    '  gap: 4px; min-width: 320px; filter: drop-shadow(0 10px 22px rgba(0,0,0,.5)); }',
+    '.crail--slant::before { display: none; }',
+    '.crail--slant .crail-row { background: linear-gradient(180deg, #14161f, #06070c); box-shadow: none; }',
+    '.crail--slant .crail-row + .crail-row:not(.is-empty)::before { display: none; }',
+    '/* Sponsor tile: a shade lifted off the strip, brand-accent rule along the top, and a speed-slash',
+    '   pair just inside EACH cut edge - leaning with that edge - the marks the player plates carry. */',
+    '.crail--slant .crail-row--partners { height: 66px; min-height: 0;',
+    '  clip-path: polygon(33px 0, calc(100% - 33px) 0, calc(100% - 12px) 100%, 12px 100%);',
+    '  background: linear-gradient(180deg, var(--crail-accent, #29b6f6) 0 2px, #1d212d 2px, #0b0c12 100%); }',
+    ".crail--slant .crail-row--partners::before, .crail--slant .crail-row--partners::after {",
+    "  content: ''; position: absolute; top: 0; bottom: 0; width: 12px; pointer-events: none;",
+    '  background: linear-gradient(90deg, rgba(255,255,255,.75) 0 4px, transparent 4px 8px,',
+    '                              rgba(255,255,255,.4) 8px 10px, transparent 10px); }',
+    '.crail--slant .crail-row--partners::before { left: 30px; transform: skewX(-18deg); }',
+    '.crail--slant .crail-row--partners::after { right: 30px; transform: skewX(18deg) scaleX(-1); }',
+    '.crail--slant .crail-seg--sponsors { padding: 0 60px; }',
+    '.crail--slant .crail-logos { height: 50px; }',
+    '.crail--slant .crail-logo { height: 48px; max-width: 240px; }',
+    '/* the one-up page centres in the tile instead of hugging its right edge */',
+    '.crail--slant .crail-page { left: 0; right: 0; justify-content: center; }',
+    '/* Talent strip: the sub-bar\'s proportions, the same cut carried on below the seam. */',
+    '.crail--slant .crail-row--talent { height: 32px; min-height: 0;',
+    '  clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 100%, 0 100%); }',
+    '.crail--slant .crail-seg--casters { padding: 0 34px; }',
+    '.crail--slant .crail-name { font-size: var(--fit-name, 17px); letter-spacing: .1em; }',
+    '/* A hard width cap: the card is a partner bug, never a band across the feed. Long caster names',
+    '   ("Alexander McCullough") used to stretch BOTH rows - the sponsor tile included - to fit the',
+    '   talent line. Now the names share the row by need and step down in size (fitNames) instead. */',
+    '.crail--slant:not(.crail--dock) { max-width: 420px; }',
+    '.crail--slant .crail-people.is-duo { display: flex; justify-content: center; }',
+    '.crail--slant .crail-p { min-width: 0; flex: 0 1 auto; }',
+    '.crail--slant .crail-mic svg { width: 18px; height: 18px; }',
+
+    '/* -- DOCK (mount({ dock: { a, b, gap, lean } })) -- the card parked BESIDE the scoreboard (the',
+    '   topleft placement doubles/crew use) is built out of the board\'s own rows instead of being a',
+    '   shrunken copy of the bottom card: a sponsor row exactly as tall as the player plate (a), a',
+    '   seam (gap), and a talent row exactly as tall as the info bar (b), top-aligned with the board',
+    '   (see placeCard) - so it reads as a third plate on the board, not a sticker next to it. On a',
+    '   slanted board (lean) both rows skew like player 1\'s plate, about the same line the board',
+    '   uses (bar 1\'s middle; --dock-origin is that line measured from the talent row, set as a',
+    '   px literal because calc() through var() is zero on Electron 18). */',
+    '.crail.crail--dock { gap: var(--dock-gap, 4px); min-width: 0; background: none; box-shadow: none;',
+    '  border-radius: 0; overflow: visible; filter: drop-shadow(0 10px 22px rgba(0,0,0,.5)); }',
+    '.crail.crail--dock::before { display: none; }',
+    '.crail.crail--dock .crail-row { clip-path: none; transform: none; min-height: 0;',
+    '  background: linear-gradient(180deg, #14161f, #06070c); box-shadow: inset 0 0 0 1px rgba(0,0,0,.55); }',
+    '.crail.crail--dock .crail-row + .crail-row:not(.is-empty)::before { display: none; }',
+    '.crail.crail--dock .crail-seg { transform: none; }',
+    '.crail.crail--dock .crail-row--partners { height: var(--dock-a, 68px);',
+    '  background: linear-gradient(180deg, var(--crail-accent, #29b6f6) 0 2px, #1d212d 2px, #0b0c12 100%); }',
+    '.crail.crail--dock .crail-row--partners::before, .crail.crail--dock .crail-row--partners::after { display: none; }',
+    '.crail.crail--dock .crail-row--talent { height: var(--dock-b, 28px); }',
+    '.crail.crail--dock .crail-seg--sponsors { padding: 0 28px; }',
+    '.crail.crail--dock .crail-logos { height: var(--dock-logo, 44px); }',
+    '.crail.crail--dock .crail-logo { height: var(--dock-logo, 44px); max-width: 170px; }',
+    '.crail.crail--dock .crail-page { left: 0; right: 0; justify-content: center; }',
+    '.crail.crail--dock .crail-seg--casters { padding: 0 18px; }',
+    '.crail.crail--dock .crail-name { font-size: var(--dock-name, 13px); letter-spacing: .06em; }',
+    '.crail.crail--dock .crail-mic svg { width: 15px; height: 15px; }',
+    '.crail.crail--dock .crail-people, .crail.crail--dock .crail-people.is-duo { gap: 10px; }',
+    '/* the pair shares the narrow row by NEED, not in equal halves - equal tracks clipped a long name',
+    '   while a short one sat in empty space */',
+    '.crail.crail--dock .crail-people.is-duo { display: flex; justify-content: center; }',
+    '.crail.crail--dock .crail-p { min-width: 0; flex: 0 1 auto; }',
+    '/* the lean: player 1\'s "/" on both rows, plus that plate\'s speed slashes at the outer end */',
+    '.crail.crail--dock.crail--dock-lean .crail-row { transform: skewX(-18deg); }',
+    '.crail.crail--dock.crail--dock-lean .crail-row--partners { transform-origin: 50% 50%; }',
+    '.crail.crail--dock.crail--dock-lean .crail-row--talent { transform-origin: 50% var(--dock-origin, -38px); }',
+    '.crail.crail--dock.crail--dock-lean .crail-seg { transform: skewX(18deg); }',
+    '.crail.crail--dock.crail--dock-lean .crail-row--partners::before { display: block; content: \'\';',
+    '  position: absolute; top: 0; bottom: 0; left: 6px; width: 16px; pointer-events: none; transform: none;',
+    '  background: linear-gradient(90deg, rgba(255,255,255,.8) 0 4px, transparent 4px 8px,',
+    '                              rgba(255,255,255,.45) 8px 10px, transparent 10px); }',
+    '.crail.crail--dock.crail--dock-lean .crail-seg--sponsors { padding: 0 30px 0 34px; }'
   ].join('\n');
 
   var mounted = false;
@@ -238,10 +331,21 @@
     if (QP.get('anim') === '0') document.body.classList.add('no-anim');
     elRail = document.createElement('div');
     elRail.className = 'crail' + (opts.variant === 'bar' ? ' crail--bar' : '')
-      + (opts.corner === 'br' ? ' crail--br' : '') + (opts.bare ? ' crail--bare' : '');
+      + (opts.corner === 'br' ? ' crail--br' : '') + (opts.bare ? ' crail--bare' : '')
+      + (opts.slant ? ' crail--slant' : '');
     if (opts.width) elRail.style.setProperty('--crail-w', opts.width + 'px');
     if (opts.bottom != null) elRail.style.setProperty('--crail-bottom', opts.bottom + 'px');
     if (opts.right != null) elRail.style.setProperty('--crail-right', opts.right + 'px');
+    if (opts.left != null) elRail.style.setProperty('--crail-left-edge', opts.left + 'px');
+    if (opts.dock) {
+      var d = opts.dock, A = Number(d.a) || 68, B = Number(d.b) || 28, G = d.gap != null ? Number(d.gap) : 4;
+      elRail.style.setProperty('--dock-a', A + 'px');
+      elRail.style.setProperty('--dock-b', B + 'px');
+      elRail.style.setProperty('--dock-gap', G + 'px');
+      elRail.style.setProperty('--dock-logo', Math.max(20, A - 24) + 'px');
+      // the board skews about bar 1's middle; from the talent row's top that line is gap + A/2 up
+      elRail.style.setProperty('--dock-origin', -(G + A / 2) + 'px');
+    }
     elRail.innerHTML =
       '<div class="crail-row crail-row--partners is-empty">' +
         '<div class="crail-seg crail-seg--sponsors"><div class="crail-logos"></div></div>' +
@@ -377,6 +481,10 @@
        signature too — switching the kit from cycle to static changes no logo, so a logos-only
        signature meant the mode change never repainted. */
     var mode = (MODE_PARAM === 'static' || MODE_PARAM === 'cycle') ? MODE_PARAM
+             // The slanted tile is built for ONE partner at a time (the Smash board's design ask),
+             // so it rotates even when the kit says static; ?railmode=static still forces a row.
+             // (and a card DOCKED beside the board has room for exactly one logo)
+             : (opts.slant || (opts.dock && _pos === 'topleft')) ? 'cycle'
              : (((data.brand || {}).sponsorMode === 'static') ? 'static' : 'cycle');
     var sig = mode + '#' + logos.join('|');
     if (sig === _sponsorSig) return;                   // unchanged - never restart the cycle
@@ -390,7 +498,7 @@
     var pages = [];
     var per = (mode === 'static') ? logos.length
             : (opts.variant === 'bar') ? PAGE_SIZE_BAR
-            : (_pos === 'topleft') ? PAGE_SIZE_TL : PAGE_SIZE_CHIP;
+            : (_pos === 'topleft' || opts.slant) ? PAGE_SIZE_TL : PAGE_SIZE_CHIP;
     for (var i = 0; i < logos.length; i += per) pages.push(logos.slice(i, i + per));
     pages.forEach(function (page, pi) {
       var wrap = document.createElement('div');
@@ -424,19 +532,47 @@
   var _pos = '';
   function applyPos(data) {
     var want = QP.get('railpos') || (opts.posFrom ? opts.posFrom(data) : '') || 'bottom';
-    want = (want === 'topleft') ? 'topleft' : 'bottom';
+    want = (want === 'topleft' || want === 'bottomleft' || want === 'bottomright') ? want : 'bottom';
     var tl = want === 'topleft';
     if (want !== _pos) {
       _pos = want;
       elRail.classList.toggle('crail--tl', tl);
-      // ?railpos=topleft has to beat the scene's own corner, and the two can never both be on
-      // (--tl is left-anchored, --br right-anchored, and --br is later in the sheet).
-      elRail.classList.toggle('crail--br', !tl && opts.corner === 'br');
+      // ?railpos= has to beat the scene's own corner, and only one anchor class can ever be on
+      // (--tl/--bl are left-anchored, --br right-anchored).
+      elRail.classList.toggle('crail--br', want === 'bottomright' || (want === 'bottom' && opts.corner === 'br'));
+      elRail.classList.toggle('crail--bl', want === 'bottomleft');
+      elRail.classList.toggle('crail--dock', tl && !!opts.dock);
+      elRail.classList.toggle('crail--dock-lean', tl && !!(opts.dock && opts.dock.lean));
       // The two placements page sponsors differently (3-up vs 1-up), and renderSponsors bails
       // early when the logo list is unchanged - so force it to re-chunk on a placement change.
       _sponsorSig = '';
     }
     if (!tl) elRail.style.removeProperty('--crail-max');
+  }
+
+  /* The docked card is only as wide as the margin beside the board, and a full name ("Alexander
+     McCullough") ellipsized away there. Step the talent names down (13px -> 10px) until the row
+     fits; only once they are at the floor does the ellipsis take over. */
+  function fitDockNames() { fitNames('--dock-name', 13, 10); }
+  var _fitSig = {};
+  function fitNames(prop, start, floor) {
+    if (!elPeople) return;
+    // Re-measure only when the names, the sponsors (tile width) or the placement changed - not on
+    // every full_state tick, which would re-layout the card several times a second for nothing.
+    var sig = _peopleSig + '#' + _sponsorSig + '#' + _pos;
+    if (_fitSig[prop] === sig) return;
+    _fitSig[prop] = sig;
+    var size = start;
+    elRail.style.setProperty(prop, size + 'px');
+    // Each name ellipsizes inside its own grid track, so the ROW never reports overflow - test
+    // the names themselves.
+    var clipped = function () {
+      return [].some.call(elPeople.querySelectorAll('.crail-name'), function (n) { return n.scrollWidth > n.clientWidth + 1; });
+    };
+    while (size > floor && clipped()) {
+      size -= 0.5;
+      elRail.style.setProperty(prop, size + 'px');
+    }
   }
 
   /* Runs AFTER the rows are filled, because centring needs the card's real width. Measured every
@@ -449,7 +585,8 @@
     var r = a.getBoundingClientRect();
     if (!r.width) return;                       // board not up yet - keep the last good numbers
     var gap = (opts.gap != null ? opts.gap : 22);   // breathing room between card and plate
-    var edge = 20;                                  // ...and against the edge of frame
+    // ...and against the edge of frame. A leaning dock's talent row sits ~21px left of its box.
+    var edge = (opts.dock && opts.dock.lean) ? 44 : 20;
     var avail = Math.max(150, Math.round(r.left - gap - edge));
     elRail.style.setProperty('--crail-max', avail + 'px');
 
@@ -460,6 +597,12 @@
     // Vertically it rides the CENTRE BRAND MARK's line, which is centred on the whole two-bar
     // stack rather than on bar 1 - so the card reads as the left-hand partner to the mark instead
     // of as a second, taller plate stacked against player 1. Falls back to the board's own centre.
+    // A DOCKED card is built from the board's own row heights, so it lines up top-to-top with it.
+    if (opts.dock) {
+      elRail.style.setProperty('--crail-y', Math.round(r.top) + 'px');
+      fitDockNames();
+      return;
+    }
     var m = opts.vAnchor && document.querySelector(opts.vAnchor);
     var mr = m && m.getBoundingClientRect();
     var cy = (mr && mr.height) ? (mr.top + mr.height / 2) : (r.top + r.height / 2);
@@ -476,11 +619,23 @@
     renderPeople(data);
     renderSponsors(data);
     placeCard();
+    // the bottom slanted card: names shrink to fit its width cap (the dock fits its own in placeCard)
+    if (opts.slant && _pos !== 'topleft') fitNames('--fit-name', 17, 12);
     // The whole rail hides when there is nothing on either side - an empty bar across the
     // bottom of the feed is worse than no bar.
-    var any = !elCastSeg.classList.contains('is-empty') || !elSponSeg.classList.contains('is-empty');
+    var castOn = !elCastSeg.classList.contains('is-empty'), sponOn = !elSponSeg.classList.contains('is-empty');
+    elCastSeg.classList.toggle('is-only', castOn && !sponOn);
+    elSponSeg.classList.toggle('is-only', sponOn && !castOn);
+    var any = castOn || sponOn;
     elRail.classList.toggle('show', any);
   }
 
-  global.CasterRail = { mount: mount, render: render };
+  // talent/sponsors expose the SAME resolution rules (Show Deck names, placement-tagged sponsors,
+  // ?casters=0 / ?sponsors=0) to scenes that lay those out themselves — tokon.html's
+  // under-the-super-meters strips — so they can never drift from what this rail would show.
+  global.CasterRail = {
+    mount: mount, render: render,
+    talent: function (data) { return people(data || {}); },
+    sponsors: function (data) { return sponsorLogos(data || {}); }
+  };
 })(window);

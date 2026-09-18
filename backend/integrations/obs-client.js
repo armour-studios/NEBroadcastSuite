@@ -69,6 +69,17 @@ function createObsClient({
   let reconnectTimer = null;
   let reconnectDelay = 5000;       // starts at 5s, backs off to 60s max
   let lastError = null;
+  // OBS answers every replay-buffer request with "Replay buffer is not available." when Replay Buffer
+  // is switched off in OBS's own Settings > Output. That is a setting only the producer can change
+  // (we never touch OBS settings), so it is tracked as a STATE, not surfaced as a raw error that
+  // repeats on every capture attempt. null = not checked yet, true/false = what OBS last told us.
+  let replayBufferAvailable = null;
+  const RB_UNAVAILABLE = /replay buffer is not available/i;
+  const noteReplayBufferError = (e) => {
+    const msg = (e && e.message) || String(e || '');
+    if (RB_UNAVAILABLE.test(msg)) replayBufferAvailable = false;
+    return msg;
+  };
   let currentScene = '';           // OBS PROGRAM scene = what viewers actually see
 
   function emit() {
@@ -98,6 +109,7 @@ function createObsClient({
     if (onReplayBufferSaved) onReplayBufferSaved({ path: (d && d.savedReplayPath) || '' });
   });
   obs.on('ReplayBufferStateChanged', (d) => {
+    replayBufferAvailable = true;   // OBS only emits this for a buffer that exists
     if (onReplayBufferStateChanged) onReplayBufferStateChanged({ active: !!(d && d.outputActive) });
   });
 
@@ -209,6 +221,7 @@ function createObsClient({
       connecting = false;
       connected = true;
       lastError = null;
+      replayBufferAvailable = null;   // the producer may have enabled it in OBS while we were away
       reconnectDelay = 5000; // reset backoff on successful connect
       emit();
       // Capture the current program scene immediately so "on air" is accurate.
@@ -457,6 +470,7 @@ function createObsClient({
   // Replay buffer (instant replay / save highlight clip)
   async function saveReplayBuffer() {
     const r = await call('SaveReplayBuffer');
+    if (r === null) noteReplayBufferError({ message: lastError });
     return r !== null;
   }
 
@@ -469,12 +483,13 @@ function createObsClient({
       const finish = (path) => { if (done) return; done = true; try { obs.off('ReplayBufferSaved', onSaved); } catch (e) {} resolve(path || null); };
       const onSaved = (d) => finish(d && d.savedReplayPath);
       obs.on('ReplayBufferSaved', onSaved);
-      obs.call('SaveReplayBuffer').catch((e) => { lastError = (e && e.message) || String(e); finish(null); });
+      obs.call('SaveReplayBuffer').catch((e) => { lastError = noteReplayBufferError(e); finish(null); });
       setTimeout(() => finish(null), timeoutMs);
     });
   }
   async function startReplayBuffer() {
     const r = await call('StartReplayBuffer');
+    if (r === null) noteReplayBufferError({ message: lastError });
     return r !== null;
   }
   async function stopReplayBuffer() {
@@ -483,7 +498,9 @@ function createObsClient({
   }
   async function isReplayBufferActive() {
     const r = await call('GetReplayBufferStatus');
-    return !!(r && r.outputActive);
+    if (r === null) { noteReplayBufferError({ message: lastError }); return false; }
+    replayBufferAvailable = true;
+    return !!r.outputActive;
   }
 
   return {
@@ -510,6 +527,7 @@ function createObsClient({
     isConnected: () => connected,
     getCurrentScene: () => currentScene,
     getLastError: () => lastError,
+    isReplayBufferAvailable: () => replayBufferAvailable,
   };
 }
 

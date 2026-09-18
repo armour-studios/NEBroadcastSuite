@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NE Broadcast Suite — THE FINALS Bar</title>
+<link rel="stylesheet" href="fonts.css">
+<style>
+  /* THE FINALS broadcast bar. The game's own spectator HUD owns the top and both sides of the frame
+     (cash, team panels, kill feed), so the broadcast furniture lives in one strip along the bottom:
+
+       +-------+------------------------------+-------+-----------+----------+---------+
+       | BRAND | EVENT NAME                   | A 0-1 | ROUND     | OBSERVED | SPONSOR |
+       |       | SCORES ticker ...............|   B   | BO / GAME | PLAYER   |         |
+       +-------+------------------------------+-------+-----------+----------+---------+
+
+     The brand and the whole right-hand cluster span BOTH rows so the numbers read at a glance; the
+     event name and the ticker share the flexible middle column, so there is no dead run anywhere.
+     With the ticker hidden the second row collapses and the tall blocks shrink to the bar.
+     No live data source exists for THE FINALS — everything comes from Match ▸ Teams (teams, series,
+     round label, Observe button) and the active brand kit (logo, rail/desk sponsors).
+     URL params: ?ticker=0  ?sponsors=0  ?sponsorrotate=N (seconds) */
+  :root {
+    --accent: #d31f26; --accent-2: #f2c230; --main-font: 'Rajdhani', 'Montserrat', system-ui, sans-serif;
+    --bar-h: 40px; --tk-h: 24px; --ink: #0b0c10; --ink-2: #16181e; --slant: 16px;
+  }
+  html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: transparent; font-family: var(--main-font); }
+  .hidden { display: none !important; }
+
+  .wrap { position: absolute; left: 0; right: 0; bottom: 0; display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: var(--bar-h) auto;
+    font-weight: 700; text-transform: uppercase; color: #fff;
+    transform: translateY(110%); transition: transform .6s cubic-bezier(.16,.84,.24,1); }
+  .wrap.show { transform: translateY(0); }
+  @media (prefers-reduced-motion: reduce) { .wrap { transition: none; } }
+
+  /* Brand — the kit logo, full height */
+  .brand { grid-column: 1; grid-row: 1 / span 2; display: flex; align-items: center; justify-content: center;
+    min-width: 76px; padding: 0 16px; box-sizing: border-box; background: var(--ink);
+    box-shadow: inset 0 2px 0 var(--accent), inset -3px 0 0 var(--accent); }
+  /* Pixel caps, not a %: the block's height comes from the grid rows, so a percentage has nothing to
+     resolve against and the logo's own size would stretch the rows instead. */
+  .br-logo { max-height: 50px; max-width: 130px; object-fit: contain; display: block; }
+  .br-logo.on-dark { filter: brightness(0) invert(1); }
+  .wrap.no-tk .br-logo { max-height: 30px; max-width: 110px; }
+
+  /* Event — top of the middle column, brand colour, fills the width */
+  .event-row { grid-column: 2; grid-row: 1; min-width: 0; display: flex; background: #050608; }
+  .seg-event { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; padding: 0 34px 0 18px; font-style: italic;
+    background: linear-gradient(90deg, rgba(0,0,0,.25), rgba(0,0,0,0) 60%), var(--accent);
+    box-shadow: inset 0 2px 0 rgba(255,255,255,.18);
+    clip-path: polygon(0 0, 100% 0, calc(100% - var(--slant)) 100%, 0 100%); }
+  .ev-name { font-size: 22px; letter-spacing: .01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+  /* Right-hand cluster — every block spans both rows */
+  .cluster { grid-column: 3; grid-row: 1 / span 2; display: flex; align-items: stretch; background: var(--ink);
+    box-shadow: inset 0 2px 0 var(--accent); }
+  .seg { flex: 0 0 auto; display: flex; align-items: center; margin-left: calc(-1 * var(--slant)); font-style: italic;
+    box-shadow: inset 0 2px 0 var(--accent);
+    clip-path: polygon(var(--slant) 0, 100% 0, calc(100% - var(--slant)) 100%, 0 100%); }
+
+  /* Score — a crest, or an abbreviation chip in team colour, per side */
+  /* Its left edge is ONE slant down both rows, continuing the event row's edge (16px over 40px =
+     26px over 64px), and it overlaps the middle column by that much — so the ticker's scrolling text
+     runs under the same angle instead of stopping at a square step below the event slant. */
+  .seg-score { --lead: 26px; margin-left: calc(-1 * var(--lead)); gap: 14px; padding: 0 34px 0 calc(var(--lead) + 22px); background: var(--ink);
+    clip-path: polygon(var(--lead) 0, 100% 0, calc(100% - var(--slant)) 100%, 0 100%); }
+  .wrap.no-tk .seg-score { --lead: var(--slant); }
+  .sc-side { position: relative; display: flex; align-items: center; justify-content: center; height: 40px; min-width: 40px; }
+  .sc-side::after { content: ''; position: absolute; left: 4px; right: 4px; bottom: -6px; height: 3px; background: var(--side); border-radius: 2px; }
+  .sc-side.has-abbr::after { display: none; }
+  .sc-logo { max-width: 40px; max-height: 40px; object-fit: contain; display: block; }
+  .sc-abbr { height: 30px; padding: 0 8px; display: flex; align-items: center; border-radius: 3px; background: var(--side); color: var(--side-ink);
+    font-size: 20px; letter-spacing: .03em; line-height: 1; font-style: normal; }
+  .sc-nums { font-size: 38px; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: .02em; min-width: 76px; text-align: center; }
+
+  /* Round — the label on top, the series format under it */
+  .seg-round { flex-direction: column; justify-content: center; align-items: center; min-width: 150px; padding: 0 36px;
+    background: linear-gradient(rgba(0,0,0,.42), rgba(0,0,0,.42)), var(--accent); line-height: 1; white-space: nowrap; }
+  .rd-main { font-size: 23px; letter-spacing: .04em; }
+  .rd-sub { font-size: 13px; letter-spacing: .12em; opacity: .8; margin-top: 4px; font-style: normal; }
+  .rd-sub:empty { display: none; }
+
+  /* Observed player — filled in the player's team colour */
+  .seg-player { justify-content: flex-end; gap: 12px; min-width: 220px; max-width: 380px; box-sizing: border-box; padding: 0 34px 0 38px;
+    background: var(--side); color: var(--side-ink); }
+  .pl-text { display: flex; flex-direction: column; align-items: flex-end; min-width: 0; }
+  .pl-name { font-size: 27px; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 270px; }
+  .pl-team { font-size: 12px; line-height: 1.2; letter-spacing: .08em; opacity: .8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 270px; }
+  /* Crest only when the team has a real logo — the team name already sits under the player. */
+  .pl-crest { width: 36px; height: 36px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
+  .pl-crest:empty { display: none; }
+  .pl-crest img { max-width: 36px; max-height: 36px; object-fit: contain; display: block; }
+
+  /* Sponsor — right edge; logos cross-fade one at a time (kit 'static' = up to 3 side by side) */
+  .seg-sponsor { gap: 20px; padding: 0 26px 0 38px; background: var(--ink-2);
+    clip-path: polygon(var(--slant) 0, 100% 0, 100% 100%, 0 100%); }
+  .sp-box { position: relative; height: 40px; width: 180px; }
+  .sp-box.static { width: auto; display: flex; align-items: center; gap: 20px; }
+  .sp-logo { height: 40px; max-width: 180px; object-fit: contain; display: block; }
+  .sp-box:not(.static) .sp-logo { position: absolute; top: 0; right: 0; left: 0; margin: 0 auto; opacity: 0; transition: opacity .6s ease; }
+  .sp-box:not(.static) .sp-logo.on { opacity: 1; }
+
+  /* Ticker hidden → the cluster is only bar-tall; step everything in it down to fit. */
+  .wrap.no-tk .sc-side { height: 26px; min-width: 26px; }
+  .wrap.no-tk .sc-side::after { bottom: -4px; height: 2px; }
+  .wrap.no-tk .sc-logo { max-width: 26px; max-height: 26px; }
+  .wrap.no-tk .sc-abbr { height: 22px; padding: 0 6px; font-size: 15px; }
+  .wrap.no-tk .sc-nums { font-size: 26px; min-width: 54px; }
+  .wrap.no-tk .rd-main { font-size: 16px; }
+  .wrap.no-tk .rd-sub { font-size: 10px; margin-top: 2px; }
+  .wrap.no-tk .pl-name { font-size: 20px; }
+  .wrap.no-tk .pl-team { font-size: 10px; }
+  .wrap.no-tk .pl-crest, .wrap.no-tk .pl-crest img { width: 26px; height: 26px; }
+  .wrap.no-tk .sp-box { height: 26px; width: 150px; }
+  .wrap.no-tk .sp-logo { height: 26px; max-width: 150px; }
+
+  /* Scores ticker lane — under the event name */
+  .tk { grid-column: 2; grid-row: 2; height: var(--tk-h); min-width: 0; display: flex; align-items: stretch; background: #050608; overflow: hidden; }
+  .tk-label { flex: 0 0 auto; display: flex; align-items: center; padding: 0 12px; background: var(--accent); font-style: italic; font-size: 12px; letter-spacing: .08em; }
+  .tk-mask { flex: 1 1 auto; min-width: 0; overflow: hidden; display: flex; align-items: center; }
+  .tk-track { display: inline-flex; align-items: center; white-space: nowrap; padding-left: 16px; font-size: 14px; animation: tkScroll linear infinite; }
+  @keyframes tkScroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+  .tk-match { display: inline-flex; align-items: center; gap: 6px; }
+  .tk-stat { font-size: 9px; letter-spacing: .1em; padding: 1px 5px; border-radius: 2px; }
+  .tk-live { background: #22e06a; color: #04130a; }
+  .tk-final { border: 1px solid rgba(255,255,255,.25); color: #9aa3b0; }
+  .tk-logo { width: 15px; height: 15px; object-fit: contain; }
+  .tk-score { color: var(--accent-2); font-variant-numeric: tabular-nums; padding: 0 2px; }
+  .tk-sep { width: 4px; height: 4px; margin: 0 18px; background: var(--accent); transform: rotate(45deg); flex: 0 0 auto; }
+</style>
+</head>
+<body>
+  <div class="wrap" id="wrap">
+    <div class="brand" id="seg-brand"><img class="br-logo" id="br-logo" alt=""></div>
+    <div class="event-row"><div class="seg-event"><span class="ev-name" id="ev-name"></span></div></div>
+    <div class="tk hidden" id="tk">
+      <div class="tk-label" id="tk-label">SCORES</div>
+      <div class="tk-mask"><div class="tk-track" id="tk-track"></div></div>
+    </div>
+    <div class="cluster">
+      <div class="seg seg-score">
+        <div class="sc-side" id="sc-a"></div>
+        <div class="sc-nums" id="sc-nums">0 - 0</div>
+        <div class="sc-side" id="sc-b"></div>
+      </div>
+      <div class="seg seg-round hidden" id="seg-round"><span class="rd-main" id="rd-main"></span><span class="rd-sub" id="rd-sub"></span></div>
+      <div class="seg seg-player hidden" id="seg-player">
+        <div class="pl-text"><span class="pl-name" id="pl-name"></span><span class="pl-team" id="pl-team"></span></div>
+        <div class="pl-crest" id="pl-crest"></div>
+      </div>
+      <div class="seg seg-sponsor hidden" id="seg-sponsor"><div class="sp-box" id="sp-box"></div></div>
+    </div>
+  </div>
+<script src="scene-base.js"></script>
+<script>
+(function () {
+  function el(id) { return document.getElementById(id); }
+  var TICKER_OFF = SceneBase.qp('ticker') === '0';
+  var SPONSORS_OFF = SceneBase.qp('sponsors') === '0';
+  var ROTATE_PARAM = Number(SceneBase.qp('sponsorrotate')) || 0;
+  var _tkSig = null, _spSig = null, _spTimer = null;
+
+  var DEMO_MATCHES = [
+    { status: 'live', teamA: 'Kingzero', teamB: 'NTMR', scoreA: 0, scoreB: 1 },
+    { status: 'done', teamA: 'OpTic', teamB: 'Sentinels', scoreA: 2, scoreB: 1 }
+  ];
+
+  // A set with no reported game scores is not 0-0 (same rule as ticker.html).
+  function fmtScore(m) {
+    var a = (typeof m.scoreA === 'number') ? m.scoreA : null;
+    var b = (typeof m.scoreB === 'number') ? m.scoreB : null;
+    if (m.dq) return m.winSide === 'a' ? 'W - DQ' : m.winSide === 'b' ? 'DQ - W' : 'DQ';
+    if (a === null && b === null) {
+      if (m.winSide) return m.winSide === 'a' ? 'W - L' : 'L - W';
+      if (m.status === 'live') return 'vs';
+    }
+    return (a || 0) + ' - ' + (b || 0);
+  }
+
+  /* Short form for a team — same rule as countdown-bar.html / matchup.html: an explicit abbr on the
+     live team wins, then the saved-team library's, then initials for a multi-word name. A single word
+     of 4 or fewer letters is kept whole ("NTMR"), anything longer is clipped to 3. */
+  function teamAbbr(data, side) {
+    var raw = (data.teams && data.teams[side]) || {};
+    var n = String(raw.name || '').trim();
+    if (!n) return side === 'orange' ? 'B' : 'A';
+    if (raw.abbr) return String(raw.abbr).toUpperCase().slice(0, 4);
+    var hit = (data.savedTeams || []).find(function (t) { return t && String(t.name || '').trim().toLowerCase() === n.toLowerCase(); });
+    if (hit && hit.abbr) return String(hit.abbr).toUpperCase().slice(0, 4);
+    var words = n.split(/\s+/).filter(Boolean);
+    if (words.length >= 2) return words.map(function (w) { return w[0]; }).join('').toUpperCase().slice(0, 4);
+    return (n.length <= 4 ? n : n.slice(0, 3)).toUpperCase();
+  }
+
+  // One side of the score: the team's own crest, or (no custom logo) an abbreviation chip in team colour.
+  function paintSide(box, team, abbr) {
+    box.style.setProperty('--side', team.color);
+    var key = team.customLogo ? 'img:' + team.customLogo : 'abbr:' + abbr + ':' + team.color;
+    if (box.dataset.key === key) return;
+    box.dataset.key = key;
+    box.innerHTML = '';
+    box.classList.toggle('has-abbr', !team.customLogo);
+    if (team.customLogo) {
+      var img = document.createElement('img'); img.className = 'sc-logo'; img.src = team.customLogo; img.alt = '';
+      box.appendChild(img);
+    } else {
+      var chip = document.createElement('span'); chip.className = 'sc-abbr'; chip.textContent = abbr;
+      chip.style.setProperty('--side-ink', SceneBase.onColor(team.color, '#0b0c10', '#ffffff'));
+      box.appendChild(chip);
+    }
+  }
+
+  function renderBar(data) {
+    var root = document.documentElement;
+    root.style.setProperty('--accent', SceneBase.liftForDark(SceneBase.brandColor(data), 0.08));
+    root.style.setProperty('--accent-2', SceneBase.brandAccent(data));
+
+    // Brand: the kit's logo; without one, the active game's mark (a dark silhouette → print it white).
+    var g = data.games && data.games[data.activeGame];
+    var brandLogo = SceneBase.brandLogo(data);
+    var mark = brandLogo || (g && g.logo ? '/assets/' + g.logo : '');
+    var bl = el('br-logo');
+    el('seg-brand').classList.toggle('hidden', !mark);
+    if (mark && bl.getAttribute('src') !== mark) bl.src = mark;
+    bl.classList.toggle('on-dark', !brandLogo);
+
+    el('ev-name').textContent = String(data.eventName || '').trim();
+
+    var a = SceneBase.teamSide(data, 'blue'), b = SceneBase.teamSide(data, 'orange');
+    paintSide(el('sc-a'), a, teamAbbr(data, 'blue'));
+    paintSide(el('sc-b'), b, teamAbbr(data, 'orange'));
+    el('sc-nums').textContent = a.series + ' - ' + b.series;
+
+    // Round: the label (or "GAME 1 OF 3" when there is none) on top, the series format underneath.
+    var label = String(data.roundLabel || '').trim();
+    var bo = Number(data.bestOf) || 0;
+    var gameNo = Number(data.game && data.game.number) || 0;
+    var gameTxt = gameNo ? 'GAME ' + gameNo + (bo > 1 ? ' OF ' + bo : '') : '';
+    var boTxt = bo > 1 ? 'BEST OF ' + bo : '';
+    var main = label || gameTxt || boTxt;
+    var sub = label ? [gameTxt, boTxt].filter(Boolean).join(' · ') : (gameTxt ? boTxt : '');
+    el('rd-main').textContent = main;
+    el('rd-sub').textContent = sub;
+    el('seg-round').classList.toggle('hidden', !main);
+
+    renderPlayer(data, a, b);
+  }
+
+  // Observed player — the one player the spectator is following, from Match ▸ Teams ▸ Observe.
+  function renderPlayer(data, a, b) {
+    var obs = data.observedPlayer || {};
+    if (SceneBase.preview && !obs.side) obs = { side: 'orange', playerId: '' };
+    var seg = el('seg-player');
+    var sideKey = obs.side === 'blue' || obs.side === 'orange' ? obs.side : '';
+    var side = sideKey === 'blue' ? a : sideKey === 'orange' ? b : null;
+    var player = null;
+    if (side) {
+      player = side.players.find(function (p) { return p && String(p.id) === String(obs.playerId); }) || null;
+      if (!player && SceneBase.preview) player = side.players[0] || null;
+    }
+    var name = player ? String(player.gamertag || player.name || '').trim() : '';
+    seg.classList.toggle('hidden', !name);
+    if (!name) return;
+    var ink = SceneBase.onColor(side.color, '#0b0c10', '#ffffff');
+    seg.style.setProperty('--side', side.color);
+    seg.style.setProperty('--side-ink', ink);
+    el('pl-name').textContent = name;
+    el('pl-team').textContent = side.name || '';
+    var crest = el('pl-crest');
+    var key = side.customLogo || '';
+    if (crest.dataset.key !== key) {
+      crest.dataset.key = key;
+      crest.innerHTML = '';
+      if (key) { var img = document.createElement('img'); img.src = key; img.alt = ''; crest.appendChild(img); }
+    }
+  }
+
+  /* Sponsors follow the brand kit's placement tags, the same pool as caster-rail.js: rail-tagged
+     first, then desk-tagged, never the untagged list (removing a placement must take a partner off
+     air). Preview falls back to the demo kit's sponsors so the slot is visible in thumbnails. */
+  function sponsorLogos(data) {
+    if (SPONSORS_OFF) return [];
+    var brand = data.brand || {};
+    var pool = (brand.railSponsors || []).length ? brand.railSponsors : (brand.deskSponsors || []);
+    if (SceneBase.preview && !(pool || []).length) pool = brand.sponsors || [];
+    var out = [];
+    (pool || []).forEach(function (s) {
+      var u = (typeof s === 'string') ? s : (s && s.logo);
+      if (u && out.indexOf(u) === -1) out.push(u);
+    });
+    return out;
+  }
+  function renderSponsors(data) {
+    var logos = sponsorLogos(data);
+    var brand = data.brand || {};
+    var isStatic = brand.sponsorMode === 'static' && logos.length <= 3;   // more than 3 would crowd the bar — cycle instead
+    var sig = (isStatic ? 's#' : 'c#') + logos.join('|');
+    if (sig === _spSig) return;
+    _spSig = sig;
+    if (_spTimer) { clearInterval(_spTimer); _spTimer = null; }
+    var box = el('sp-box');
+    box.innerHTML = '';
+    box.classList.toggle('static', isStatic);
+    el('seg-sponsor').classList.toggle('hidden', !logos.length);
+    if (!logos.length) return;
+    logos.forEach(function (src, i) {
+      var img = document.createElement('img');
+      img.className = 'sp-logo' + (i === 0 ? ' on' : ''); img.src = src; img.alt = '';
+      box.appendChild(img);
+    });
+    if (isStatic || logos.length < 2) return;
+    var secs = ROTATE_PARAM > 0 ? ROTATE_PARAM : (Number(brand.sponsorInterval) > 0 ? Number(brand.sponsorInterval) : 8);
+    var idx = 0;
+    _spTimer = setInterval(function () {
+      var kids = box.children;
+      if (kids.length < 2) return;
+      kids[idx % kids.length].classList.remove('on');
+      idx = (idx + 1) % kids.length;
+      kids[idx].classList.add('on');
+    }, Math.max(3, secs) * 1000);
+  }
+
+  function renderTicker(data) {
+    var box = el('tk');
+    if (TICKER_OFF) { box.classList.add('hidden'); return; }
+    var t = data.ticker || {};
+    var isNxgen = t.source === 'nxgen';
+    var isMatches = t.source === 'startgg' || isNxgen;
+    var feed = (isNxgen ? (data.nxgen && data.nxgen.matchFeed) : (data.startgg && data.startgg.matchFeed)) || [];
+    // The match on air is already on the bar — the lane is for the OTHER games.
+    var onA = String((data.teams && data.teams.blue && data.teams.blue.name) || '').toLowerCase();
+    var onB = String((data.teams && data.teams.orange && data.teams.orange.name) || '').toLowerCase();
+    var matches = isMatches ? feed.filter(function (m) {
+      if (!m || (m.status !== 'live' && m.status !== 'done')) return false;
+      var x = String(m.teamA || '').toLowerCase(), y = String(m.teamB || '').toLowerCase();
+      return !((x === onA && y === onB) || (x === onB && y === onA));
+    }) : [];
+    var messages = (t.messages || []).filter(Boolean);
+    if (SceneBase.preview && !matches.length) matches = DEMO_MATCHES;
+    var speed = (t.speed > 0) ? t.speed : 40;
+
+    var track = el('tk-track');
+    var sig = JSON.stringify([matches, messages, speed]);
+    if (sig === _tkSig && track.children.length) return;
+    _tkSig = sig;
+    track.innerHTML = '';
+    if (!matches.length && !messages.length) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    el('tk-label').textContent = matches.length ? 'SCORES' : 'NEWS';
+
+    function sep() { var s = document.createElement('span'); s.className = 'tk-sep'; track.appendChild(s); }
+    function logoImg(src) { var lg = document.createElement('img'); lg.className = 'tk-logo'; lg.src = src; lg.onerror = function () { this.remove(); }; return lg; }
+    function match(m) {
+      var w = document.createElement('span'); w.className = 'tk-match';
+      var st = document.createElement('span');
+      st.className = 'tk-stat ' + (m.status === 'live' ? 'tk-live' : 'tk-final');
+      st.textContent = m.status === 'live' ? 'LIVE' : 'FINAL';
+      w.appendChild(st);
+      if (m.logoA) w.appendChild(logoImg(m.logoA));
+      var na = document.createElement('span'); na.textContent = m.teamA || 'TBD'; w.appendChild(na);
+      var sc = document.createElement('span'); sc.className = 'tk-score'; sc.textContent = fmtScore(m); w.appendChild(sc);
+      var nb = document.createElement('span'); nb.textContent = m.teamB || 'TBD'; w.appendChild(nb);
+      if (m.logoB) w.appendChild(logoImg(m.logoB));
+      track.appendChild(w); sep();
+    }
+    function msg(text) { var s = document.createElement('span'); s.textContent = text; track.appendChild(s); sep(); }
+    // Two copies so the -50% scroll loops seamlessly.
+    for (var c = 0; c < 2; c++) { matches.forEach(match); messages.forEach(msg); }
+    track.style.animationDuration = speed + 's';
+  }
+
+  /* A long event title gets squeezed by the cluster to its right. Step the type down until it fits
+     before letting the ellipsis cut it; 15px is the floor. */
+  function fitEventName() {
+    var n = el('ev-name');
+    var size = 22;
+    n.style.fontSize = size + 'px';
+    while (n.scrollWidth > n.clientWidth + 1 && size > 15) {
+      size -= 1;
+      n.style.fontSize = size + 'px';
+    }
+  }
+
+  function render(data) {
+    if (!data) return;
+    renderBar(data);
+    renderSponsors(data);
+    renderTicker(data);
+    el('wrap').classList.toggle('no-tk', el('tk').classList.contains('hidden'));
+    fitEventName();
+    el('wrap').classList.add('show');
+  }
+
+  // The first fit runs against the fallback font and undecoded logos — both change the widths once they
+  // arrive, so fit again when the web font lands and whenever an image in the bar finishes loading.
+  if (document.fonts) {
+    document.fonts.ready.then(fitEventName);
+    if (document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', fitEventName);
+  }
+  el('wrap').addEventListener('load', fitEventName, true);
+  SceneBase.connect(render);
+})();
+</script>
+</body>
+</html>

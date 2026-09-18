@@ -388,6 +388,27 @@ img{display:block;}
   background:linear-gradient(180deg,rgba(16,20,31,.96),rgba(8,11,18,.985));
   clip-path:polygon(30px 0,100% 0,100% 100%,0 100%);}
 
+/* ── OCCASIONAL SPONSOR ROLL-OUT (RLCS-style) — lives INSIDE #br so it is part of the statcard: it
+   slides out from behind the bar's slanted left edge, shares the card's drop-shadow, and rides the
+   card's show/hide. Top band continues the team-colour name strip (PRESENTED BY); the body continues
+   the dark stats panel with the logo on it. Its right end stays tucked under the bar, so the join is
+   seamless. Height is synced to the card row (name strip + stats) in JS. */
+.br-bar{z-index:1;}
+.spon-roll{position:absolute;left:0;bottom:0;z-index:0;width:250px;height:92px;display:flex;flex-direction:column;
+  clip-path:polygon(30px 0,100% 0,100% 100%,0 100%);
+  transform:translateX(34px);opacity:0;pointer-events:none;
+  transition:transform .62s cubic-bezier(.22,.9,.24,1),opacity .3s ease .05s;}
+.spon-roll.out{transform:translateX(-216px);opacity:1;transition:transform .62s cubic-bezier(.22,.9,.24,1),opacity .2s ease;}
+.spon-roll.empty{display:none;}
+.spon-roll .sr-head{flex:none;height:40px;display:flex;align-items:center;padding:0 46px 0 40px;
+  background:var(--spec-color);box-shadow:inset 0 1px 0 rgba(255,255,255,.16),inset 0 -2px 7px rgba(0,0,0,.28);}
+.spon-roll .sr-lbl{font-size:11px;font-weight:800;letter-spacing:.2em;text-transform:uppercase;color:var(--spec-text,#fff);white-space:nowrap;}
+.spon-roll .sr-body{flex:1;display:flex;align-items:center;justify-content:center;padding:0 44px 0 30px;
+  background:linear-gradient(180deg,rgba(16,20,31,.96),rgba(8,11,18,.985));}
+.spon-roll img{max-height:44px;max-width:168px;object-fit:contain;display:block;}
+/* a DARK logo would vanish on the dark panel — give it a light plate (set from the logo's luminance) */
+.spon-roll.sr-light .sr-body{background:linear-gradient(180deg,#ffffff,#e6eaf2);}
+
 /* facecam — framed window seated ON TOP of the card; collapses to nothing when no cam */
 .cam{position:relative;width:100%;height:0;background:#05070c;overflow:hidden;transition:height .4s ease;}
 .cam.on{height:210px;box-shadow:inset 0 -3px 0 var(--spec-color);}   /* slightly smaller cam; team-colour seam into the name strip */
@@ -1252,6 +1273,11 @@ body.sb-external #sb{display:none !important;}
 
 <!-- BOTTOM-RIGHT: polygonal stat bar flowing into a circular boost -->
 <div id="br" class="br">
+  <!-- OCCASIONAL SPONSOR ROLL-OUT — part of the statcard; slides out from under the bar's left edge -->
+  <div id="spon-roll" class="spon-roll empty" aria-hidden="true">
+    <div class="sr-head"><span class="sr-lbl">Presented by</span></div>
+    <div class="sr-body"><img id="spon-roll-logo" alt=""></div>
+  </div>
   <div class="br-bar">
     <div id="cam" class="cam"><div class="cam-load"><img alt=""></div><div class="cam-live"><i></i>LIVE</div><div class="cam-stub">NO CAM</div></div>
     <div class="card-head">
@@ -1274,6 +1300,7 @@ body.sb-external #sb{display:none !important;}
     </div>
   </div>
 </div>
+
 
 <!-- REPLAY CAM GRID — all player cams + stat cards during a replay (optional, alongside the LT) -->
 <div id="replay-cams"></div>
@@ -1867,7 +1894,7 @@ function pickSpectated(players, spectated){
 function renderStatcard(players, spectated, facecams){
   const mod=el('br');
   const p=pickSpectated(players, spectated);
-  if(!p){ if(mod) mod.classList.remove('show'); syncSponsorToStatcard(); showCam(null,facecams); return; }
+  if(!p){ if(mod) mod.classList.remove('show'); syncSponsorToStatcard(); showCam(null,facecams); el('spon-roll')?.classList.remove('out'); return; }
   if(mod) mod.classList.add('show');
   syncSponsorToStatcard();
   // after a replay the HUD is cleared; restore it once we're back in normal play (NOT the replay
@@ -1889,6 +1916,55 @@ function renderStatcard(players, spectated, facecams){
   const pct=Math.max(0,Math.min(100,p.boost||0));
   drawBoost(pct, color); setText('boost-val', Math.round(pct));
   showCam(p, facecams);
+  updateSponsorRoll();
+}
+
+/* ── OCCASIONAL SPONSOR ROLL-OUT (RLCS-style) ──────────────────────────────────────
+   The title-sponsor tab rolls out from behind the bottom-right statcard every SPON_EVERY_MS for
+   SPON_HOLD_MS, then rolls back. Producer-gated (state.rlSponsorRoll); only fires when a title
+   sponsor is set and the statcard is up, and never over a goal replay. */
+const SPON_EVERY_MS = 32000, SPON_HOLD_MS = 5200;
+let sponCycleTimer = null, sponHideTimer = null;
+function sponsorLogo(){ const b = currentState.brand || {}; return (b.spots && b.spots.title) || ''; }
+function updateSponsorRoll(){
+  const roll = el('spon-roll'); if(!roll) return;
+  if(!currentState.rlSponsorRoll){ roll.classList.add('empty'); roll.classList.remove('out'); return; }   // producer toggle off
+  const logo = sponsorLogo(), img = el('spon-roll-logo');
+  if(logo){ if(img.getAttribute('src')!==logo){ img.onload = () => roll.classList.toggle('sr-light', logoIsDark(img)); img.src = logo; } roll.classList.remove('empty'); }
+  else { roll.classList.add('empty'); roll.classList.remove('out'); }
+  syncSponsorRollHeight();
+}
+// Match the tab to the card row (name strip + stats) so its bands line up with the card's exactly.
+function syncSponsorRollHeight(){
+  const roll = el('spon-roll'), head = document.querySelector('#br .card-head'), stats = document.querySelector('#br .stats');
+  if(!roll || !head || !stats) return;
+  const h = head.offsetHeight + stats.offsetHeight;
+  if(h > 0) roll.style.height = h + 'px';
+}
+// Average luminance of the logo's opaque pixels — a dark logo gets a light plate so it stays readable.
+// A cross-origin image taints the canvas (getImageData throws) → assume light, keep the dark panel.
+function logoIsDark(img){
+  try{
+    const c = document.createElement('canvas'); c.width = c.height = 32;
+    const x = c.getContext('2d'); x.drawImage(img, 0, 0, 32, 32);
+    const d = x.getImageData(0, 0, 32, 32).data; let sum = 0, n = 0;
+    for(let k = 0; k < d.length; k += 4){ if(d[k+3] < 40) continue; sum += (0.2126*d[k] + 0.7152*d[k+1] + 0.0722*d[k+2]) / 255; n++; }
+    return n > 0 && (sum / n) < 0.38;
+  }catch(e){ return false; }
+}
+function rollSponsorOut(){
+  const roll = el('spon-roll'); if(!roll) return;
+  if(!currentState.rlSponsorRoll || !sponsorLogo()) return;   // disabled or nothing to show
+  if(goalCycleActive || !statcardVisible()) return;           // don't clash with a replay / card hidden
+  syncSponsorRollHeight();
+  roll.classList.add('out');
+  clearTimeout(sponHideTimer);
+  sponHideTimer = setTimeout(() => roll.classList.remove('out'), SPON_HOLD_MS);
+}
+function startSponsorCycle(){
+  clearInterval(sponCycleTimer);
+  setTimeout(rollSponsorOut, 6500);
+  sponCycleTimer = setInterval(rollSponsorOut, SPON_EVERY_MS);
 }
 
 /* ── sponsor rail ─────────────────────────────────────────────────────────── */
@@ -2224,6 +2300,7 @@ function goalEvent(side){
   brazilGoal = isBrazilGoal(side);   // a 7-1 goal plays ONLY the Brazil flag swipe (normal swipe + outro suppressed)
   // safety: if the ReplayEnd signal is ever missed, force the end sequence after 15s
   clearTimeout(goalCycleTimer); goalCycleTimer=setTimeout(endGoalCycle, 15000);
+  { const roll=el('spon-roll'); if(roll){ roll.classList.remove('out'); clearTimeout(sponHideTimer); } }   // pull the sponsor tab back for the replay
   triggerGoalName(side);
   currentState._goal = Object.assign({}, currentState._goal, {team:side});
   clearTimeout(introTimer); clearTimeout(introHoldTimer); clearTimeout(introHoldSafety);
@@ -3125,6 +3202,7 @@ async function connect(){
 }
 drawBoost(0, BLUE);
 connect();
+startSponsorCycle();
 
 /* ════════════════════════ DEV TOOLBAR — test event triggers ════════════════
    Hidden by default; press the backtick (`) key to toggle, or load the overlay
@@ -3132,6 +3210,7 @@ connect();
    so you can preview goal/replay/overtime/scorecard without RL or the server. */
 const DEV = {
   eventName:'PRO CHAMPIONSHIP SERIES', bestOf:7,
+  rlSponsorRoll:true,   // preview the sponsor roll-out in ?dev
   brand:{ logo:'/assets/rl.png', color:'#2f8dff', spots:{ title:'/assets/rl.png' },
           // dev-only partners so the bottom sponsor rail is visible when previewing the scorecard
           // (a real brand kit supplies these from state.brand.railSponsors/sponsors)

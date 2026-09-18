@@ -96,32 +96,30 @@ function lgPopulateLeagueSelect(selectEl, leagues, opts) {
   if (opts.value !== undefined) selectEl.value = opts.value || '';
 }
 
+// The league switcher in the Leagues header (it replaced the 236px list sidebar, which squeezed the
+// editor into a sliver beside the on-air rail). Esports > Competitions keeps the full card list.
 function lgRenderList() {
-  const wrap = el('lg-list'); if (!wrap) return;
+  const sel = el('lg-switch'); if (!sel) return;
   const STATUS_LABELS = { active: 'Active', playoffs: 'Playoffs', offseason: 'Off-season', complete: 'Complete' };
-  wrap.innerHTML = lgLeagues.length
+  const esc = (v) => String(v == null ? '' : v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  if (!lgActiveId && lgLeagues.length) lgActiveId = lgLeagues[0].id;
+  const sig = JSON.stringify([lgActiveId, lgLeagues.map((l) => [l.id, l.name, l.season, l.status, (l.teams || []).length])]);
+  if (sel.dataset.sig === sig) return;
+  sel.dataset.sig = sig;
+  sel.innerHTML = lgLeagues.length
     ? lgLeagues.map((l) => {
-        const esc = (s) => (s || '').replace(/</g, '&lt;');
-        const phText = l.abbr
-          ? l.abbr.slice(0, 4)
-          : (l.name || '').split(/\s+/).map((w) => w[0] || '').join('').slice(0, 4).toUpperCase() || '?';
-        const logoHtml = l.logo
-          ? `<img class="lg-list-logo" src="${l.logo}" alt="">`
-          : `<div class="lg-list-logo-ph">${esc(phText)}</div>`;
-        const status = l.status || 'active';
-        return `<button class="lg-list-item${l.id === lgActiveId ? ' active' : ''}" data-id="${l.id}">
-          ${logoHtml}
-          <div class="lg-list-info">
-            <span class="lg-list-name">${esc(l.name || 'League')}</span>
-            <span class="lg-list-sub">
-              <span class="lg-list-status" data-s="${status}"></span>
-              ${esc(STATUS_LABELS[status] || status)} · ${(l.teams || []).length} teams
-            </span>
-          </div></button>`;
+        const bits = [l.season, STATUS_LABELS[l.status || 'active'] || l.status, (l.teams || []).length + ' teams'].filter(Boolean).join(' · ');
+        return `<option value="${esc(l.id)}"${l.id === lgActiveId ? ' selected' : ''}>${esc(l.name || 'League')}  (${esc(bits)})</option>`;
       }).join('')
-    : '<div class="lg-empty" style="padding:14px;">No leagues yet.</div>';
-  wrap.querySelectorAll('.lg-list-item').forEach((b) => b.addEventListener('click', () => { lgActiveId = b.dataset.id; lgRender(); }));
+    : '<option value="">No leagues yet</option>';
+  sel.disabled = !lgLeagues.length;
 }
+el('lg-switch')?.addEventListener('change', function () { if (this.value) { lgActiveId = this.value; lgRender(); } });
+el('lg-startgg-toggle')?.addEventListener('click', () => {
+  const row = el('lg-startgg-row'); if (!row) return;
+  row.hidden = !row.hidden;
+  if (!row.hidden) el('lg-startgg-slug')?.focus();
+});
 // One central team database: league teams REFERENCE a saved team (by name) and resolve their
 // name/logo/roster live from currentState.savedTeams. Legacy embedded teams fall back to their
 // own data and are flagged "unlinked" so they can be re-added from the library.
@@ -749,54 +747,73 @@ function lgRenderStandingsTab() {
   const rankedIds = new Set(ranked.map(s => s.teamId));
   const unranked = (lg.teams || []).filter(tm => !rankedIds.has(tm.id));
   const rows = [
-    ...ranked.map(s => { const tm = teamsMap[s.teamId]; return { teamId: tm.id, teamName: lgResolveTeam(tm).name, w: s.w || 0, l: s.l || 0, t: s.t || 0, gf: s.gf || 0, ga: s.ga || 0, pts: s.pts || 0, subW: s.subW || 0, subL: s.subL || 0, form: s.form || [], streak: s.streak || '', ptsLocked: !!s.ptsLocked }; }),
-    ...unranked.map(tm => ({ teamId: tm.id, teamName: lgResolveTeam(tm).name, w: 0, l: 0, t: 0, gf: 0, ga: 0, pts: 0, subW: 0, subL: 0, form: [], streak: '' }))
+    ...ranked.map(s => { const tm = teamsMap[s.teamId]; const rt = lgResolveTeam(tm); return { teamId: tm.id, teamName: rt.name, logo: rt.logo || '', w: s.w || 0, l: s.l || 0, t: s.t || 0, gf: s.gf || 0, ga: s.ga || 0, pts: s.pts || 0, subW: s.subW || 0, subL: s.subL || 0, form: s.form || [], streak: s.streak || '', ptsLocked: !!s.ptsLocked }; }),
+    ...unranked.map(tm => ({ teamId: tm.id, teamName: lgResolveTeam(tm).name, logo: lgResolveTeam(tm).logo || '', w: 0, l: 0, t: 0, gf: 0, ga: 0, pts: 0, subW: 0, subL: 0, form: [], streak: '' }))
   ];
 
-  if (!rows.length) { wrap.innerHTML = '<div class="lg-empty">Add teams to track standings.</div>'; return; }
+  if (!rows.length) { wrap.innerHTML = '<div class="lg-empty">Add teams on the Teams tab to start the table.</div>'; return; }
   const formDots = (form) => form.map(f => `<span class="lg2-fd lg2-fd-${f.toLowerCase()}">${f}</span>`).join('');
   const gs = lgGameStats(lg.game);
   const u = gs.unit;
   const showDraw = rows.some(r => (r.t || 0) > 0) || (!gs.series && lg.scoring && lg.scoring.draw != null && Number(lg.scoring.draw) !== 0);
   const divs = lgDivisions(lg);
   const hasDivs = divs.length > 0;
+  // Column set. The default is what league sites show — rank, team, W, L, games, diff, points, form —
+  // so the table fits beside the on-air rail. "All columns" adds the split for/against, games won and
+  // lost separately, streak and the division picker. Numbers are only editable in Manual mode: in the
+  // other modes the table is rebuilt from results, so a typed cell would silently be overwritten.
+  const expanded = !!lgStPrefs().expanded;
+  const expChk = el('lg-st-expanded'); if (expChk) expChk.checked = expanded;
+  const unassigned = hasDivs && rows.some((r) => !divs.find((d) => d.id === lgTeamDivId(lg, r.teamId)));
+  const showDiv = hasDivs && (expanded || unassigned);
   // Sortable header cell: clicking a stat column sorts lg.standings by it (arrow shows active key/dir).
   const sortArrow = (k) => _lgStSort.key === k ? (_lgStSort.dir < 0 ? ' ▾' : ' ▴') : '';
   const sTh = (k, lbl, title) => `<th class="lg2-st-sort" data-sk="${k}"${title ? ` title="${title}"` : ''}>${lbl}${sortArrow(k)}</th>`;
-  let head = '<th class="lg2-drag-th"></th><th>#</th>' + sTh('teamName', 'Team') + sTh('w', 'W', 'Series won') + sTh('l', 'L', 'Series lost');
+  let head = `<th class="lg2-st-team-th lg2-st-sort" data-sk="teamName"><span class="lg2-st-rank-h">#</span>Team${sortArrow('teamName')}</th>` + sTh('w', 'W', 'Series won') + sTh('l', 'L', 'Series lost');
   if (showDraw) head += sTh('t', 'T', 'Series tied');
-  if (gs.sub) head += sTh('subW', esc(gs.sub.abbr) + 'W', esc(gs.sub.noun) + ' won') + sTh('subL', esc(gs.sub.abbr) + 'L', esc(gs.sub.noun) + ' lost');
-  if (u) head += sTh('gf', 'For', esc(u.noun) + ' scored') + sTh('ga', 'Against', esc(u.noun) + ' conceded') + sTh('diff', 'Diff', esc(u.noun) + ' difference');
-  head += sTh('pts', 'Pts') + '<th>Form</th><th title="Current win/loss streak">Streak</th>';
-  if (hasDivs) head += '<th title="Division">Div</th>';
-  const numInp = (r, key, min) => `<td><input type="number" class="input-text lg2-st-inp" data-tid="${r.teamId}" data-key="${key}" value="${r[key]}"${min != null ? ` min="${min}"` : ''}></td>`;
-  const divSel = (r) => hasDivs ? `<td><select class="input-select lg2-st-div" data-tid="${r.teamId}"><option value="">—</option>${divs.map((d) => `<option value="${esc(d.id)}"${lgTeamDivId(lg, r.teamId) === d.id ? ' selected' : ''}>${esc(d.name)}</option>`).join('')}</select></td>` : '';
+  if (gs.sub) head += expanded || manual
+    ? sTh('subW', esc(gs.sub.noun) + ' W', esc(gs.sub.noun) + ' won') + sTh('subL', esc(gs.sub.noun) + ' L', esc(gs.sub.noun) + ' lost')
+    : sTh('subW', esc(gs.sub.noun), esc(gs.sub.noun) + ' won-lost');
+  if (u && expanded) head += sTh('gf', 'For', esc(u.noun) + ' scored') + sTh('ga', 'Against', esc(u.noun) + ' conceded');
+  if (u) head += sTh('diff', 'Diff', esc(u.noun) + ' difference');
+  head += sTh('pts', 'Pts', 'Points') + '<th class="lg2-st-form-th">Form</th>';
+  if (expanded) head += '<th title="Current win/loss streak">Streak</th>';
+  if (showDiv) head += '<th title="Division">Div</th>';
+  const num = (r, key, min) => manual
+    ? `<td><input type="number" class="input-text lg2-st-inp" data-tid="${r.teamId}" data-key="${key}" value="${r[key]}"${min != null ? ` min="${min}"` : ''}></td>`
+    : `<td class="lg2-st-num">${r[key]}</td>`;
+  const divSel = (r) => showDiv ? `<td><select class="input-select lg2-st-div" data-tid="${r.teamId}"><option value="">—</option>${divs.map((d) => `<option value="${esc(d.id)}"${lgTeamDivId(lg, r.teamId) === d.id ? ' selected' : ''}>${esc(d.name)}</option>`).join('')}</select></td>` : '';
+  const initials = (n) => esc(String(n || '?').split(/\s+/).map((w) => w[0] || '').join('').slice(0, 3).toUpperCase());
   // One team-row; rank is passed in so divisions can rank within each group. Playoff zone = rank ≤ N.
   const rowHtml = (r, rank) => {
     const zone = rank <= playoffN ? ' lg2-st-playoff' : '';
     const cut = rank === playoffN ? ' lg2-st-cut' : '';
-    let c = `<td class="lg2-drag-cell"><span class="lg2-drag-handle" title="Drag to reorder"></span></td>`
-      + `<td class="lg2-pos">${rank <= playoffN ? '<span class="lg2-playoff-dot" title="Playoff spot"></span>' : ''}${rank}</td>`
-      + `<td>${esc(r.teamName)}</td>` + numInp(r, 'w', 0) + numInp(r, 'l', 0);
-    if (showDraw) c += numInp(r, 't', 0);
-    if (gs.sub) c += numInp(r, 'subW', 0) + numInp(r, 'subL', 0);
-    if (u) c += numInp(r, 'gf', 0) + numInp(r, 'ga', 0) + `<td>${(r.gf - r.ga) >= 0 ? '+' : ''}${r.gf - r.ga}</td>`;
+    const logo = r.logo ? `<img class="lg2-st-logo" src="${esc(r.logo)}" alt="">` : `<span class="lg2-st-logo lg2-st-logo-ph">${initials(r.teamName)}</span>`;
+    let c = `<td class="lg2-st-team"><span class="lg2-drag-handle" title="Drag to reorder"></span><span class="lg2-pos${rank <= playoffN ? ' in-playoffs' : ''}" title="${rank <= playoffN ? 'Playoff spot' : ''}">${rank}</span>${logo}<span class="lg2-st-name" title="${esc(r.teamName)}">${esc(r.teamName)}</span></td>`
+      + num(r, 'w', 0) + num(r, 'l', 0);
+    if (showDraw) c += num(r, 't', 0);
+    if (gs.sub) c += expanded || manual ? num(r, 'subW', 0) + num(r, 'subL', 0) : `<td class="lg2-st-num lg2-sub-rec">${r.subW}<span class="lg2-sub-dash">-</span>${r.subL}</td>`;
+    if (u && expanded) c += num(r, 'gf', 0) + num(r, 'ga', 0);
+    if (u) { const d = r.gf - r.ga; c += `<td class="lg2-st-num lg2-st-diff ${d > 0 ? 'pos' : d < 0 ? 'neg' : ''}">${d > 0 ? '+' : ''}${d}</td>`; }
     // In manual mode points normally derive from the scoring rules; a typed value pins the cell
     // (marked with a dot) until it's cleared, which hands the column back to the rules.
     const ptsCell = manual
       ? `<td><input type="number" class="input-text lg2-st-inp lg2-st-pts${r.ptsLocked ? ' pinned' : ''}" data-tid="${r.teamId}" data-key="pts" value="${r.pts}" title="${r.ptsLocked ? 'Overridden by hand — clear the field to go back to the scoring rules' : 'Derived from your scoring rules — type a value to override'}"></td>`
-      : numInp(r, 'pts');
-    c += ptsCell + `<td class="lg2-form-cell">${formDots(r.form)}</td><td class="lg2-streak">${esc(r.streak)}</td>` + divSel(r);
+      : `<td class="lg2-st-num lg2-st-pts-val">${r.pts}</td>`;
+    c += ptsCell + `<td class="lg2-form-cell">${formDots(r.form)}</td>`;
+    if (expanded) c += `<td class="lg2-streak">${esc(r.streak)}</td>`;
+    c += divSel(r);
     return `<tr data-tid="${r.teamId}" draggable="true" class="lg2-st-row${zone}${cut}">${c}</tr>`;
   };
-  const tableFor = (groupRows) => `<div class="lg2-st-scroll"><table class="lg2-st-table"><thead><tr>${head}</tr></thead><tbody>${groupRows.map((r, i) => rowHtml(r, i + 1)).join('')}</tbody></table></div>`;
+  const tableFor = (groupRows) => `<div class="lg2-st-scroll"><table class="lg2-st-table${manual ? ' is-manual' : ''}"><thead><tr>${head}</tr></thead><tbody>${groupRows.map((r, i) => rowHtml(r, i + 1)).join('')}</tbody></table></div>`;
+  const legend = `<div class="lg2-st-legend"><span class="lg2-st-legend-dot"></span>Playoff spot (top ${playoffN}) · change it in Settings</div>`;
   if (hasDivs) {
     const groups = divs.map((d) => ({ name: d.name, rows: rows.filter((r) => lgTeamDivId(lg, r.teamId) === d.id) }));
     const un = rows.filter((r) => !divs.find((d) => d.id === lgTeamDivId(lg, r.teamId)));
     if (un.length) groups.push({ name: 'Unassigned', rows: un });
-    wrap.innerHTML = groups.map((g) => `<div class="lg2-div-group"><div class="lg2-div-head">${esc(g.name)}<span class="lg2-div-count">${g.rows.length}</span></div>${g.rows.length ? tableFor(g.rows) : '<div class="lg-empty" style="padding:6px 0;">No teams in this division.</div>'}</div>`).join('');
+    wrap.innerHTML = groups.map((g) => `<div class="lg2-div-group"><div class="lg2-div-head">${esc(g.name)}<span class="lg2-div-count">${g.rows.length}</span></div>${g.rows.length ? tableFor(g.rows) : '<div class="lg-empty" style="padding:6px 0;">No teams in this division.</div>'}</div>`).join('') + legend;
   } else {
-    wrap.innerHTML = tableFor(rows);
+    wrap.innerHTML = tableFor(rows) + legend;
   }
 
   // Sortable headers
@@ -926,6 +943,10 @@ el('lg-st-sortdir')?.addEventListener('click', () => {
   lgStSortBy(_lgStSort.key, true);
 });
 
+el('lg-st-expanded')?.addEventListener('change', function () {
+  const p = lgStPrefs(); p.expanded = this.checked; lgStSavePrefs(p); lgRenderStandingsTab();
+});
+
 // Switching source mode. Going manual seeds a row for every team so the table is immediately
 // typeable, and carries over whatever the schedule had already produced rather than starting at 0.
 el('lg-st-source')?.addEventListener('click', (e) => {
@@ -934,7 +955,7 @@ el('lg-st-source')?.addEventListener('click', (e) => {
   const mode = ['manual', 'points'].includes(b.dataset.src) ? b.dataset.src : 'schedule';
   lg.standingsMode = mode;
   if (mode === 'manual') (lg.teams || []).forEach((tm) => lgStandingsRow(lg, tm.id));
-  lgSave(); lgRenderStandingsTab(); lgRenderTeams();
+  lgSave(); lgRenderStandingsTab(); lgRenderTeams(); lgUpdateBanner();
   lgStatus({
     manual: 'Manual standings — type the table directly; the schedule no longer overwrites it.',
     points: 'Standings now total the placement points from the Tournaments tab. Add an event there to fill the table.',
@@ -1163,7 +1184,9 @@ const LG_SUB_UNIT = {
   'smash':         { noun: 'Games', abbr: 'Gm' },
   'mobile-legends':{ noun: 'Games', abbr: 'Gm' },
   'honor-of-kings':{ noun: 'Games', abbr: 'Gm' },
-  'bedwars':       { noun: 'Games', abbr: 'Gm' }
+  'bedwars':       { noun: 'Games', abbr: 'Gm' },
+  'the-finals':    { noun: 'Games', abbr: 'Gm' },
+  'marvel-tokon':  { noun: 'Games', abbr: 'Gm' }
 };
 // Games where the numeric For/Against "unit" score is meaningful (goals/rounds). MOBAs and BR games
 // have no simple per-game score, so their For/Against/Diff columns are hidden rather than shown as 0.
@@ -1203,6 +1226,7 @@ const LG_STAT_SETS = {
   'smash':         ['Wins', 'KOs', 'Falls', 'Self-destructs'],
   'eafc':          ['Goals', 'Assists', 'Shots', 'Possession %'],
   'bedwars':       ['Beds Broken', 'Final Kills', 'Kills', 'Deaths'],
+  'the-finals':    ['Eliminations', 'Deaths', 'Assists', 'Cash', 'Revives'],
   // Battle royale: scored per placement + elims rather than head-to-head, so the tracked totals are
   // the ones an organiser actually reads off a lobby result sheet.
   'fortnite':      ['Eliminations', 'Placement Points', 'Victory Royales', 'Damage']
@@ -1619,168 +1643,298 @@ function lgPopulateScheduleSelects() {
 // state, not saved to the league, so it just needs to survive re-renders within this session.
 const _lgExpandedGames = new Set();
 
+// Schedule filters — UI state only (not saved to the league).
+const _lgSchFilter = { week: '', team: '', status: 'all' };
+// A match's display status. Mirrors matchStatus() in backend/competition.js so the tab, the ticker
+// and the schedule board never disagree about what is live or final.
+function lgMatchStatus(m) {
+  const cap = (currentState && currentState.leagueCapture) || {};
+  if ((cap.active && cap.matchId === m.id) || m.status === 'live') return 'live';
+  if (m.status === 'postponed' || m.status === 'cancelled') return m.status;
+  const r = m.result || {};
+  if ((Array.isArray(m.games) && m.games.length) || (r.scoreA != null && r.scoreB != null)) return 'final';
+  return 'upcoming';
+}
+function lgMatchWhen(m) {
+  if (!m.date) return m.time || '';
+  const d = new Date(m.date + 'T' + (/^\d{1,2}:\d{2}/.test(m.time || '') ? (m.time.length === 4 ? '0' + m.time : m.time) : '12:00'));
+  if (isNaN(d)) return [m.date, m.time].filter(Boolean).join(' ');
+  const day = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  return m.time ? day + ' · ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : day;
+}
+function lgBestOfWins(fmt) { const n = parseInt(String(fmt || '').replace(/\D/g, ''), 10) || 3; return Math.ceil(n / 2); }
+
 function lgRenderScheduleTab() {
   const lg = lgActive(); const wrap = el('lg2-schedule'); if (!wrap || !lg) return;
   lgPopulateScheduleSelects();
-  const esc = (s) => String(s == null ? '' : s).replace(/</g, '&lt;');
+  const esc = (v) => String(v == null ? '' : v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const schedule = lg.schedule || [];
-  if (!schedule.length) { wrap.innerHTML = '<div class="lg-empty">No matches yet. Add one above or generate a round-robin.</div>'; return; }
-  const byWeek = {};
-  for (const m of schedule) { const w = m.week || ''; (byWeek[w] = byWeek[w] || []).push(m); }
-  const teamName = (id, fallback) => { const tm = (lg.teams || []).find((t) => t.id === id); return tm ? lgResolveTeam(tm).name : (fallback || '?'); };
-  wrap.innerHTML = Object.entries(byWeek).map(([week, matches]) => `
-    <div class="lg2-schedule-week">
-      ${week ? `<div class="lg2-week-label">Week ${esc(week)}</div>` : ''}
-      ${matches.map((m) => {
-        const r = m.result || {};
-        const hasResult = r.scoreA != null && r.scoreB != null;
-        const winner = hasResult ? (Number(r.scoreA) > Number(r.scoreB) ? 'A' : Number(r.scoreB) > Number(r.scoreA) ? 'B' : 'draw') : null;
-        const aName = teamName(m.teamA, m.sggTeamA), bName = teamName(m.teamB, m.sggTeamB);
-        // Imported (start.gg-synced) rows can fail to fuzzy-match onto a league team — teamA/teamB
-        // stays null while the raw platform name survives in sggTeamA/sggTeamB. Unmatched rows are
-        // silently excluded from standings recalculation, so surface a picker rather than hiding it.
-        const aUnmatched = !m.teamA && m.sggTeamA;
-        const bUnmatched = !m.teamB && m.sggTeamB;
-        const unmatchedOpts = (raw) => '<option value="">Unmatched — pick a team…</option>' + (lg.teams || []).map((tm) =>
-          `<option value="${tm.id}">${esc(lgResolveTeam(tm).name)}</option>`).join('') +
-          (raw ? `<option value="" disabled>(start.gg: ${esc(raw)})</option>` : '');
-        const dtStr = [m.date, m.time].filter(Boolean).map(esc).join(' · ');
-        // Per-game breakdown is optional — a match with 0 games keeps today's single-number series
-        // entry; once at least 1 game is logged, the series score is derived from the games below
-        // (real per-game totals also then feed GF/GA in standings instead of the series tally).
-        const hasGames = Array.isArray(m.games) && m.games.length > 0;
-        const tally = lgMatchTally(m);
-        const expanded = _lgExpandedGames.has(m.id);
-        const gamesRows = expanded ? `
-          <div class="lg2-match-games" style="display:flex;flex-direction:column;gap:4px;margin-top:6px;padding:8px;background:rgba(255,255,255,.03);border-radius:6px;">
-            ${(m.games || []).map((g, gi) => `
-              <div class="lg2-game-row" style="display:flex;align-items:center;gap:6px;">
-                <span style="color:var(--muted);font-size:11px;min-width:24px;">G${gi + 1}</span>
-                <input type="number" class="input-text lg2-game-a" data-mid="${m.id}" data-gi="${gi}" value="${g.scoreA ?? ''}" min="0" placeholder="—" style="width:64px;">
-                <span style="color:var(--muted);">:</span>
-                <input type="number" class="input-text lg2-game-b" data-mid="${m.id}" data-gi="${gi}" value="${g.scoreB ?? ''}" min="0" placeholder="—" style="width:64px;">
-                <button class="lg-del lg2-game-del" data-mid="${m.id}" data-gi="${gi}" title="Remove game">×</button>
-              </div>`).join('')}
-            <button class="btn btn-ghost btn-xs lg2-game-add" data-mid="${m.id}" style="align-self:flex-start;">+ Add Game</button>
-          </div>` : '';
-        return `<div class="lg2-match-item" data-mid="${m.id}">
-          <div class="lg2-match-row">
-            <div class="lg2-match-teams">
-              ${aUnmatched
-                ? `<select class="input-text lg2-unmatched-sel" data-mid="${m.id}" data-side="A" style="border-color:var(--warn,#c98a1f);color:var(--warn,#c98a1f);max-width:180px;">${unmatchedOpts(m.sggTeamA)}</select>`
-                : `<span${winner === 'A' ? ' style="font-weight:900"' : winner === 'B' ? ' style="color:var(--muted)"' : ''}>${esc(aName)}</span>`}
-              <span style="color:var(--muted);margin:0 6px;">vs</span>
-              ${bUnmatched
-                ? `<select class="input-text lg2-unmatched-sel" data-mid="${m.id}" data-side="B" style="border-color:var(--warn,#c98a1f);color:var(--warn,#c98a1f);max-width:180px;">${unmatchedOpts(m.sggTeamB)}</select>`
-                : `<span${winner === 'B' ? ' style="font-weight:900"' : winner === 'A' ? ' style="color:var(--muted)"' : ''}>${esc(bName)}</span>`}
-            </div>
-            <span class="lg2-match-fmt">${esc(m.format || 'BO3')}</span>
-            ${dtStr ? `<span class="lg2-match-date">${dtStr}</span>` : ''}
-            <div class="lg2-match-score">
-              ${hasGames
-                ? `<span class="lg2-series-derived" title="Derived from ${m.games.length} game(s) below" style="font-weight:800;">${tally.sa}–${tally.sb}</span>`
-                : `<input type="number" class="input-text lg2-score-a" data-mid="${m.id}" value="${r.scoreA ?? ''}" placeholder="—" min="0">
-                   <span style="color:var(--muted);font-weight:700;">:</span>
-                   <input type="number" class="input-text lg2-score-b" data-mid="${m.id}" value="${r.scoreB ?? ''}" placeholder="—" min="0">`}
-              <label class="lg2-ot-chk" title="This result went to overtime" style="display:flex;align-items:center;gap:3px;font-size:11px;color:var(--muted);">
-                <input type="checkbox" class="lg2-ot-inp" data-mid="${m.id}" ${r.ot ? 'checked' : ''}>OT
-              </label>
-            </div>
-            <button class="btn btn-ghost btn-xs lg2-match-games-toggle" data-mid="${m.id}">${hasGames ? `Games (${m.games.length})` : '+ Games'}</button>
-            ${(function () { const cap = (currentState && currentState.leagueCapture) || {}; const armed = cap.active && cap.matchId === m.id; return `<button class="btn btn-ghost btn-xs lg2-match-record${armed ? ' armed' : ''}" data-mid="${m.id}" title="Record the spectated result of this match into the league">${armed ? '● Recording' : 'Record'}</button>`; })()}
-            <button class="btn btn-ghost btn-xs lg2-match-live" data-mid="${m.id}">Go Live</button>
-            <button class="lg-del lg2-match-del" data-mid="${m.id}" title="Remove">×</button>
-          </div>
-          ${gamesRows}
-          <div class="lg2-match-extra">
-            <input type="text" class="input-text lg2-match-notes-inp" data-mid="${m.id}" value="${esc(m.notes || '')}" placeholder="Notes…">
-            <input type="url" class="input-text lg2-match-vod-inp" data-mid="${m.id}" value="${esc(m.vod || '')}" placeholder="VOD link…">
-          </div>
-        </div>`;
-      }).join('')}
-    </div>`).join('');
+  const teamById = (id) => (lg.teams || []).find((t) => t.id === id);
+  const teamOf = (id, fallback) => { const tm = teamById(id); if (!tm) return { name: fallback || 'TBD', logo: '' }; const r = lgResolveTeam(tm); return { name: r.name, logo: r.logo || '' }; };
+
+  // Filters: week list follows the schedule, team list follows the roster.
+  const weeks = [...new Set(schedule.map((m) => String(m.week || '')))].sort((x, y) => {
+    if (!x) return 1; if (!y) return -1;
+    const nx = parseFloat(x), ny = parseFloat(y);
+    return (!isNaN(nx) && !isNaN(ny)) ? nx - ny : x.localeCompare(y);
+  });
+  if (_lgSchFilter.week && !weeks.includes(_lgSchFilter.week === '__none__' ? '' : _lgSchFilter.week)) _lgSchFilter.week = '';
+  if (_lgSchFilter.team && !teamById(_lgSchFilter.team)) _lgSchFilter.team = '';
+  // '' means All weeks, so matches with no week use a sentinel value in the filter.
+  const NOWK = '__none__';
+  const fw = el('lg-sch-f-week');
+  if (fw) fw.innerHTML = '<option value="">All weeks</option>' + weeks.map((w) => { const v = w || NOWK; return `<option value="${esc(v)}"${v === _lgSchFilter.week ? ' selected' : ''}>${w ? 'Week ' + esc(w) : 'No week'}</option>`; }).join('');
+  const ft = el('lg-sch-f-team');
+  if (ft) ft.innerHTML = '<option value="">All teams</option>' + (lg.teams || []).map((tm) => `<option value="${esc(tm.id)}"${tm.id === _lgSchFilter.team ? ' selected' : ''}>${esc(lgResolveTeam(tm).name)}</option>`).join('');
+  document.querySelectorAll('#lg-sch-f-status .seg-btn').forEach((x) => x.classList.toggle('active', x.dataset.st === _lgSchFilter.status));
+
+  const addCard = el('lg-sch-add-card');
+  if (!schedule.length) {
+    if (addCard) addCard.hidden = false;   // nothing to look at yet, so lead with the form
+    el('lg-sch-count') && (el('lg-sch-count').textContent = '');
+    wrap.innerHTML = '<div class="lg-empty">No matches yet. Add one above, or fill the whole season with a round robin.</div>';
+    return;
+  }
+  const shown = schedule.filter((m) => {
+    if (_lgSchFilter.week && String(m.week || '') !== (_lgSchFilter.week === '__none__' ? '' : _lgSchFilter.week)) return false;
+    if (_lgSchFilter.team && m.teamA !== _lgSchFilter.team && m.teamB !== _lgSchFilter.team) return false;
+    const st = lgMatchStatus(m);
+    if (_lgSchFilter.status === 'upcoming') return st === 'upcoming' || st === 'live' || st === 'postponed';
+    if (_lgSchFilter.status === 'final') return st === 'final';
+    return true;
+  });
+  const cnt = el('lg-sch-count');
+  if (cnt) cnt.textContent = shown.length === schedule.length ? `${schedule.length} match${schedule.length === 1 ? '' : 'es'}` : `${shown.length} of ${schedule.length} matches`;
+  if (!shown.length) { wrap.innerHTML = '<div class="lg-empty">No matches match these filters.</div>'; return; }
+
+  const byWeek = new Map();
+  for (const w of weeks) byWeek.set(w, []);
+  for (const m of shown) byWeek.get(String(m.week || '')).push(m);
+  const STATUS_LABEL = { live: 'Live', final: 'Final', upcoming: 'Upcoming', postponed: 'Postponed', cancelled: 'Cancelled' };
+  const cap = (currentState && currentState.leagueCapture) || {};
+
+  const matchHtml = (m) => {
+    const r = m.result || {};
+    const st = lgMatchStatus(m);
+    const hasGames = Array.isArray(m.games) && m.games.length > 0;
+    const tally = lgMatchTally(m);
+    const sa = hasGames ? tally.sa : r.scoreA, sb = hasGames ? tally.sb : r.scoreB;
+    const done = sa != null && sb != null && sa !== '' && sb !== '';
+    const winner = done ? (Number(sa) > Number(sb) ? 'A' : Number(sb) > Number(sa) ? 'B' : 'draw') : null;
+    const A = teamOf(m.teamA, m.sggTeamA), B = teamOf(m.teamB, m.sggTeamB);
+    // Imported (start.gg-synced) rows can fail to match a league team — teamA/teamB stays null while
+    // the raw platform name survives in sggTeamA/sggTeamB. Unmatched rows don't count toward
+    // standings, so surface a picker rather than hiding it.
+    const unmatchedSel = (side, raw) => `<select class="input-select lg2-unmatched-sel" data-mid="${m.id}" data-side="${side}"><option value="">Pick a team…</option>${(lg.teams || []).map((tm) => `<option value="${tm.id}">${esc(lgResolveTeam(tm).name)}</option>`).join('')}${raw ? `<option value="" disabled>(start.gg: ${esc(raw)})</option>` : ''}</select>`;
+    const logo = (t) => t.logo ? `<img class="lg2-mc-logo" src="${esc(t.logo)}" alt="">` : `<span class="lg2-mc-logo lg2-mc-logo-ph">${esc(String(t.name || '?').slice(0, 2).toUpperCase())}</span>`;
+    const side = (key, t, raw) => {
+      const id = key === 'A' ? m.teamA : m.teamB;
+      const cls = winner === key ? ' win' : (winner && winner !== 'draw' ? ' loss' : '');
+      const body = !id && raw ? unmatchedSel(key, raw) : `<span class="lg2-mc-name" title="${esc(t.name)}">${esc(t.name)}</span>`;
+      return `<div class="lg2-mc-side lg2-mc-side-${key.toLowerCase()}${cls}">${key === 'A' ? logo(t) + body : body + logo(t)}</div>`;
+    };
+    const ff = r.ff === 'A' || r.ff === 'B' ? r.ff : '';
+    const score = hasGames
+      ? `<span class="lg2-mc-derived" title="From ${m.games.length} game score${m.games.length === 1 ? '' : 's'} (open Details to edit)">${tally.sa}<i>-</i>${tally.sb}</span>`
+      : `<input type="number" class="input-text lg2-score-a" data-mid="${m.id}" value="${r.scoreA ?? ''}" placeholder="-" min="0" aria-label="${esc(A.name)} score"><i>-</i><input type="number" class="input-text lg2-score-b" data-mid="${m.id}" value="${r.scoreB ?? ''}" placeholder="-" min="0" aria-label="${esc(B.name)} score">`;
+    const armed = cap.active && cap.matchId === m.id;
+    const expanded = _lgExpandedGames.has(m.id);
+    const hasExtra = hasGames || m.notes || m.vod;
+    const details = expanded ? `
+      <div class="lg2-mc-details">
+        <div class="lg2-mc-games">
+          <div class="lg2-mc-sub">Game scores <span>optional: when logged, the series score and standings use them</span></div>
+          ${(m.games || []).map((g, gi) => `
+            <div class="lg2-game-row">
+              <span class="lg2-game-n">G${gi + 1}</span>
+              <input type="number" class="input-text lg2-game-a" data-mid="${m.id}" data-gi="${gi}" value="${g.scoreA ?? ''}" min="0" placeholder="-">
+              <i>-</i>
+              <input type="number" class="input-text lg2-game-b" data-mid="${m.id}" data-gi="${gi}" value="${g.scoreB ?? ''}" min="0" placeholder="-">
+              <button class="lg-del lg2-game-del" data-mid="${m.id}" data-gi="${gi}" title="Remove game">×</button>
+            </div>`).join('')}
+          <button class="btn btn-ghost btn-xs lg2-game-add" data-mid="${m.id}">+ Add game</button>
+        </div>
+        <div class="lg2-match-extra">
+          <input type="text" class="input-text lg2-match-notes-inp" data-mid="${m.id}" value="${esc(m.notes || '')}" placeholder="Notes">
+          <input type="url" class="input-text lg2-match-vod-inp" data-mid="${m.id}" value="${esc(m.vod || '')}" placeholder="VOD link">
+        </div>
+      </div>` : '';
+    const when = lgMatchWhen(m);
+    return `<div class="lg2-mc is-${st}${armed ? ' is-recording' : ''}" data-mid="${m.id}">
+      <div class="lg2-mc-row">
+        ${side('A', A, m.sggTeamA)}
+        <div class="lg2-mc-score">${score}</div>
+        ${side('B', B, m.sggTeamB)}
+      </div>
+      <div class="lg2-mc-foot">
+        <div class="lg2-mc-meta">
+          <span class="lg2-mc-status">${STATUS_LABEL[st] || st}${ff ? ' · Forfeit' : ''}</span>
+          <span>${esc(m.format || 'BO3')}</span>
+          ${when ? `<span>${esc(when)}</span>` : ''}
+          <label class="lg2-ot-chk" title="This result went to overtime"><input type="checkbox" class="lg2-ot-inp" data-mid="${m.id}" ${r.ot ? 'checked' : ''}>OT</label>
+          ${m.vod ? `<a class="lg2-mc-vod" href="${esc(m.vod)}" target="_blank" rel="noopener">VOD</a>` : ''}
+        </div>
+        <div class="lg2-mc-actions">
+          <button class="btn btn-ghost btn-xs lg2-match-games-toggle${expanded ? ' active' : ''}" data-mid="${m.id}">${hasExtra ? 'Details' + (hasGames ? ` (${m.games.length})` : '') : '+ Details'}</button>
+          <button class="btn btn-ghost btn-xs lg2-match-record${armed ? ' armed' : ''}" data-mid="${m.id}" title="Record the spectated result of this match into the league">${armed ? 'Recording' : 'Record'}</button>
+          <button class="btn btn-secondary btn-xs lg2-match-live" data-mid="${m.id}" title="Put both teams on the scoreboard">Go live</button>
+          <select class="input-select lg2-match-more" data-mid="${m.id}" aria-label="More actions">
+            <option value="">More</option>
+            <optgroup label="Status">
+              <option value="st:live"${m.status === 'live' ? ' disabled' : ''}>Mark live</option>
+              <option value="st:postponed"${m.status === 'postponed' ? ' disabled' : ''}>Postponed</option>
+              <option value="st:cancelled"${m.status === 'cancelled' ? ' disabled' : ''}>Cancelled</option>
+              ${m.status ? '<option value="st:">Clear status</option>' : ''}
+            </optgroup>
+            <optgroup label="Result">
+              <option value="ff:A">${esc(A.name)} forfeits</option>
+              <option value="ff:B">${esc(B.name)} forfeits</option>
+              ${done ? '<option value="clear">Clear result</option>' : ''}
+            </optgroup>
+            <option value="delete">Delete match</option>
+          </select>
+        </div>
+      </div>
+      ${details}
+    </div>`;
+  };
+
+  wrap.innerHTML = [...byWeek.entries()].filter(([, ms]) => ms.length).map(([week, ms]) => {
+    const all = schedule.filter((m) => String(m.week || '') === week);
+    const played = all.filter((m) => lgMatchStatus(m) === 'final').length;
+    return `<div class="lg2-schedule-week">
+      <div class="lg2-week-label"><span>${week ? 'Week ' + esc(week) : 'No week set'}</span><span class="lg2-week-count">${played} of ${all.length} played</span></div>
+      ${ms.map(matchHtml).join('')}
+    </div>`;
+  }).join('');
+
+  const findM = (mid) => (lg.schedule || []).find((x) => x.id === mid);
+  const afterResult = () => {
+    if (lgStandingsMode(lg) === 'schedule') lg.standings = lgAggregateFromSchedule(lg);
+    lgSave(); lgRenderScheduleTab();
+    if (_lgActiveTab === 'standings') lgRenderStandingsTab();
+  };
   const saveScore = (mid) => {
-    const m = (lg.schedule || []).find((x) => x.id === mid); if (!m) return;
+    const m = findM(mid); if (!m) return;
     const ia = wrap.querySelector(`.lg2-score-a[data-mid="${mid}"]`);
     const ib = wrap.querySelector(`.lg2-score-b[data-mid="${mid}"]`);
     m.result = m.result || {};
     m.result.scoreA = ia && ia.value !== '' ? Number(ia.value) : null;
     m.result.scoreB = ib && ib.value !== '' ? Number(ib.value) : null;
-    const hasResult = m.result.scoreA != null && m.result.scoreB != null;
-    if (hasResult) lg.standings = lgAggregateFromSchedule(lg);
-    lgSave(); lgRenderScheduleTab();
-    if (hasResult && _lgActiveTab === 'standings') lgRenderStandingsTab();
+    delete m.result.ff;   // a typed score replaces a forfeit
+    if (m.status === 'live' && m.result.scoreA != null && m.result.scoreB != null) delete m.status;
+    afterResult();
   };
   wrap.querySelectorAll('.lg2-score-a, .lg2-score-b').forEach((inp) => inp.addEventListener('change', () => saveScore(inp.dataset.mid)));
   wrap.querySelectorAll('.lg2-ot-inp').forEach((inp) => inp.addEventListener('change', () => {
-    const m = (lg.schedule || []).find((x) => x.id === inp.dataset.mid); if (!m) return;
-    m.result = m.result || {}; m.result.ot = inp.checked; lgSave();
+    const m = findM(inp.dataset.mid); if (!m) return;
+    m.result = m.result || {}; m.result.ot = inp.checked; afterResult();
   }));
-  wrap.querySelectorAll('.lg2-match-games-toggle').forEach((b) => b.addEventListener('click', () => {
-    const mid = b.dataset.mid;
+  wrap.querySelectorAll('.lg2-match-games-toggle').forEach((btn) => btn.addEventListener('click', () => {
+    const mid = btn.dataset.mid;
     if (_lgExpandedGames.has(mid)) _lgExpandedGames.delete(mid); else _lgExpandedGames.add(mid);
     lgRenderScheduleTab();
   }));
-  wrap.querySelectorAll('.lg2-game-add').forEach((b) => b.addEventListener('click', () => {
-    const m = (lg.schedule || []).find((x) => x.id === b.dataset.mid); if (!m) return;
+  wrap.querySelectorAll('.lg2-game-add').forEach((btn) => btn.addEventListener('click', () => {
+    const m = findM(btn.dataset.mid); if (!m) return;
     m.games = m.games || []; m.games.push({ scoreA: null, scoreB: null });
     _lgExpandedGames.add(m.id);
     lgSave(); lgRenderScheduleTab();
   }));
-  wrap.querySelectorAll('.lg2-game-del').forEach((b) => b.addEventListener('click', () => {
-    const m = (lg.schedule || []).find((x) => x.id === b.dataset.mid); if (!m) return;
-    m.games = (m.games || []).filter((_, i) => String(i) !== b.dataset.gi);
-    lgSave(); lgRenderScheduleTab();
+  wrap.querySelectorAll('.lg2-game-del').forEach((btn) => btn.addEventListener('click', () => {
+    const m = findM(btn.dataset.mid); if (!m) return;
+    m.games = (m.games || []).filter((_, i) => String(i) !== btn.dataset.gi);
+    afterResult();
   }));
   wrap.querySelectorAll('.lg2-game-a, .lg2-game-b').forEach((inp) => inp.addEventListener('change', () => {
-    const m = (lg.schedule || []).find((x) => x.id === inp.dataset.mid); if (!m || !Array.isArray(m.games)) return;
+    const m = findM(inp.dataset.mid); if (!m || !Array.isArray(m.games)) return;
     const g = m.games[Number(inp.dataset.gi)]; if (!g) return;
     const v = inp.value !== '' ? Number(inp.value) : null;
     if (inp.classList.contains('lg2-game-a')) g.scoreA = v; else g.scoreB = v;
-    lg.standings = lgAggregateFromSchedule(lg);
-    lgSave(); lgRenderScheduleTab();
-    if (_lgActiveTab === 'standings') lgRenderStandingsTab();
+    afterResult();
   }));
   wrap.querySelectorAll('.lg2-unmatched-sel').forEach((sel) => sel.addEventListener('change', () => {
     if (!sel.value) return;
-    const m = (lg.schedule || []).find((x) => x.id === sel.dataset.mid); if (!m) return;
+    const m = findM(sel.dataset.mid); if (!m) return;
     if (sel.dataset.side === 'A') m.teamA = sel.value; else m.teamB = sel.value;
-    lgSave(); lgRenderScheduleTab(); lgRenderStandingsTab();
-    lgStatus('Match linked — Recalculate standings to include it.', true);
+    afterResult();
+    lgStatus('Match linked to the team.', true);
   }));
-  wrap.querySelectorAll('.lg2-match-del').forEach((b) => b.addEventListener('click', () => {
-    lg.schedule = (lg.schedule || []).filter((m) => m.id !== b.dataset.mid);
-    lg.standings = lgAggregateFromSchedule(lg);
-    lgRenderScheduleTab(); lgSave();
-    if (_lgActiveTab === 'standings') lgRenderStandingsTab();
+  wrap.querySelectorAll('.lg2-match-more').forEach((sel) => sel.addEventListener('change', async () => {
+    const v = sel.value; sel.value = '';
+    const m = findM(sel.dataset.mid); if (!m || !v) return;
+    if (v.startsWith('st:')) {
+      const st = v.slice(3);
+      if (st === 'live') (lg.schedule || []).forEach((x) => { if (x !== m && x.status === 'live') delete x.status; });
+      if (st) m.status = st; else delete m.status;
+      lgSave(); lgRenderScheduleTab();
+      send('competition_match_status', { leagueId: lg.id, matchId: m.id, status: st });
+      return;
+    }
+    if (v.startsWith('ff:')) {
+      const side = v.slice(3);
+      const A = teamOf(m.teamA, m.sggTeamA).name, B = teamOf(m.teamB, m.sggTeamB).name;
+      const quitter = side === 'A' ? A : B;
+      const hadGames = Array.isArray(m.games) && m.games.length;
+      if (!(await appConfirm(`Record a forfeit by ${quitter}? The other team gets a ${lgBestOfWins(m.format)}-0 win${hadGames ? ' and the logged game scores are removed' : ''}.`, 'Record forfeit'))) return;
+      const w = lgBestOfWins(m.format);
+      m.games = [];
+      m.result = { ...(m.result || {}), scoreA: side === 'A' ? 0 : w, scoreB: side === 'B' ? 0 : w, ff: side, ot: false };
+      if (m.status === 'live') delete m.status;
+      afterResult();
+      return;
+    }
+    if (v === 'clear') {
+      if (!(await appConfirm('Clear this match result? Standings recalculate without it.', 'Clear result'))) return;
+      m.games = []; m.result = {};
+      afterResult();
+      return;
+    }
+    if (v === 'delete') {
+      const A = teamOf(m.teamA, m.sggTeamA).name, B = teamOf(m.teamB, m.sggTeamB).name;
+      if (!(await appConfirm(`Delete ${A} vs ${B} from the schedule?`, 'Delete', true))) return;
+      lg.schedule = (lg.schedule || []).filter((x) => x.id !== m.id);
+      afterResult();
+    }
   }));
-  wrap.querySelectorAll('.lg2-match-live').forEach((b) => b.addEventListener('click', () => {
-    const m = (lg.schedule || []).find((x) => x.id === b.dataset.mid); if (!m) return;
-    const ta = (lg.teams || []).find((t) => t.id === m.teamA), tb = (lg.teams || []).find((t) => t.id === m.teamB);
-    if (!ta || !tb) { lgStatus('Add both teams to the Roster tab first.', false); return; }
+  wrap.querySelectorAll('.lg2-match-live').forEach((btn) => btn.addEventListener('click', () => {
+    const m = findM(btn.dataset.mid); if (!m) return;
+    const ta = teamById(m.teamA), tb = teamById(m.teamB);
+    if (!ta || !tb) { lgStatus('Add both teams on the Teams tab first.', false); return; }
     const ra = lgResolveTeam(ta), rb = lgResolveTeam(tb);
     send('set_team', { side: 'blue',   name: ra.name, logo: ra.logo || null, players: ra.players });
     send('set_team', { side: 'orange', name: rb.name, logo: rb.logo || null, players: rb.players });
     send('reset_series'); lgStatus(`${ra.name} vs ${rb.name} pushed live.`, true);
   }));
-  wrap.querySelectorAll('.lg2-match-record').forEach((b) => b.addEventListener('click', () => {
-    const cap = (currentState && currentState.leagueCapture) || {};
-    if (cap.active && cap.matchId === b.dataset.mid) { send('league_capture_stop', {}); return; }   // toggle off
-    const m = (lg.schedule || []).find((x) => x.id === b.dataset.mid); if (!m) return;
+  wrap.querySelectorAll('.lg2-match-record').forEach((btn) => btn.addEventListener('click', () => {
+    const c = (currentState && currentState.leagueCapture) || {};
+    if (c.active && c.matchId === btn.dataset.mid) { send('league_capture_stop', {}); return; }   // toggle off
+    const m = findM(btn.dataset.mid); if (!m) return;
     if (!m.teamA || !m.teamB) { lgStatus('Both teams must be assigned before recording.', false); return; }
     send('league_capture_arm', { leagueId: lg.id, matchId: m.id });
     lgStatus('Armed — the next spectated series records into this match (saves when it clinches).', true);
   }));
-  wrap.querySelectorAll('.lg2-match-notes-inp').forEach(inp => inp.addEventListener('change', () => {
-    const m = (lg.schedule || []).find(x => x.id === inp.dataset.mid); if (!m) return;
+  wrap.querySelectorAll('.lg2-match-notes-inp').forEach((inp) => inp.addEventListener('change', () => {
+    const m = findM(inp.dataset.mid); if (!m) return;
     m.notes = inp.value.trim(); lgSave();
   }));
-  lgRenderCaptureBar();
-  wrap.querySelectorAll('.lg2-match-vod-inp').forEach(inp => inp.addEventListener('change', () => {
-    const m = (lg.schedule || []).find(x => x.id === inp.dataset.mid); if (!m) return;
-    m.vod = inp.value.trim(); lgSave();
+  wrap.querySelectorAll('.lg2-match-vod-inp').forEach((inp) => inp.addEventListener('change', () => {
+    const m = findM(inp.dataset.mid); if (!m) return;
+    m.vod = inp.value.trim(); lgSave(); lgRenderScheduleTab();
   }));
+  lgRenderCaptureBar();
 }
+el('lg-sch-f-week')?.addEventListener('change', function () { _lgSchFilter.week = this.value; lgRenderScheduleTab(); });
+el('lg-sch-f-team')?.addEventListener('change', function () { _lgSchFilter.team = this.value; lgRenderScheduleTab(); });
+el('lg-sch-f-status')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.seg-btn'); if (!btn) return;
+  _lgSchFilter.status = btn.dataset.st || 'all'; lgRenderScheduleTab();
+});
+el('lg-sch-add-toggle')?.addEventListener('click', () => {
+  const card = el('lg-sch-add-card'); if (!card) return;
+  card.hidden = !card.hidden;
+  if (!card.hidden) el('lg-sch-a')?.focus();
+});
 // Live status of the producer-armed spectated-match capture (state.leagueCapture). Re-rendered on
 // every full_state (see app.js hook) so it ticks up as games finish.
 function lgRenderCaptureBar() {
@@ -2329,12 +2483,16 @@ function lgRenderOverview() {
 
 // ── tab switching ──────────────────────────────────────────────────────────
 function lgSwitchTab(name) {
+  if (!name) name = 'overview';
   _lgActiveTab = name;
-  document.querySelectorAll('#lg2-tabs .lg2-tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
-  ['overview', 'roster', 'standings', 'rankings', 'schedule', 'bracket', 'stats', 'brseries', 'ballchasing', 'settings'].forEach((t) => {
+  const navTab = name === 'rankings' ? 'standings' : name;   // Power rankings is a view inside Standings
+  document.querySelectorAll('#lg2-tabs .lg2-tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === navTab));
+  document.querySelectorAll('.lg2-view-seg .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.lgview === name));
+  ['overview', 'source', 'roster', 'standings', 'rankings', 'schedule', 'bracket', 'stats', 'brseries', 'ballchasing', 'settings'].forEach((t) => {
     const p = el('lg2-panel-' + t); if (p) p.style.display = t === name ? '' : 'none';
   });
   if (name === 'overview') lgRenderOverview();
+  else if (name === 'source') { if (typeof lgRenderSourceTab === 'function') lgRenderSourceTab(); }
   else if (name === 'roster') lgSetRosterView(_lgRosterView);
   else if (name === 'standings') lgRenderStandingsTab();
   else if (name === 'rankings') lgRenderRankingsTab();
@@ -2631,10 +2789,16 @@ function lgUpdateBanner() {
     bcTab.style.display = showBc ? '' : 'none';
     if (!showBc && _lgActiveTab === 'ballchasing') lgSwitchTab('overview');
   }
-  // Tournaments is NOT game-gated (Ballchasing above is). Any league can run a circuit scored on
-  // placement points — a weekly Rocket League cup, a Bedwars series, an FGC ranking season — so
-  // the tab is always available. Only "Go live with this event", which drives the battle-royale
-  // lobby board, is game-specific, and it hides itself in lgRenderBrTab.
+  // Tournaments is NOT game-gated the way Ballchasing is — any league can run a circuit scored on
+  // placement points (a weekly RL cup, a Bedwars series, an FGC ranking season). It shows whenever
+  // that applies: a battle-royale game, standings set to Tournament points, or events already
+  // logged. Picking "Tournament points" on the Standings tab re-renders the banner and reveals it.
+  const brTab = el('lg2-tab-brseries');
+  if (brTab) {
+    const showBr = lgBrIsBrGame(lg) || lgStandingsMode(lg) === 'points' || lgBrSeries(lg).length > 0;
+    brTab.hidden = !showBr;
+    if (!showBr && _lgActiveTab === 'brseries') lgSwitchTab('overview');
+  }
   // Chips
   const chips = el('lg2-banner-chips'); if (!chips) return;
   const game = lg.game && currentState.games && currentState.games[lg.game] ? currentState.games[lg.game].name : (lg.game || '');
@@ -2659,15 +2823,31 @@ function lgRender() {
   if (!lg) { if (empty) empty.style.display = ''; if (detail) detail.style.display = 'none'; return; }
   if (empty) empty.style.display = 'none'; if (detail) detail.style.display = '';
   lgUpdateBanner();
+  lgUpdateGoLive();
   lgSwitchTab(_lgActiveTab);
 }
 
+// Banner "Go live": this league becomes the live competition every competition scene follows.
+function lgUpdateGoLive() {
+  const b = el('lg-go-live'); const lg = lgActive(); if (!b || !lg) return;
+  const live = ((currentState.competition || {}).leagueId || '') === lg.id;
+  b.textContent = live ? 'On air' : 'Go live';
+  b.classList.toggle('btn-primary', !live);
+  b.classList.toggle('btn-secondary', live);
+  b.title = live ? 'This league is the live competition. Manage it on Events > Competitions.' : 'Make this the live competition: the ticker, schedule, standings and break scenes follow it';
+}
+el('lg-go-live')?.addEventListener('click', () => {
+  const lg = lgActive(); if (!lg) return;
+  if (((currentState.competition || {}).leagueId || '') === lg.id) { if (typeof evShowSubtab === 'function') evShowSubtab('competitions'); return; }
+  send('competition_set_live', { leagueId: lg.id });
+  lgStatus('"' + (lg.name || 'League') + '" is now the live competition.', true);
+});
 el('lg-new')?.addEventListener('click', () => { const l = lgNewLeague(); lgLeagues.push(l); lgActiveId = l.id; _lgActiveTab = 'overview'; lgRender(); lgSave(); });
 // Import a league from a start.gg event (server fetches entrants → builds a team league).
 el('lg-startgg-import')?.addEventListener('click', () => {
   const input = (el('lg-startgg-slug')?.value || '').trim();
   if (!input) { showToast('Paste a start.gg event URL or slug first.', '#f59e0b'); return; }
-  if (!currentState.startgg?.hasToken) { showToast('Add your Start.gg API token in Settings → Integrations first.', '#f59e0b'); return; }
+  if (!currentState.startgg?.hasToken) { showToast('Add your Start.gg API token in Marketplace → Integrations first.', '#f59e0b'); return; }
   send('create_league_from_startgg', { input });
   lgStatus('Importing league from start.gg (teams + rosters)…');
 });
@@ -2835,7 +3015,10 @@ el('lg-stats-push')?.addEventListener('click', () => {
 el('lg-add-match')?.addEventListener('click', lgAddMatch);
 el('lg-gen-rr')?.addEventListener('click', lgGenerateRoundRobin);
 el('lg-gen-drr')?.addEventListener('click', lgGenerateDoubleRoundRobin);
-el('lg2-tabs')?.addEventListener('click', (e) => { const tab = e.target.closest('.lg2-tab'); if (tab) lgSwitchTab(tab.dataset.tab); });
+el('lg2-tabs')?.addEventListener('click', (e) => { const tab = e.target.closest('.lg2-tab'); if (tab && tab.dataset.tab) lgSwitchTab(tab.dataset.tab); });
+document.querySelectorAll('.lg2-view-seg').forEach((seg) => seg.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-lgview]'); if (b) lgSwitchTab(b.dataset.lgview);
+}));
 el('lg-roster-seg')?.addEventListener('click', (e) => { const b = e.target.closest('.seg-btn'); if (b) lgSetRosterView(b.dataset.rv); });
 el('lg-players-search')?.addEventListener('input', () => lgRenderRosterPlayers());
 // Overview cockpit controls
@@ -2944,7 +3127,7 @@ el('lg-st-divisions')?.addEventListener('click', () => { const b = el('lg-st-div
 el('lg-bkt-generate')?.addEventListener('click', lgBracketGenerate);
 // The standalone "Bracket Builder" sub-tab was removed from the ESPORTS nav (2026-08) — the builder
 // is reached from the competition it belongs to instead. openBracketBuilder() is defined in
-// seeding-spotlight.js (loads before this file) and is the single place that knows where the
+// spotlight.js (loads before this file) and is the single place that knows where the
 // builder's DOM currently lives.
 el('lg-bkt-builder')?.addEventListener('click', () => { if (typeof window.openBracketBuilder === 'function') window.openBracketBuilder(); });
 el('lg-bkt-push')?.addEventListener('click', () => lgBracketPush(true));
@@ -2967,8 +3150,8 @@ function lgPushScheduleToOverlay() {
   });
   if (!matches.length) { lgStatus('No matches in the schedule to push.', false); return; }
   const title = [lg.name, lg.season].filter(Boolean).join(' — ');
-  send('set_upcoming', { visible: true, title: title || 'Schedule', source: 'league', showResults: true, matches });
-  lgStatus('League schedule pushed to the schedule overlay.', true);
+  send('set_upcoming', { visible: true, title: title || 'Schedule', source: 'league', leagueId: lg.id, showResults: true, matches });
+  lgStatus('Schedule board now follows this league — results you record update it automatically.', true);
 }
 
 // Hide every league-driven overlay in one click (end-of-segment reset).

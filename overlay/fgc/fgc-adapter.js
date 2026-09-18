@@ -32,9 +32,23 @@
 
   // The roster's country ISO code for the flag — our editor stores a lowercase ISO alpha-2 in
   // `country`; start.gg imports use `countryCode`; the profile registry backs both up.
+  // start.gg ALSO fills `country` with the country NAME ("United States"), and reading that first
+  // asked for "united states.svg" — a 404 the image skin drew as a broken-image icon in the plaque.
+  // Only a 2-letter value is a flag file (same rule as smash.html's countryCode()).
   function countryCode(p, prof) {
-    return firstNonEmpty(p && p.country, p && p.countryCode, prof && prof.countryCode, prof && prof.country).toLowerCase();
+    var cands = [p && p.countryCode, prof && prof.countryCode, p && p.country, prof && prof.country];
+    for (var i = 0; i < cands.length; i++) {
+      var s = str(cands[i]).toLowerCase();
+      if (/^[a-z]{2}$/.test(s)) return s;
+    }
+    return '';
   }
+
+  // Image URLs that already failed to load (a flag we don't ship, a dead team-logo link). They are
+  // mapped to '' on the next frame so the template falls back to its no-image plaque instead of
+  // leaving a broken-image icon (or an empty image slot) on air.
+  var _badImg = {};
+  function okImg(url) { url = str(url); return url && !_badImg[url] ? url : ''; }
 
   // The active/on-air roster member for a side — the one actually competing, chosen in
   // Match ▸ Teams (state.activePlayer[side] = player id). '' or a stale id → the first player.
@@ -73,8 +87,9 @@
 
     // Player row image = the active player's COUNTRY FLAG (matches the FGC layout — flags by
     // the name, org identity lives on the team row below).
-    var cc = pA ? countryCode(pA, prof) : '';
-    var playerImg = cc ? (FLAG_BASE + cc + '.svg') : '';
+    // No roster entry: the side name is still usually a gamertag the profile registry knows.
+    var cc = pA ? countryCode(pA, prof) : countryCode(null, profiles[teamName.toLowerCase()] || null);
+    var playerImg = cc ? okImg(FLAG_BASE + cc + '.svg') : '';
 
     // Top bar shows the PLAYER name only — the org/team lives on the team row below, so no
     // "TEAM | player" prefix up top.
@@ -92,7 +107,7 @@
     var teamPlaque = { name: '', score: 0, img: '', profile: '' };
     if (pA && teamName) {
       teamPlaque.name = teamName;
-      teamPlaque.img = str(team.logo);
+      teamPlaque.img = okImg(team.logo);
     }
 
     return { player: player, team: teamPlaque };
@@ -423,7 +438,8 @@
     }
     preloadCasterIcons();
     if (typeof window.__fgcConnect === 'function') window.__fgcConnect();
-    window.SceneBase.connect(function (state) {
+    var lastState = null;
+    function frame(state) {
       try {
         applyBrandColors(state);
         applyCasterLayout(state);
@@ -432,7 +448,23 @@
         applySponsorRail(state);
         if (_DEBUG) showDebug(state);
       } catch (e) { console.error('[fgc-adapter] map/emit failed:', e); }
+    }
+    // Plaque/team images: the image skin uses <img src>, the SVG skins <image href>; both fire
+    // 'error'. Remember the URL and re-render the last frame without it. The templates resolve an
+    // EMPTY image to the page's own URL, which also errors — that one is not a real failure.
+    ['player1Img', 'player2Img', 'team1Img', 'team2Img'].forEach(function (id) {
+      var img = document.getElementById(id);
+      if (!img) return;
+      img.addEventListener('error', function () {
+        var raw = str(img.getAttribute('src') || img.getAttribute('href'));
+        if (!raw) return;
+        var abs = new URL(raw, location.href).href;
+        if (abs === location.href) return;
+        _badImg[raw] = _badImg[abs] = _badImg[new URL(abs).pathname] = true;
+        if (lastState) frame(lastState);
+      });
     });
+    window.SceneBase.connect(function (state) { lastState = state; frame(state); });
   }
   boot();
 })();

@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<!--
+  tokon.html — Marvel Tokon: Fighting Souls scoreboard. Competitive Tokon is 1v1 (each player runs
+  a tag team), so the board carries two PLAYERS, not two teams.
+
+  Built AROUND the game's own HUD (1920x1080 coordinates, measured off producer screenshots):
+    - a character-portrait cluster in each top corner (heads reach ~x204 / ~x1760 in the top band)
+    - the in-game CHARACTER NAME labels under the outer ends of the top band (y ~38-62)
+    - the life bars (y ~70-107), the round timer (x ~912-1014) and the round-win pips (y ~41-67)
+    - the super meters along the bottom (y ~1017-1056), with a V-shaped gap between their inner ends
+      (~145px wide at the top, ~85px at the bottom)
+
+    top     / ORG NAME  flag \score\ \ LOSERS QUARTER-FINAL / /score/ flag  NAME ORG \    (y 2-34)
+                                       BEST OF 3 · GAME 2 OF 3
+    ... the fight ...
+    meters  [ super meter    ] \ sponsor / [ super meter    ]                               (y 1017-1053)
+    edge                  / EVENT TITLE \ \ (mic) CASTER  CASTER \                          (y 1056-1080)
+
+  TOP: a compact board — the two player plates pulled in toward a centre section holding the ROUND
+  and "BEST OF 3 · GAME 2 OF 3". It ends at y ~34, above the in-game character names and round pips.
+  BOTTOM: the SPONSORS rotate one at a time in a tile filling the gap between the super meters; the
+  EVENT TITLE is a centred tab on the bottom edge of the screen (always shown), with the CASTERS
+  attached to its right (with the 'meters' placement).
+
+  Every piece is slanted at Tokon's own ~38deg with its thin light frame line: player 1's side leans
+  "\", player 2's "/". The exception is the top plates' OUTER ends, which lean the opposite way
+  (producer's call), so each plate is a trapezoid wider along the bottom.
+
+    teams.blue/orange      → the two players (active roster member: gamertag, org prefix, country)
+    series.blue/orange     → set score, plus the pips under it
+    roundLabel             → top middle, line 1   bestOf + game.number → line 2 "Best of 3 · Game 2 of 3"
+    eventName              → the bottom-edge tab
+    playerProfiles         → country when the roster entry itself has none
+    tokon.railPos          → where casters + sponsors go (Match ▸ Teams ▸ Marvel Tokon):
+                             'meters'      casters right of the event tab, sponsors rotating in the
+                                           tile between the super meters
+                             'bottomleft' | 'bottomright'  the shared caster-rail card in a corner
+
+  Flags are ISO-2 only: start.gg puts the country NAME on `country` ("United States") and the code on
+  `countryCode`, and a name is not a flag file.
+
+  POSITION is set in Match ▸ Teams ▸ Marvel Tokon ▸ Position (state.tokon.layout: top, w, gutter,
+  spony, sponw, barlift — frame pixels). The same names as ?params on the source URL still
+  override the saved values, for one-off per-source tweaks.
+
+  Query params:  ?top=2 · ?w=1140 board width · ?gutter=340 centre section width
+                 · ?spony=1017 sponsor tile top · ?sponw=130 its top width · ?barlift=0 lifts
+                 the event tab + casters off the bottom edge
+                 · ?title=off hides the event title · ?info=0 drops the best-of / game line
+                 · ?railpos=meters|bottomleft|bottomright overrides the producer's pick
+                 · ?railbottom=30 lifts the corner card · ?rail=0 / ?casters=0 / ?sponsors=0
+                 · ?anim=0 cuts the entrance animation
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="/fonts.css">
+  <style>
+    :root {
+      --a: #e0383e;
+      --b: #2a7fff;
+      --bar-h: 32px;     /* the top board — short enough to clear Tokon's character-name labels */
+      --gutter: 340px;   /* the centre section (round + best-of / game) */
+      /* The lean — Tokon's OWN: "\" on player 1's side, "/" on player 2's, ~38deg. Literal pairs
+         rather than calc(-1 * var()) — Electron 18 (Chrome 100) is unreliable with calc() arriving
+         through var() substitution. */
+      --sk-a: 38deg;   --unsk-a: -38deg;
+      --sk-b: -38deg;  --unsk-b: 38deg;
+      /* the thin light frame line Tokon draws round its own bars */
+      --hud-line: rgba(226, 232, 242, .6);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 1920px; height: 1080px; overflow: hidden; background: transparent;
+      font-family: 'Rajdhani', 'Inter', system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased; text-transform: uppercase;
+    }
+
+    @keyframes sb-drop  { from { opacity: 0; transform: translateX(-50%) translateY(-16px); }
+                          to   { opacity: 1; transform: translateX(-50%) translateY(0); } }
+    /* Plates SLIDE in — a clip-path wipe would end on inset(0) and, with fill-mode both, square the
+       trapezoid clips back into rectangles for good. */
+    @keyframes slide-l  { from { opacity: 0; transform: translateX(-26px); } to { opacity: 1; transform: none; } }
+    @keyframes slide-r  { from { opacity: 0; transform: translateX(26px); }  to { opacity: 1; transform: none; } }
+    @keyframes rise     { from { opacity: 0; transform: translateY(-8px); }  to { opacity: 1; transform: none; } }
+
+    .sb {
+      position: absolute; top: var(--sb-top, 2px); left: 50%; transform: translateX(-50%);
+      display: grid;
+      grid-template-columns: 1fr var(--gutter) 1fr;
+      grid-template-rows: var(--bar-h);
+      width: var(--sb-w, 1140px);
+      opacity: 0;
+      filter: drop-shadow(0 8px 20px rgba(0, 0, 0, .5));
+    }
+    .sb.show { animation: sb-drop .42s cubic-bezier(.2, .8, .3, 1) both; }
+    .sb:not(.show) .p, .sb:not(.show) .mid { opacity: 0; }
+    .sb.show .p--a { animation: slide-l .5s cubic-bezier(.2, .8, .3, 1) .14s both; }
+    .sb.show .p--b { animation: slide-r .5s cubic-bezier(.2, .8, .3, 1) .14s both; }
+    .sb.show .mid  { animation: rise    .4s cubic-bezier(.2, .8, .3, 1) .02s both; }
+    body.no-anim .sb, body.no-anim .sb * { animation: none !important; }
+    body.no-anim .sb.show, body.no-anim .sb.show * { opacity: 1; }
+
+    /* ── Top: player plate ──
+       A TRAPEZOID, not a skew: the INNER end (toward the centre) keeps Tokon's lean, the OUTER end
+       leans the opposite way. One skew can't give the two ends different leans, so the plate is
+       clipped. The 1px light rim is the plate's own background showing round a slightly inset,
+       clipped fill (::before) — a box-shadow can't follow a clip-path diagonal.
+       25px = the 32px bar x tan(38deg). */
+    .p {
+      grid-row: 1; position: relative; display: flex; align-items: stretch;
+      background: var(--hud-line);
+      clip-path: polygon(25px 0, calc(100% - 25px) 0, 100% 100%, 0 100%);
+    }
+    .p::before {
+      content: ''; position: absolute; top: 1px; right: 1px; bottom: 1px; left: 1px; z-index: 0;
+      background: linear-gradient(90deg, var(--pc-deep) 0%, var(--pc) 64%, var(--pc-lite) 100%);
+      clip-path: polygon(24.5px 0, calc(100% - 24.5px) 0, 100% 100%, 0 100%);
+    }
+    .p--b::before { background: linear-gradient(270deg, var(--pc-deep) 0%, var(--pc) 64%, var(--pc-lite) 100%); }
+    .p--a { grid-column: 1; margin-left: 12px;
+            --sk: var(--sk-a); --unsk: var(--unsk-a);
+            --pc: var(--a); --pc-deep: var(--a-deep); --pc-lite: var(--a-lite);
+            --pc-ink: var(--a-ink); --pc-ink-soft: var(--a-ink-soft); --pc-shadow: var(--a-shadow); }
+    .p--b { grid-column: 3; margin-right: 12px; flex-direction: row-reverse;
+            --sk: var(--sk-b); --unsk: var(--unsk-b);
+            --pc: var(--b); --pc-deep: var(--b-deep); --pc-lite: var(--b-lite);
+            --pc-ink: var(--b-ink); --pc-ink-soft: var(--b-ink-soft); --pc-shadow: var(--b-shadow); }
+
+    .pbody {
+      position: relative; z-index: 1; flex: 1 1 auto; min-width: 0;
+      display: flex; align-items: center; gap: 12px; padding: 0 14px 0 38px;
+    }
+    .p--b .pbody { flex-direction: row-reverse; padding: 0 38px 0 14px; }
+    .name {
+      flex: 1 1 auto; min-width: 0;
+      font-size: 21px; font-weight: 700; letter-spacing: .02em; line-height: 1;
+      color: var(--pc-ink, #fff);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      text-shadow: var(--pc-shadow, 0 2px 6px rgba(0,0,0,.55));
+    }
+    .p--b .name { text-align: right; }
+    .name .pre { color: var(--pc-ink-soft, rgba(255,255,255,.72)); margin-right: .34em; }
+
+    .flag {
+      flex: 0 0 auto; width: 26px; height: 19px; object-fit: cover; border-radius: 3px;
+      box-shadow: 0 1px 5px rgba(0,0,0,.6); background: rgba(255,255,255,.06);
+    }
+    .flag.is-hidden { display: none; }
+
+    /* Score cap: a dark slanted tile carrying the INNER end's lean, set 1px inside the plate's inner
+       diagonal (13px = half the 25px cut + the 1px rim) so the light rim stays visible. White digits
+       on dark whatever kit the player wears; the side colour is its inner edge. */
+    .pscore {
+      position: relative; z-index: 2; flex: 0 0 auto; width: 50px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+      background: linear-gradient(180deg, #1b1f2b, #07080d);
+      color: #fff; text-shadow: 0 2px 6px rgba(0,0,0,.5);
+      font-size: 21px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums;
+      transform: skewX(var(--sk));
+    }
+    .pscore > * { transform: skewX(var(--unsk)); }
+    .p--a .pscore { margin: 1px 13px 1px 0; box-shadow: inset -3px 0 0 var(--a-lite); }
+    .p--b .pscore { margin: 1px 0 1px 13px; box-shadow: inset 3px 0 0 var(--b-lite); }
+    .pscore-pips { display: flex; align-items: center; gap: 3px; height: 5px; }
+    .pscore-pips.is-hidden { display: none; }
+    .p--b .pscore-pips { flex-direction: row-reverse; }
+    .pscore-pip {
+      width: 5px; height: 5px; border-radius: 50%; flex: 0 0 auto;
+      background: rgba(255,255,255,.14); box-shadow: inset 0 0 0 1px rgba(255,255,255,.28);
+    }
+    .pscore-pip.won { background: #fff; box-shadow: 0 0 5px rgba(255,255,255,.65); }
+
+    /* ── Top middle: round + best-of / game ──
+       A trapezoid wider at the top, so its sides run parallel to the plates' inner ends. It is 34px
+       wider than its grid column (17px into each plate's column) so the seam between it and each
+       plate is ~8px, the same gap Tokon leaves between its own segments. 23px = 30px x tan(38deg). */
+    .mid { grid-column: 2; grid-row: 1; display: flex; justify-content: center; align-items: flex-start; min-width: 0; }
+    .mid.is-hidden { visibility: hidden; }
+    .strip {
+      position: relative; flex: 0 0 auto; width: calc(100% + 34px); height: calc(var(--bar-h) - 2px);
+      display: flex; align-items: center; justify-content: center; gap: 10px; padding: 0 32px;
+      background: var(--hud-line);
+      clip-path: polygon(0 0, 100% 0, calc(100% - 23px) 100%, 23px 100%);
+    }
+    .strip::before {
+      content: ''; position: absolute; top: 1px; right: 1px; bottom: 1px; left: 1px;
+      background: linear-gradient(180deg, #14161f, #06070c);
+      clip-path: polygon(0 0, 100% 0, calc(100% - 22.5px) 100%, 22.5px 100%);
+    }
+    .strip::after {
+      content: ''; position: absolute; top: 1px; left: 1px; right: 1px; height: 2px;
+      background: linear-gradient(90deg, transparent, var(--glow, #29b6f6) 25%, var(--glow, #29b6f6) 75%, transparent);
+    }
+    .strip-logo { position: relative; z-index: 1; height: 20px; width: auto; max-width: 56px; object-fit: contain;
+                  flex: 0 0 auto; filter: drop-shadow(0 2px 6px rgba(0,0,0,.6)); }
+    .strip-logo.is-hidden { display: none; }
+    .strip-txt {
+      position: relative; z-index: 1; min-width: 0;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1;
+    }
+    .strip-round, .strip-match { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .strip-round { font-size: 14px; font-weight: 800; letter-spacing: .08em; color: #fff; }
+    .strip-match { margin-top: 3px; font-size: 11px; font-weight: 700; letter-spacing: .14em; color: rgba(255,255,255,.72); }
+    .strip-round:empty, .strip-match:empty { display: none; }
+    /* No round: the best-of / game line is the whole section, so it takes the headline size. */
+    .strip-round:empty + .strip-match { margin-top: 0; font-size: 14px; color: #fff; letter-spacing: .08em; }
+
+    /* ── Bottom ──
+       Tokon's super meters sit ~y1017-1056 with a V-shaped gap between their inner ends (~145px wide
+       at the top, ~85px at the bottom). The SPONSORS rotate in a tile filling that gap; the EVENT
+       TITLE is a tab on the bottom edge of the screen under it, with the CASTERS attached to its
+       right. With a corner card picked, only the event tab shows here. Positions come from JS. */
+    body.rail-meters .crail { display: none !important; }
+    .mtext {
+      position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; gap: 12px;
+      height: 100%; min-width: 0;
+      font-size: 15px; font-weight: 800; letter-spacing: .14em; line-height: 1; color: #fff; white-space: nowrap;
+    }
+    .mtext .mname { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .mtext svg { width: 15px; height: 15px; fill: var(--glow, #29b6f6); flex: 0 0 auto; }
+    .msep { flex: 0 0 auto; width: 1px; height: 13px; background: rgba(255,255,255,.25); }
+
+    /* Sponsor tile between the meters: a trapezoid WIDER AT THE TOP so its sides run parallel to the
+       meters' inner ends, ONE logo at a time. Rim = background round an inset clipped fill.
+       28px = the 36px tile x tan(38deg). */
+    .mspon {
+      position: absolute; top: var(--spon-y, 1017px); height: 36px;
+      left: 50%; width: var(--spon-w, 130px); transform: translateX(-50%);
+      background: var(--hud-line);
+      clip-path: polygon(0 0, 100% 0, calc(100% - 28px) 100%, 28px 100%);
+      transition: opacity .35s ease;
+    }
+    .mspon::before {
+      content: ''; position: absolute; top: 1px; right: 1px; bottom: 1px; left: 1px;
+      background: linear-gradient(180deg, #14161f, #06070c);
+      clip-path: polygon(0 0, 100% 0, calc(100% - 27.5px) 100%, 27.5px 100%);
+    }
+    .mspon.is-hidden { opacity: 0; }
+    .mpage {
+      position: absolute; top: 0; right: 0; bottom: 4px; left: 0;
+      display: flex; align-items: center; justify-content: center;
+      opacity: 0; transition: opacity .6s ease;
+    }
+    .mpage.on { opacity: 1; }
+    .mpage img { height: 20px; width: auto; max-width: var(--spon-img-w, 76px); object-fit: contain; flex: 0 0 auto; }
+
+    /* Event title: a tab rising from the bottom edge, centred, WIDER AT THE BOTTOM — the mirror of the
+       top middle section. No rim along the bottom, it runs off the screen edge. 19px = 24px x tan(38deg). */
+    .bevent {
+      position: absolute; left: 50%; bottom: var(--bar-lift, 0px); transform: translateX(-50%);
+      height: 24px; min-width: 220px; max-width: 760px; padding: 0 40px;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--hud-line);
+      clip-path: polygon(19px 0, calc(100% - 19px) 0, 100% 100%, 0 100%);
+      transition: opacity .35s ease;
+    }
+    .bevent::before {
+      content: ''; position: absolute; top: 1px; right: 1px; bottom: 0; left: 1px;
+      background: linear-gradient(180deg, #14161f, #06070c);
+      clip-path: polygon(18.5px 0, calc(100% - 18.5px) 0, 100% 100%, 0 100%);
+    }
+    .bevent::after {
+      content: ''; position: absolute; top: 1px; left: 20px; right: 20px; height: 2px; z-index: 1;
+      background: linear-gradient(90deg, transparent, var(--glow, #29b6f6) 25%, var(--glow, #29b6f6) 75%, transparent);
+    }
+    .bevent.is-hidden, .bcast.is-hidden { opacity: 0; }
+
+    /* Casters: a slanted segment attached to the RIGHT of the event tab, leaning "\" so its left edge
+       runs parallel to the tab's right side, ~8px seam. Skewed about its BOTTOM edge so that edge stays
+       on the screen edge; JS places its left end off the tab's measured width. */
+    .bcast {
+      position: absolute; left: var(--bcast-left, 1160px); bottom: var(--bar-lift, 0px);
+      height: 24px; padding: 0 30px;
+      display: flex; align-items: center;
+      background: linear-gradient(180deg, #14161f, #06070c);
+      box-shadow: inset 0 0 0 1px var(--hud-line), inset 4px 0 0 var(--glow, #29b6f6);
+      transform-origin: 50% 100%;
+      transform: skewX(var(--sk-a));
+      transition: opacity .35s ease;
+    }
+    .bcast .mtext { transform-origin: 50% 100%; transform: skewX(var(--unsk-a)); }
+  </style>
+</head>
+<body>
+  <div class="sb" id="sb">
+    <div class="p p--a">
+      <div class="pbody">
+        <div class="name" id="nameA">PLAYER 1</div>
+        <img class="flag is-hidden" id="flagA" alt="">
+      </div>
+      <div class="pscore">
+        <span id="scoreA">0</span>
+        <span class="pscore-pips is-hidden" id="pipsA"></span>
+      </div>
+    </div>
+
+    <div class="mid" id="mid">
+      <div class="strip">
+        <img class="strip-logo is-hidden" id="stripLogo" alt="">
+        <div class="strip-txt">
+          <span class="strip-round" id="stripRound"></span>
+          <span class="strip-match" id="stripMatch"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="p p--b">
+      <div class="pbody">
+        <div class="name" id="nameB">PLAYER 2</div>
+        <img class="flag is-hidden" id="flagB" alt="">
+      </div>
+      <div class="pscore">
+        <span id="scoreB">0</span>
+        <span class="pscore-pips is-hidden" id="pipsB"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom: sponsors between the super meters; event title tab on the screen edge, casters to its right -->
+  <div class="mspon is-hidden" id="mspon"></div>
+  <div class="bevent is-hidden" id="bevent"><div class="mtext"><span class="mname" id="beventText"></span></div></div>
+  <div class="bcast is-hidden" id="bcast"><div class="mtext" id="bcastIn"></div></div>
+
+  <script src="/scene-base.js"></script>
+  <script src="/caster-rail.js"></script>
+  <script>
+    const FLAG_BASE = '/fgc/static/flags/flags/1x1/';
+    const QP = new URLSearchParams(location.search);
+    const SHOW_INFO = QP.get('info') !== '0';
+    if (QP.get('anim') === '0') document.body.classList.add('no-anim');
+    const el = (id) => document.getElementById(id);
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    const numParam = (k, d, lo, hi) => {
+      const raw = QP.get(k);
+      return (raw == null || raw === '' || !isFinite(Number(raw))) ? d : clamp(Number(raw), lo, hi);
+    };
+
+    const root = document.documentElement.style;
+    /* Where everything sits on the 1920x1080 frame. Saved per show in Match ▸ Teams ▸ Marvel Tokon ▸
+       Position (state.tokon.layout, clamped server-side); a same-named ?param on the source URL
+       still wins for a one-off per-source tweak. [default, min, max] must match the server's
+       normalizeTokonLayout(). */
+    const LAYOUT = {
+      top: [2, 0, 400], w: [1140, 800, 1700], gutter: [340, 200, 700],
+      spony: [1017, 0, 1060], sponw: [130, 60, 400], barlift: [0, 0, 400]
+    };
+    let _layoutSig = '';
+    function applyLayout(saved) {
+      saved = saved || {};
+      const v = {};
+      Object.keys(LAYOUT).forEach((k) => {
+        const [d, lo, hi] = LAYOUT[k];
+        const s = Number(saved[k]);
+        const fromState = (saved[k] == null || saved[k] === '' || !isFinite(s)) ? d : clamp(s, lo, hi);
+        v[k] = numParam(k, fromState, lo, hi);
+      });
+      const sig = JSON.stringify(v);
+      if (sig === _layoutSig) return;
+      _layoutSig = sig;
+      // Plain px literals throughout — no calc() through var() (Electron 18).
+      root.setProperty('--sb-top', v.top + 'px');
+      root.setProperty('--sb-w', v.w + 'px');
+      root.setProperty('--gutter', v.gutter + 'px');
+      // Sponsor tile in the gap between the meters: top edge + top width. The logo gets what's left
+      // across the tile's middle (it narrows by the 28px cut each side toward the bottom).
+      root.setProperty('--spon-y', v.spony + 'px');
+      root.setProperty('--spon-w', v.sponw + 'px');
+      root.setProperty('--spon-img-w', Math.max(30, v.sponw - 54) + 'px');
+      // Event tab + casters sit on the bottom edge; lift them for a source that crops the frame.
+      root.setProperty('--bar-lift', v.barlift + 'px');
+      placeCasters();
+    }
+    applyLayout();
+
+    function str(v) { return (v == null ? '' : String(v)).trim(); }
+    function firstNonEmpty() { for (const v of arguments) { const s = str(v); if (s) return s; } return ''; }
+    function esc(v) { return str(v).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+
+    function activePlayer(team, activeId) {
+      const roster = (team && Array.isArray(team.players)) ? team.players : [];
+      if (activeId) { const hit = roster.find((p) => p && String(p.id) === String(activeId)); if (hit) return hit; }
+      return roster[0] || null;
+    }
+
+    function abbrev(name) {
+      const n = str(name);
+      if (n.length <= 10) return n;
+      const words = n.split(/[\s\-_]+/).filter(Boolean);
+      if (words.length < 2) return n.slice(0, 10);
+      return words.map((w) => w[0]).join('').toUpperCase().slice(0, 4);
+    }
+    // The org rides on the plate as a prefix. start.gg's own PREFIX wins; a "MVG | Zain" entrant name
+    // is split so the tag isn't printed twice (same rules as smash.html).
+    function orgOf(p, prof, team, shownName) {
+      const pre = firstNonEmpty(p && p.prefix, prof && prof.prefix);
+      if (pre) return pre;
+      const org = str(team && team.org);
+      if (org) return org;
+      let nm = str(team && team.name);
+      if (!nm) return '';
+      const cut = nm.split(/\s*[|｜]\s*/);
+      if (cut.length > 1) {
+        const keep = cut.filter((x) => x.toLowerCase() !== str(shownName).toLowerCase());
+        nm = (keep.length ? keep[0] : cut[0]).trim();
+      }
+      return nm.toLowerCase() === str(shownName).toLowerCase() ? '' : abbrev(nm);
+    }
+    function stripOrg(name, org) {
+      const parts = str(name).split(/\s*[|｜]\s*/).filter(Boolean);
+      if (parts.length < 2 || !str(org)) return str(name);
+      const o = str(org).toLowerCase();
+      const keep = parts.filter((x) => x.toLowerCase() !== o && abbrev(x).toLowerCase() !== o);
+      return keep.length ? keep.join(' | ') : str(name);
+    }
+
+    // The profile registry is keyed by lowercased gamertag. A side with no roster entry still has a
+    // name (the start.gg entrant), so try that too — "when possible" is whatever we can match.
+    function profileFor(profiles, p, team, raw) {
+      const keys = [p && p.gamertag, p && p.name, raw, str(team && team.name).split(/\s*[|｜]\s*/).pop()];
+      for (const k of keys) { const hit = profiles[str(k).toLowerCase()]; if (str(k) && hit) return hit; }
+      return null;
+    }
+    function countryCode(p, prof) {
+      const cands = [p && p.countryCode, prof && prof.countryCode, p && p.country, prof && prof.country];
+      for (const c of cands) { const s = str(c).toLowerCase(); if (/^[a-z]{2}$/.test(s)) return s; }
+      return '';
+    }
+    function spellFormat(v) {
+      const t = str(v);
+      let m = /^bo\s*[-.]?\s*(\d+)$/i.exec(t);
+      if (m) return 'Best of ' + m[1];
+      m = /^ft\s*[-.]?\s*(\d+)$/i.exec(t);
+      if (m) return 'First to ' + m[1];
+      return t;
+    }
+
+    // A flag that 404s (a code we don't ship) is remembered and never requested again.
+    const _badFlag = {};
+    ['A', 'B'].forEach((sfx) => {
+      const f = el('flag' + sfx);
+      f.addEventListener('error', () => { _badFlag[f.getAttribute('src')] = true; f.classList.add('is-hidden'); });
+    });
+
+    function renderSide(sfx, team, score, activeId, profiles) {
+      team = team || {};
+      const p = activePlayer(team, activeId);
+      const raw = firstNonEmpty(p && (p.gamertag || p.name), team.name) || ('PLAYER ' + (sfx === 'A' ? '1' : '2'));
+      const prof = profileFor(profiles, p, team, raw);
+      const org = orgOf(p, prof, team, raw);
+      const name = stripOrg(raw, org);
+      el('name' + sfx).innerHTML = (org ? `<span class="pre">${esc(org)}</span>` : '') + esc(name);
+      el('score' + sfx).textContent = String(Number(score) || 0);
+
+      const cc = countryCode(p, prof);
+      const url = cc ? FLAG_BASE + cc + '.svg' : '';
+      const flag = el('flag' + sfx);
+      if (url && !_badFlag[url]) {
+        if (flag.getAttribute('src') !== url) flag.src = url;
+        flag.classList.remove('is-hidden');
+      } else flag.classList.add('is-hidden');
+    }
+
+    /* Bottom band under the super meters. Names and logos come from CasterRail's own resolvers, so
+       this shows exactly who/what the corner card would. */
+    const MIC = '<svg viewBox="0 0 24 24" aria-hidden="true">'
+      + '<path d="M12 14.5a3.2 3.2 0 0 0 3.2-3.2V5.2a3.2 3.2 0 1 0-6.4 0v6.1A3.2 3.2 0 0 0 12 14.5z"/>'
+      + '<path d="M17.6 11.3a5.6 5.6 0 0 1-11.2 0H4.6a7.4 7.4 0 0 0 6.5 7.3V21H8.9v1.8h6.2V21h-2.2v-2.4a7.4 7.4 0 0 0 6.5-7.3h-1.8z"/></svg>';
+    let _mSponTimer = null;
+    // The casters segment hangs off the event tab's RIGHT end, so it is placed from the tab's measured
+    // width (the tab is centred and sized by the event name). No title → the casters centre themselves.
+    function placeCasters() {
+      const ev = el('bevent'), bc = el('bcast');
+      if (!ev || !bc) return;
+      const evW = ev.classList.contains('is-hidden') ? 0 : ev.offsetWidth;
+      const left = evW ? (960 + evW / 2 + 8) : (960 - bc.offsetWidth / 2);
+      root.setProperty('--bcast-left', Math.round(left) + 'px');
+    }
+
+    function renderBottom(data, title) {
+      const mode = QP.get('railpos') || ((data.tokon || {}).railPos) || '';
+      const meters = mode === 'meters';
+      document.body.classList.toggle('rail-meters', meters);
+      const on = meters && QP.get('rail') !== '0' && typeof CasterRail !== 'undefined' && !!CasterRail.talent;
+
+      // EVENT TITLE — the bottom-edge tab, centred. Shown whichever caster/sponsor placement is picked.
+      const evText = el('beventText');
+      if (evText.textContent !== title) evText.textContent = title;
+      el('bevent').classList.toggle('is-hidden', !title);
+
+      // CASTERS — right of the event tab. A mic between a pair, leading a single name or a list.
+      const bcIn = el('bcastIn');
+      const names = on ? CasterRail.talent(data) : [];
+      const tSig = names.join('~');
+      if (bcIn.dataset.sig !== tSig) {
+        bcIn.dataset.sig = tSig;
+        const nm = (n) => `<span class="mname">${esc(n)}</span>`;
+        bcIn.innerHTML = !names.length ? '' : (names.length === 2
+          ? nm(names[0]) + MIC + nm(names[1]) : MIC + names.map(nm).join('<span class="msep"></span>'));
+      }
+      el('bcast').classList.toggle('is-hidden', !names.length);
+      placeCasters();
+      // The tab's width changes again once the display font swaps in.
+      if (document.fonts && document.fonts.ready) document.fonts.ready.then(placeCasters);
+
+      // SPONSORS: the tile between the super meters, ONE logo at a time, rotating (brand kit's
+      // sponsorInterval, default 6s; ?railrotate= overrides).
+      const sp = el('mspon');
+      const logos = on ? CasterRail.sponsors(data) : [];
+      const brand = data.brand || {};
+      const sSig = logos.join('|');
+      if (sp.dataset.sig !== sSig) {
+        sp.dataset.sig = sSig;
+        if (_mSponTimer) { clearInterval(_mSponTimer); _mSponTimer = null; }
+        sp.innerHTML = logos.map((u, i) => `<div class="mpage${i ? '' : ' on'}">`
+          + `<img src="${String(u).replace(/"/g, '%22')}" alt=""></div>`).join('');
+        if (logos.length > 1) {
+          const secs = Math.max(3, Number(QP.get('railrotate')) || Number(brand.sponsorInterval) || 6);
+          let idx = 0;
+          _mSponTimer = setInterval(() => {
+            const k = sp.children;
+            if (k.length < 2) return;
+            k[idx % k.length].classList.remove('on');
+            idx = (idx + 1) % k.length;
+            k[idx].classList.add('on');
+          }, secs * 1000);
+        }
+      }
+      sp.classList.toggle('is-hidden', !logos.length);
+    }
+
+    function render(data) {
+      data = data || {};
+      const teams = data.teams || {};
+      const series = data.series || {};
+      const profiles = data.playerProfiles || {};
+      const active = data.activePlayer || {};
+      applyLayout((data.tokon || {}).layout);
+
+      // Per-side colour = the effective team colour. Tints computed in JS — Electron 18 (Chrome 100)
+      // has no color-mix().
+      const cA = str(teams.blue && teams.blue.color) || '#e0383e';
+      const cB = str(teams.orange && teams.orange.color) || '#2a7fff';
+      const rgb = (hex) => { const m = /^#?([0-9a-f]{6})$/i.exec(hex || ''); const n = m ? parseInt(m[1], 16) : 0;
+        return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+      const lighten = (hex, amt) => `rgb(${rgb(hex).map((v) => Math.round(v + (255 - v) * amt)).join(',')})`;
+      const darken = (hex, amt) => `rgb(${rgb(hex).map((v) => Math.round(v * (1 - amt))).join(',')})`;
+      [['a', cA], ['b', cB]].forEach(([k, hex]) => {
+        const ink = SceneBase.onColor(hex);
+        const pale = ink !== '#fff';
+        const ic = pale ? rgb(ink) : [255, 255, 255];
+        root.setProperty('--' + k, hex);
+        root.setProperty('--' + k + '-ink', ink);
+        root.setProperty('--' + k + '-ink-soft', `rgba(${ic[0]},${ic[1]},${ic[2]},.72)`);
+        root.setProperty('--' + k + '-shadow', pale ? 'none' : '0 2px 8px rgba(0,0,0,.35)');
+        root.setProperty('--' + k + '-deep', darken(hex, pale ? 0.22 : 0.62));
+        root.setProperty('--' + k + '-lite', pale ? darken(hex, 0.08) : lighten(hex, 0.24));
+      });
+
+      renderSide('A', teams.blue, series.blue, active.blue, profiles);
+      renderSide('B', teams.orange, series.orange, active.orange, profiles);
+
+      // Top middle: brand mark + the ROUND, with "BEST OF 3 · GAME 2 OF 3" beneath. game.number
+      // auto-advances as the set score moves; Match ▸ Teams ▸ Marvel Tokon can nudge it.
+      const logo = str(SceneBase.brandLogo(data));
+      root.setProperty('--glow', SceneBase.brandColor(data) || '#29b6f6');
+      const sl = el('stripLogo');
+      if (logo) { if (sl.getAttribute('src') !== logo) sl.src = logo; sl.classList.remove('is-hidden'); }
+      else sl.classList.add('is-hidden');
+      const bo = Number(data.bestOf) || 0;
+      const fmt = spellFormat(firstNonEmpty(data.match && data.match.format, bo > 0 ? ('Best of ' + bo) : ''));
+      const gameN = Number(data.game && data.game.number) || 0;
+      const game = gameN > 0 ? ('Game ' + gameN + (bo > 0 ? ' of ' + bo : '')) : '';
+      const round = firstNonEmpty(data.roundLabel, data.match && data.match.division);
+      const matchLine = SHOW_INFO ? [fmt, game].filter(Boolean).join('  ·  ') : '';
+      el('stripRound').textContent = round;
+      el('stripMatch').textContent = matchLine;
+      el('mid').classList.toggle('is-hidden', !logo && !round && !matchLine);
+
+      // Pips under each score: one per game needed to take the set.
+      const need = Math.max(1, Math.ceil((bo || 3) / 2));
+      [['A', Number(series.blue) || 0], ['B', Number(series.orange) || 0]].forEach(([sfx, won]) => {
+        const row = el('pips' + sfx);
+        if (row.dataset.need !== String(need)) {
+          row.dataset.need = String(need);
+          row.innerHTML = Array.from({ length: need }, () => '<span class="pscore-pip"></span>').join('');
+        }
+        [].forEach.call(row.children, (pip, i) => pip.classList.toggle('won', i < won));
+        row.classList.toggle('is-hidden', need < 2);
+      });
+
+      // Bottom: event title under player 1's meter; casters + rotating sponsors per the placement.
+      renderBottom(data, QP.get('title') === 'off' ? '' : str(data.eventName));
+      if (typeof CasterRail !== 'undefined') CasterRail.render(data);
+      el('sb').classList.add('show');
+    }
+
+    // Corner caster/sponsor card — used when the producer picks a bottom corner instead of the
+    // under-the-meters layout (Match ▸ Teams ▸ Marvel Tokon; ?railpos= on the source URL beats it).
+    if (typeof CasterRail !== 'undefined') CasterRail.mount({
+      variant: 'chip', bottom: numParam('railbottom', 30, 0, 600), left: 44, right: 44,
+      posFrom: function (d) {
+        const v = ((d || {}).tokon || {}).railPos;
+        // 'meters' hides this card (body.rail-meters). Report it as a DIFFERENT placement rather than
+        // a corner: the card lays its sponsor logos out by measuring them, and while it is
+        // display:none they measure zero wide. A changed placement is what makes it rebuild, so
+        // switching back to a corner re-measures instead of showing clipped / missing logos.
+        return (v === 'bottomleft' || v === 'bottomright') ? v : 'bottom';
+      }
+    });
+
+    if (typeof SceneBase !== 'undefined') {
+      if (SceneBase.preview) {
+        render({
+          teams: { blue: { name: 'HPARK', color: '#a855f7', players: [{ gamertag: 'HPARK', countryCode: 'us' }] },
+                   orange: { name: 'DREDAWG', color: '#7e22ce', players: [{ gamertag: 'DREDAWG', countryCode: 'us' }] } },
+          series: { blue: 1, orange: 0 }, bestOf: 3, game: { number: 2 },
+          eventName: 'SoloStacks CrownBreaker Tournament', roundLabel: 'Losers Quarter-Final',
+          brand: { logo: '', color: '#29b6f6' },
+          tokon: { railPos: 'meters' },
+          casters: { nameMode: 'gamertag', list: [
+            { slot: 1, gamertag: 'JONZEY' }, { slot: 2, gamertag: 'VELLO' }
+          ] }
+        });
+      } else {
+        SceneBase.connect((data) => { SceneBase.applySceneConfig('tokon', data); render(data); });
+      }
+    }
+  </script>
+</body>
+</html>

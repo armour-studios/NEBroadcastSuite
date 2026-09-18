@@ -48,11 +48,6 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     if (tab === 'media' && typeof mdLoad === 'function') mdLoad();   // lazy-load media on open
     if (tab === 'events' && typeof evAutoLoad === 'function') evAutoLoad();   // auto-pull in-house tournaments
     if (tab === 'replays' && !_stagingLoading) scanStagingArea();   // auto-scan the OBS folder
-    // Cameras page: re-pull VDO links for whichever sub-tab is active on entry.
-    if (tab === 'facecams' && typeof cfShowSubtab === 'function') {
-      const active = document.querySelector('#cf-subnav .cf-tab.active');
-      cfShowSubtab((active && active.dataset.cf) || 'talent');
-    }
     // Scene previews are live overlays — only run them while Assets ▸ Overlays is open.
     if (tab === 'media' && _assetsTab === 'overlays') { if (typeof loadScenePreviews === 'function') loadScenePreviews(); }
     else if (typeof unloadScenePreviews === 'function') unloadScenePreviews();
@@ -68,10 +63,9 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
         else el('tab-principal-content')?.appendChild(mt);
       }
     }
-    // On Air + Graphics sections live in dash-grid and are borrowed by the Production → Graphics
-    // pane while Production is active, then returned so they stay in the customize system.
-    if (tab === 'produccion') _returnGraphicsToProd();
-    else _borrowGraphicsToDash();
+    // On Air + Graphics are Dashboard sections full-time now — Production dropped its Graphics
+    // pane, so they are never lent back out.
+    _borrowGraphicsToDash();
     // Show Deck: one element, home is the DCC's Show Deck tab (inside the Talent Monitor widget)
     // on the Dashboard — it no longer appears on the Talent page. See placeShowDeck.
     placeShowDeck(tab);
@@ -93,15 +87,9 @@ function setSwitchSettingsCat(cat) {
   if (cat === 'games') _settingsSelectActiveGame();   // per-game browser opens on the active game
   try { localStorage.setItem('ne_settings_cat', cat); } catch (e) {}
 }
-// Per-game browser: when the Games category opens, select the active game's tab in the relocated
-// per-game setup panel so "the active game is shown by default" (others stay one click away).
+// Per-game browser: when the Games category opens it shows the game on air (games-hub.js).
 function _settingsSelectActiveGame() {
-  const ag = (typeof currentState !== 'undefined' && currentState && currentState.activeGame) || '';
-  const alias = { 'rocket-league': 'rl', rl: 'rl', cs2: 'cs2', 'counter-strike-2': 'cs2', valorant: 'valorant',
-    league: 'league', 'league-of-legends': 'league', lol: 'league', apex: 'apex', 'apex-legends': 'apex' };
-  const g = alias[ag]; if (!g) return;
-  const btn = document.querySelector('#integration-games .game-tab-btn[data-game="' + g + '"]');
-  if (btn && !btn.classList.contains('active')) btn.click();
+  if (window.GamesHub) window.GamesHub.followActive();
 }
 function _settingsCat() { try { return localStorage.getItem('ne_settings_cat') || 'general'; } catch (e) { return 'general'; } }
 function setApplySettingsCat() { setSwitchSettingsCat(_settingsCat()); }
@@ -125,7 +113,8 @@ function openSettings(cat) {
 window.openSettings = openSettings;
 // Jump links from feature panels into the right Settings category (cockpit RL strip, replay editor…).
 document.addEventListener('click', (e) => {
-  const j = e.target.closest('.js-open-rl-settings'); if (j) { e.preventDefault(); openSettings('games'); }
+  const j = e.target.closest('.js-open-rl-settings');
+  if (j) { e.preventDefault(); openSettings('games'); document.querySelector('#integration-games .game-tab-btn[data-game="rl"]')?.click(); }
 });
 // Wire the modal chrome (main window only). Backdrop click, ✕, Esc all close it; "Pop out" detaches
 // Settings to its own OS window via the shared popout system, then closes the modal.
@@ -732,6 +721,7 @@ function _activePageTab() {
   if (sortBtn) {
     sortBtn.addEventListener('click', () => {
       const members = (typeof currentState !== 'undefined' && currentState.crew) ? [...currentState.crew] : [];
+      if (!members.length) return;   // library tier not loaded yet — nothing to sort
       members.sort((a, b) => (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase()));
       send('update_crew_order', { crew: members });
       setTimeout(renderCrewList, 300);
@@ -2258,89 +2248,72 @@ function _borrowGraphicsToDash() {
   // Moving the iframe just reloaded it — re-point the preview at the current scene.
   setTimeout(() => { if (typeof window._gfxReapplyPreview === 'function') window._gfxReapplyPreview(); }, 60);
 }
-function _returnGraphicsToProd() {
-  const dst = el('prod-graphics-tab');
-  const src1 = el('dash-section-onair');
-  const src2 = el('dash-section-graphics');
-  if (!dst) return;
-  if (src1) {
-    const onairEl = src1.querySelector('.gfx-onair');
-    if (onairEl) dst.appendChild(onairEl);
-  }
-  if (src2) { while (src2.firstChild) dst.appendChild(src2.firstChild); }
-  // Moving the iframe just reloaded it — re-point the preview at the current scene.
-  setTimeout(() => { if (typeof window._gfxReapplyPreview === 'function') window._gfxReapplyPreview(); }, 60);
-}
-// Initial borrow — dashboard is the default view; don't borrow if Production is restored.
+// #prod-graphics-tab is only the static HOME of this markup — the Dashboard is where it lives and
+// is shown, so move it out once at boot and hide the empty husk that is left behind.
 (function () {
-  const saved = (() => { try { return localStorage.getItem('ne_active_tab'); } catch { return null; } })();
-  if (saved !== 'produccion') _borrowGraphicsToDash();
+  _borrowGraphicsToDash();
+  const husk = el('prod-graphics-tab'); if (husk) husk.style.display = 'none';
 })();
 
-// ── Production page: one flat sub-nav (Deck | Graphics | Rundown | Flows | Hotkeys | NEURAL AI) ──
-// The old single "Production" scroll is split into Deck (live cockpit) + Graphics (scene config)
-// panes that already exist in the static HTML; Director ("NEURAL AI") is pulled in as a pane too.
+// ── Production page: one flat sub-nav (Cameras | Rundown | Flows | Hotkeys | NEURAL AI) ──
+// Director ("NEURAL AI") and the whole Cameras page are pulled in as panes. Deck and Graphics left
+// this page — both live on the Dashboard (the deck grid with its live preview, and the On Air /
+// Graphics sections) — so Production is camera feeds, run of show, automation and hotkeys.
 (function mergeProductionDirector() {
   const prodTab = document.getElementById('tab-produccion-content');
   const dirTab = document.getElementById('tab-director-content');
   if (!prodTab || !dirTab) return;
+  const camTab = document.getElementById('tab-facecams-content');
   const panes = {
-    deck:     document.getElementById('prod-deck-tab'),
-    graphics: document.getElementById('prod-graphics-tab'),
+    cameras:  camTab,
     rundown:  document.getElementById('prod-rundown-content'),
     flows:    document.getElementById('prod-flows-content'),
     hotkeys:  document.getElementById('prod-hotkeys-tab'),
     director: dirTab,
   };
-  const TABS = [['deck', 'Deck'], ['graphics', 'Graphics'], ['rundown', 'Rundown'], ['flows', 'Flows'], ['hotkeys', 'Hotkeys'], ['director', 'NEURAL AI']];
+  const TABS = [['cameras', 'Cameras'], ['rundown', 'Rundown'], ['flows', 'Flows'], ['hotkeys', 'Hotkeys'], ['director', 'NEURAL AI']];
   const sub = document.createElement('div');
   sub.id = 'pd-subnav'; sub.className = 'ev-subnav';
   sub.innerHTML = TABS.map(([k, l], i) => `<button type="button" class="ev-subnav-btn${i === 0 ? ' active' : ''}" data-pd="${k}">${l}</button>`).join('');
-  // Director was its own top-level tab — demote it to a pane here.
-  dirTab.classList.remove('tab-content', 'active'); dirTab.style.display = 'none';
-  const dirHead = dirTab.querySelector('.page-head'); if (dirHead) dirHead.style.display = 'none';
+  // Director and Cameras were their own top-level tabs — demote both to panes here. Their ids stay
+  // put, so every #tab-facecams-content / #cf-subnav selector in camera-feeds.js keeps working.
+  [dirTab, camTab].forEach((t) => {
+    if (!t) return;
+    t.classList.remove('tab-content', 'active'); t.style.display = 'none';
+    const h = t.querySelector('.page-head'); if (h) h.style.display = 'none';
+  });
   // Detach every pane, then re-append sub-nav + panes in tab order (keeps the .page-head on top).
   Object.values(panes).forEach((p) => { if (p && p.parentNode) p.parentNode.removeChild(p); });
   prodTab.appendChild(sub);
   TABS.forEach(([k]) => { if (panes[k]) { panes[k].classList.add('pd-pane'); prodTab.appendChild(panes[k]); } });
   window._pdShow = function (which) {
+    // A retired key ('deck' / 'graphics' from an old deep link) matched no pane and hid them ALL,
+    // leaving a blank page — land on Cameras instead.
+    if (!TABS.some(([k]) => k === which)) which = 'cameras';
     sub.querySelectorAll('.ev-subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.pd === which));
     TABS.forEach(([k]) => { if (panes[k]) panes[k].style.display = (k === which) ? '' : 'none'; });
     try {
       if (which === 'flows' && typeof renderFlows === 'function') renderFlows();
-      if (which === 'deck' && typeof renderDeck === 'function' && window._deck) renderDeck();
       if (which === 'hotkeys' && typeof renderDeckHkLegend === 'function' && window._deck) renderDeckHkLegend();
-      if (which === 'graphics' && window.ONAIR_SCENES && typeof renderGraphicsBoard === 'function') renderGraphicsBoard();
-      if ((which === 'deck' || which === 'graphics') && typeof fitLivePreviews === 'function') setTimeout(fitLivePreviews, 40);
+      // Cameras: re-pull VDO links for whichever camera sub-tab is active on entry.
+      if (which === 'cameras' && typeof cfShowSubtab === 'function') {
+        const active = document.querySelector('#cf-subnav .cf-tab.active');
+        cfShowSubtab((active && active.dataset.cf) || 'talent');
+      }
     } catch (_) {}
     try { localStorage.setItem('prod_active_tab', which); } catch (_) {}
   };
   sub.querySelectorAll('.ev-subnav-btn').forEach((b) => b.addEventListener('click', () => window._pdShow(b.dataset.pd)));
   let saved = (() => { try { return localStorage.getItem('prod_active_tab'); } catch (_) { return null; } })();
-  if (saved === 'production') saved = 'deck';   // migrate the old combined-scroll value
-  const initialPdTab = (saved && ['deck', 'graphics', 'rundown', 'flows', 'hotkeys', 'director'].includes(saved)) ? saved : 'deck';
-  // Defer this first call: ONAIR_SCENES is a const declared much later in the file (~line 11428),
-  // and _pdShow('graphics') needs window.ONAIR_SCENES (its TDZ-safe handle, set right after that
-  // declaration) to render the graphics board. Calling it synchronously here — which happens on
-  // every load where Graphics was the last-viewed Production sub-tab — always misses that handle
-  // and silently skips the render, leaving the board empty until the user manually reselects the
-  // tab later (by which point the rest of the script has finished running).
+  // Migrate retired values: the old combined scroll, plus Deck/Graphics now that both live on the
+  // Dashboard — anyone parked on one of those lands on Cameras instead of a blank page.
+  if (saved === 'production' || saved === 'deck' || saved === 'graphics') saved = 'cameras';
+  const initialPdTab = (saved && ['cameras', 'rundown', 'flows', 'hotkeys', 'director'].includes(saved)) ? saved : 'cameras';
+  // Deferred: _pdShow('cameras') calls cfShowSubtab, which lives in camera-feeds.js (loaded after
+  // this file) and reaches for VDO_API, a const declared further down it. A macrotask lets both
+  // scripts finish first; calling it synchronously hits the TDZ crash camera-feeds.js documents.
   setTimeout(() => window._pdShow(initialPdTab), 0);
   try { if (localStorage.getItem('ne_active_tab') === 'director') localStorage.setItem('ne_active_tab', 'produccion'); } catch (_) {}
-})();
-
-// ── Move the live Match panel (Match — Teams slot + Scorecard) to the TOP of the Deck pane ──
-// It used to be a tab on the Talent page; the producer wants it on Production. Runs after the
-// merge so #prod-deck-tab exists.
-(function moveMatchToProduction() {
-  const matchPanel = document.getElementById('teams-panel-match');
-  const deckTab    = document.getElementById('prod-deck-tab');
-  if (!matchPanel || !deckTab) return;
-  matchPanel.style.display = '';                 // always visible within Production
-  deckTab.insertBefore(matchPanel, deckTab.firstChild);
-  // The team library (now the Talent "Teams" tab) stays put but must be visible (was display:none).
-  const lib = document.getElementById('teams-panel-library');
-  if (lib) lib.style.display = '';
 })();
 
 // ── Re-home the Settings "Keyboard Shortcuts" panel into the Production ▸ Hotkeys pane ──
@@ -2920,19 +2893,30 @@ function _returnGraphicsToProd() {
   // Open/close a scene's FULL BOARD (Bracket, Spotlight, Standings, Schedule, Map Pool, Draft).
   // No longer a floating modal — the board docks full-width below the hub (#gfx-popout-<key>)
   // and we scroll it into view; only one board is open at a time.
+  // The boards (the manual bracket builder above all) are deep editors: they open as a popup over
+  // the hub rather than docking below it, so the scene you were on is still there behind them.
   function openGfxPopout(key) {
     const modal = el('gfx-popout-' + key); if (!modal) return;
     document.querySelectorAll('.gfx-fullboard').forEach((m) => { if (m !== modal) m.style.display = 'none'; });
     modal.style.display = 'flex';
+    document.body.classList.add('gfx-board-open');
     runSceneSideEffects(key);
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      fitScenePreviews();
-      try { modal.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_) {}
-    }));
+    requestAnimationFrame(() => requestAnimationFrame(fitScenePreviews));
   }
   function closeGfxPopout(key) {
     const modal = el('gfx-popout-' + key); if (modal) modal.style.display = 'none';
+    if (!document.querySelector('.gfx-fullboard[style*="flex"]')) document.body.classList.remove('gfx-board-open');
   }
+  // Esc closes whichever board is open; clicking the backdrop (outside the box) does too.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    document.querySelectorAll('.gfx-fullboard').forEach((m) => {
+      if (m.style.display === 'flex') closeGfxPopout(m.id.replace('gfx-popout-', ''));
+    });
+  });
+  document.querySelectorAll('.gfx-fullboard[id^="gfx-popout-"]').forEach((m) => {
+    m.addEventListener('mousedown', (e) => { if (e.target === m) closeGfxPopout(m.id.replace('gfx-popout-', '')); });
+  });
   window._gfxOpenPopout = openGfxPopout;
   window._gfxClosePopout = closeGfxPopout;
   // Keep the front-facing summary live as state changes (e.g. a match gets queued elsewhere)
@@ -3662,6 +3646,7 @@ function _returnGraphicsToProd() {
     }
     return '';
   }
+  window._winnerNameFromSel = _winnerNameFromSel;   // winnerPayload() (Show button) lives outside this block
   const doWinnerPreview = debounce(() => {
     if (typeof send !== 'function') return;
     const sel = el('select-winner-side')?.value || 'blue';
@@ -3997,8 +3982,15 @@ function _returnGraphicsToProd() {
     const game = (st.games || {})[st.activeGame] || {};
     return (game.features || []).indexOf('stocks') >= 0;
   }
+  // The Top 8 placement wall itself is for every FIGHTING game (Smash, Marvel Tokon, Tekken...);
+  // only the fighter-art column is Smash's. Mirrors standings.html's gate.
+  function stdGameHasTop8() {
+    const st = currentState || {};
+    const f = ((st.games || {})[st.activeGame] || {}).features || [];
+    return f.indexOf('stocks') >= 0 || f.indexOf('fgc') >= 0;
+  }
   function stdIsPlacement() {
-    return stdGameIsSmash() && stdLayoutChoice() !== 'podium';
+    return stdGameHasTop8() && stdLayoutChoice() !== 'podium';
   }
   // Real finish order from start.gg for the linked event, or null. This is the ONLY source with
   // true placements: an elimination bracket's standings are ordered by set wins, so they have no
@@ -4017,8 +4009,10 @@ function _returnGraphicsToProd() {
       // auto-fills the fighters. Dropping it here would have made the whole pull invisible.
       // `players` is the entrant's roster — the Top 8 card lists it under a TEAM/doubles name, so
       // it has to survive this mapping the same way `character` does.
+      // `countryCode` is the entrant's start.gg country (ISO-2) — the card's flag.
       if (pl) return pl.map((r) => ({ placement: r.placement, name: r.name,
-                                      character: r.character || '', players: r.players || [] }));
+                                      character: r.character || '', players: r.players || [],
+                                      countryCode: r.countryCode || '' }));
     }
     let rows = [];
     try { const r = buildStandingsPayload(); if (r.ok && Array.isArray(r.payload.rows)) rows = r.payload.rows; } catch (e) { rows = []; }
@@ -4072,7 +4066,7 @@ function _returnGraphicsToProd() {
   function stdRenderFighters() {
     const wrap = el('gfx-std-fighters'); if (!wrap) return;
     // Off Smash there is no board choice to make, so the whole selector goes away.
-    const seg = el('gfx-std-layout-row'); if (seg) seg.style.display = stdGameIsSmash() ? '' : 'none';
+    const seg = el('gfx-std-layout-row'); if (seg) seg.style.display = stdGameHasTop8() ? '' : 'none';
     const block = el('gfx-std-fighters-wrap');
     const show = stdIsPlacement();
     if (block) block.style.display = show ? '' : 'none';
@@ -4110,6 +4104,10 @@ function _returnGraphicsToProd() {
 
     const emptyEl = el('gfx-std-fighters-empty');
     if (emptyEl) emptyEl.style.display = rows.length ? 'none' : '';
+    // Fighter art only exists for Smash; other fighting games (Marvel Tokon...) get the same Top 8
+    // builder without the fighter column or the "fighters reported" count.
+    const withFighters = stdGameIsSmash();
+    wrap.classList.toggle('no-fighters', !withFighters);
     const stateEl = el('gfx-std-pl-state');
     if (stateEl) {
       // Say how many fighters start.gg actually reported. Blank slots are almost always a player
@@ -4118,6 +4116,7 @@ function _returnGraphicsToProd() {
       const pl = (currentState || {}).startggPlacements || {};
       let label = 'Following the source';
       if (_stdTop8) label = 'Edited by hand';
+      else if (stdStartggPlacements() && !withFighters) label = 'Following start.gg';
       else if (stdStartggPlacements()) {
         const filled = rows.filter((r) => (r.character || '').trim()).length;
         label = 'Following start.gg · ' + filled + '/' + rows.length + ' fighters reported';
@@ -4151,6 +4150,8 @@ function _returnGraphicsToProd() {
         const v = inp.dataset.fld === 'placement' ? String(r.placement || (i + 1)) : String(r[inp.dataset.fld] || '');
         if (document.activeElement !== inp) inp.value = v;
       });
+      const pick = row.querySelector('.smash-char-pick');
+      if (pick) pick.style.visibility = withFighters ? '' : 'hidden';
       smashSetThumb(row.querySelector('.smash-char-thumb'), row.querySelector('[data-fld="character"]').value);
       // Medal tint for the podium — 1st/2nd/3rd otherwise look identical to 8th.
       const place = parseInt(r.placement || (i + 1), 10);
@@ -5325,7 +5326,8 @@ function _returnGraphicsToProd() {
   if (twitch && workflow) {
     const wrap = document.createElement('div'); wrap.className = 'tw-sub'; wrap.dataset.twpanel = 'stream'; wrap.style.display = 'none';
     move(workflow, wrap); twitch.appendChild(wrap); workflow.remove();
-    if (subnav) { const b = document.createElement('button'); b.type = 'button'; b.className = 'ev-subnav-btn'; b.dataset.tw = 'stream'; b.textContent = 'Stream'; subnav.appendChild(b); }
+    // "Channel": announcement, shoutout, chat modes, raid. (The stream title/category moved to On Air, below.)
+    if (subnav) { const b = document.createElement('button'); b.type = 'button'; b.className = 'ev-subnav-btn'; b.dataset.tw = 'stream'; b.textContent = 'Channel'; subnav.appendChild(b); }
   }
   const workflowTab = qtab('workflow'); if (workflowTab) workflowTab.remove();
 
@@ -5360,13 +5362,35 @@ function _returnGraphicsToProd() {
     if (!l) { l = document.createElement('span'); l.className = 'qrail-tab-label'; b.appendChild(l); }
     l.textContent = txt; if (title) b.title = title;
   };
-  setLabel('quick',  'Air',    'Air — scenes, overlays & triggers');
-  setLabel('ros',    'Next',   'Next — run of show & stream queue');
-  setLabel('talent', 'Talent', 'Talent — cams, listen-in & interviews');
-  setLabel('flows',  'Auto',   'Auto — flows & Neural AI director');
-  setLabel('replay', 'Replay', 'Replay — save the buffer & push clips to air');
-  setLabel('twitch', 'Stream', 'Stream — title, chat, activity & predictions');
-  setLabel('notes',  'Notes',  'Notes — producer notes');
+  // Names describe what is INSIDE each tab (2026-09-17 rethink with the producer):
+  //   On Air     — what viewers see: stream status + title, put graphics on air, program feed
+  //   Up Next    — what is coming: run of show + the match queue
+  //   Talent     — casters and players: cams, mics, listen-in
+  //   Replay     — replay buffer, clips, playlists
+  //   Chat       — chat, activity, Q&A, predictions, channel tools
+  //   Automation — flows, AI shield, auto-director, auto-clipping
+  setLabel('quick',  'On Air',     'On Air — what viewers see: stream status and title, put graphics on air, program feed');
+  setLabel('ros',    'Up Next',    'Up Next — the run of show and the match queue');
+  setLabel('talent', 'Talent',     'Talent — casters and players: cams, mics and listen-in');
+  setLabel('replay', 'Replay',     'Replay — replay buffer, clips and playlists');
+  setLabel('twitch', 'Chat',       'Chat — chat, activity, Q&A, predictions and channel tools');
+  setLabel('flows',  'Automation', 'Automation — flows, AI shield, auto-director and auto-clipping');
+  setLabel('notes',  'Notes',      'Notes — producer notes');
+
+  // Order by how often a producer reaches for each during a show.
+  const tabsStrip = document.getElementById('qrail-tabs'), spacer = tabsStrip && tabsStrip.querySelector('.qrail-tab-spacer');
+  if (tabsStrip && spacer) ['quick', 'ros', 'talent', 'replay', 'twitch', 'flows'].forEach((t) => { const b = qtab(t); if (b) tabsStrip.insertBefore(b, spacer); });
+
+  // Stream title + category belong with the ON STREAM status, not under chat. Moved (not cloned)
+  // so every existing handler on #flows-stream-title / #btn-flows-update-channel keeps working.
+  const streamGroup = document.getElementById('flows-stream-title')?.closest('.qrail-group');
+  const cockpit = document.getElementById('qk-cockpit');
+  if (streamGroup && cockpit && cockpit.parentNode) {
+    streamGroup.classList.add('qk-stream-info');
+    cockpit.parentNode.insertBefore(streamGroup, cockpit.nextSibling);
+    const lbl = streamGroup.querySelector('.qrail-label > span');
+    if (lbl) lbl.textContent = 'Stream title';
+  }
 
   // Pin Notes to the bottom of the strip (by the popout), off the main tab list.
   const nTab = qtab('notes'), tabsEl = document.getElementById('qrail-tabs'), popBtn = document.getElementById('qrail-popout-btn');
@@ -5402,10 +5426,10 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && document
 
 // ── Popout system ─────────────────────────────────────────────────────────────
 const PAGE_LABELS = {
-  principal: 'Dashboard', events: 'Esports', produccion: 'Production',
-  director: 'Director', replays: 'Video Editor', scenes: 'Overlays',
+  principal: 'Dashboard', events: 'Events', produccion: 'Production',
+  director: 'Director', replays: 'Replays', scenes: 'Overlays',
   equipos: 'Talent', facecams: 'Cameras', brands: 'Profiles',
-  media: 'Assets', integrations: 'Integrations', stats: 'Analytics',
+  media: 'Assets', integrations: 'Marketplace', stats: 'Analytics',
   ajustes: 'Settings', roles: 'Roles',
   graphics: 'Graphics', social: 'Social',
 };
@@ -5533,15 +5557,15 @@ if (_popoutPage === 'triggers') {
     if (_pbt) _pbt.textContent = PAGE_LABELS[_popoutPage];
     _pb.removeAttribute('hidden');
   }
-  // Activate the target tab after all listeners are set up. Merged pages redirect to their host.
-  // Cameras (facecams) is its own sidebar page again — no equipos redirect (that sent the
-  // Cameras pop-out to the Talent page); its tab click restores the active cf sub-tab itself.
+  // Activate the target tab after all listeners are set up. Merged pages redirect to their host:
+  // Director and Cameras are Production panes, and Graphics is a Dashboard section now.
   requestAnimationFrame(() => {
-    const target = (_popoutPage === 'director' || _popoutPage === 'graphics') ? 'produccion' : (_popoutPage === 'brands' ? 'ajustes' : (_popoutPage === 'scenes' ? 'media' : _popoutPage));
+    const HOST = { director: 'produccion', facecams: 'produccion', graphics: 'principal', brands: 'ajustes', scenes: 'media' };
+    const target = HOST[_popoutPage] || _popoutPage;
     const btn = document.querySelector('.tab-btn[data-tab="' + target + '"]');
     if (btn) btn.click();
     if (_popoutPage === 'director' && typeof window._pdShow === 'function') window._pdShow('director');
-    if (_popoutPage === 'graphics' && typeof window._pdShow === 'function') window._pdShow('graphics');
+    if (_popoutPage === 'facecams' && typeof window._pdShow === 'function') window._pdShow('cameras');
     if (_popoutPage === 'scenes' && typeof window._assetsShow === 'function') window._assetsShow('overlays');
     if (_popoutPage === 'brands' && typeof openSettings === 'function') openSettings('brandkits');
   });
@@ -5576,7 +5600,7 @@ if (_popoutPage === 'triggers') {
 
 // ── Right quick-actions rail: icon-only tabs, click-to-toggle panel, popout ──
 const QRAIL_W_KEY = 'ne_qrail_w';
-const QRAIL_W_MIN = 190, QRAIL_W_MAX = 680, QRAIL_W_DEFAULT = 320;
+const QRAIL_W_MIN = 190, QRAIL_W_MAX = 680, QRAIL_W_DEFAULT = 360;   // 320 left ~230px of content — names/phases truncated
 function qrailExpandedW() {
   const v = parseInt(localStorage.getItem(QRAIL_W_KEY) || '', 10);
   // Old saved values were 366+ (included 170px label column); clamp to new range.
@@ -5605,19 +5629,19 @@ function qrailExpand(tab) {
 }
 
 const QRAIL_TAB_TITLES = {
-  // 6-tab identity (AIR·NEXT·TALENT·AUTO·STREAM·NOTES). Keys stay the panels' data-qpanel names.
-  quick: 'On Air', ros: 'Up Next', flows: 'Automation', talent: 'On-Air Talent',
-  replay: 'Replay', twitch: 'Stream', notes: 'Producer Notes',
+  // Match the tab captions (On Air·Up Next·Talent·Replay·Chat·Automation·Notes). Keys stay the
+  // panels' data-qpanel names.
+  quick: 'On Air', ros: 'Up Next', flows: 'Automation', talent: 'Talent',
+  replay: 'Replay', twitch: 'Chat', notes: 'Notes',
   // legacy keys — their panels are merged away, kept so any direct caller still titles correctly.
   startgg: 'Up Next', graphics: 'On Air', golive: 'On Air', ai: 'Automation',
-  workflow: 'Stream', checklist: 'Run-of-Show',
+  workflow: 'Chat', checklist: 'Up Next',
 };
 function qrailShowTab(tab) {
   document.querySelectorAll('#qrail-tabs .qrail-tab').forEach((b) => b.classList.toggle('active', b.dataset.qtab === tab));
   document.querySelectorAll('.qrail-body .qrail-panel').forEach((p) => p.classList.toggle('active', p.dataset.qpanel === tab));
   const titleText = QRAIL_TAB_TITLES[tab] || '';
   const title = el('qrail-paneltitle'); if (title) title.textContent = titleText;
-  const head = el('qrail-head'); if (head) head.title = titleText; // label is hidden — shown as a hover tooltip only
   // Live sections refresh as their tab opens (queue now lives under NEXT, AI under AUTO).
   if ((tab === 'ros' || tab === 'flows' || tab === 'talent') && typeof renderQrailLive === 'function') renderQrailLive();
   if (tab === 'replay' && typeof renderQrailReplay === 'function') { renderQrailReplay(currentState); if (typeof qrScanFolder === 'function') qrScanFolder(); }
@@ -6655,7 +6679,7 @@ function applyLiquipediaState(data) {
 
 // ── Org-seat role UX: talent/analyst run the app VIEW-ONLY (server enforces it —
 // every mutating control message is rejected); this just makes it visible and
-// hides the two pages that are all credentials (Settings / Integrations). ──
+// hides the two pages that are all credentials (Settings / Marketplace). ──
 let _cloudRoleShown = null;
 function applyCloudRole(role) {
   role = role || null;
@@ -6942,15 +6966,15 @@ el('bb-trigger-go')?.addEventListener('click', () => {
   // chips (Line-up, Break, Winner) showed on standalone pages but never on the
   // unified gfx.html source. Mirrors the plain toggle path exactly.
   const prevScene = currentState && currentState.gfxActive;
-  if (prevScene && prevScene !== g.sceneKey && typeof SCENE_META !== 'undefined' && SCENE_META[prevScene]) {
-    const pm = SCENE_META[prevScene];
+  if (prevScene && prevScene !== g.sceneKey && window._gfxSceneMeta && window._gfxSceneMeta[prevScene]) {
+    const pm = window._gfxSceneMeta[prevScene];
     el(pm.clearId || ('btn-hide-' + prevScene))?.click();
   }
   send(g.msg, g.show());
   if (g.sceneKey) {
     send('set_gfx_active', { scene: g.sceneKey });
     if (currentState) currentState.gfxActive = g.sceneKey;
-    if (typeof refreshTopBar === 'function') refreshTopBar(g.sceneKey);
+    if (window._gfxRefreshTopBar) window._gfxRefreshTopBar();
   }
   if (el('gfx-autocut-on')?.checked) {
     const sc = (el('gfx-autocut-scene')?.value || '').trim();
@@ -6967,7 +6991,7 @@ el('bb-trigger-hide')?.addEventListener('click', () => {
     if (g.sceneKey && currentState && currentState.gfxActive === g.sceneKey) {
       send('set_gfx_active', { scene: '' });
       currentState.gfxActive = '';
-      if (typeof refreshTopBar === 'function') refreshTopBar('');
+      if (window._gfxRefreshTopBar) window._gfxRefreshTopBar();
     }
   }
   el('bb-trigger-pop').style.display = 'none';
@@ -7540,6 +7564,7 @@ function applyState(data) {
   _ap('updateFacecamTeamHeaders', () => { updateFacecamTeamHeaders(teams, data); });
   _ap('applyCommercialState', () => { if (typeof applyCommercialState === 'function') applyCommercialState(data); });
   _ap('lgHydrate', () => { if (typeof lgHydrate === 'function') lgHydrate(data.leagues); });
+  _ap('cmpApplyState', () => { if (typeof window.evLeagueRender === 'function') window.evLeagueRender(false); if (typeof window.cmpApplyState === 'function') window.cmpApplyState(); if (typeof lgUpdateGoLive === 'function') lgUpdateGoLive(); });
   _ap('lgRenderCaptureBar', () => { if (typeof lgRenderCaptureBar === 'function') lgRenderCaptureBar(); });   // live spectated-capture status
   _ap('renderMyEvents', () => { if (typeof renderMyEvents === 'function') renderMyEvents(); });
   // Reflect central team-library changes (new/renamed teams, logos) in the open leagues view.
@@ -7608,8 +7633,12 @@ function applyState(data) {
       if (metaEl) metaEl.textContent = [ae.gameName, ae.numEntrants ? `${ae.numEntrants} teams` : '', ae.format].filter(Boolean).join(' · ');
       if (badge) { badge.textContent = ae.platform === 'startgg' ? 'start.gg' : ae.platform === 'challonge' ? 'Challonge' : ae.platform === 'nxgen' ? 'NXGEN' : ae.platform === 'faceit' ? 'FACEIT' : ae.platform; badge.dataset.plat = ae.platform; }
       activeCard.style.display = 'flex';
-      // Sync platform tab to active event's platform (without triggering a panel switch if already correct)
-      if (ae.platform !== _evActivePlatform) {
+      // Sync platform tab to active event's platform — once per newly-active event, not on every
+      // broadcast (that pulled the producer off whichever tab they had open, every state tick).
+      const aeKey = ae.platform + '|' + ae.name;
+      const aeChanged = aeKey !== window._evLastActiveKey;
+      window._evLastActiveKey = aeKey;
+      if (aeChanged && ae.platform !== _evActivePlatform) {
         const tab = document.querySelector(`.ev-plat-tab[data-plat="${ae.platform}"]`);
         if (tab) tab.click();
       }
@@ -7961,6 +7990,10 @@ function relabelTeamSides(data) {
 }
 
 let _lastSyncedTeamName = { blue: undefined, orange: undefined };
+// Set only by the logo controls (upload / media library / Default): marks a crest the producer
+// actually changed on a side, so Apply and Save can tell the server to make it the team's crest in
+// the library and vault. Every other path that fills pendingLogo* is just reading a stored crest.
+let _logoDirty = { blue: false, orange: false };
 function syncTeamCard(side, teamData) {
   if (!teamData) return;
   const nameEl  = el(`input-name-${side}`);
@@ -7978,6 +8011,7 @@ function syncTeamCard(side, teamData) {
   _lastSyncedTeamName[side] = teamData.name || '';
   if (nameChanged) {
     if (side === 'blue') pendingLogoBlue = teamData.logo; else pendingLogoOrange = teamData.logo;
+    _logoDirty[side] = false;   // a different team is on this side - the edit was for the last one
     if (logoImg) setSideLogo(side, teamData.logo);
   } else if (logoImg) {
     const pending = side === 'blue' ? pendingLogoBlue : pendingLogoOrange;
@@ -8046,7 +8080,8 @@ const ROLES_BY_GAME = {
   'marvel-rivals': ['Vanguard', 'Duelist', 'Strategist', 'Flex'],
   'mobile-legends':['Gold', 'EXP', 'Mid', 'Jungle', 'Roam'],
   'honor-of-kings':['Clear', 'Mid', 'Farm', 'Roam', 'Support'],
-  cod:             ['Slayer', 'Objective', 'Anchor', 'Flex', 'IGL']
+  cod:             ['Slayer', 'Objective', 'Anchor', 'Flex', 'IGL'],
+  'the-finals':    ['Light', 'Medium', 'Heavy', 'Flex']
 };
 // Extends (never replaces) the built-in role list with any roles added via an active Game Config
 // for this game (currentState.gameConfigs, keyed by gameId) — dedupe-append, same "extend the
@@ -8260,7 +8295,8 @@ function renderMatchPlayers(side, players) {
     const r = _profiles[(p.name || '').trim().toLowerCase()] || {};
     return [p.id, p.name, p.realName || '', p.assignedCamera || '', p.hero || '', p.role || '', p.country || '', p.info || '', p.startgg || '', p.sixmans || '', r.startggSlug || '', (r.sixmans && r.sixmans.name) || '', p.status || '', p.photo ? '1' : '0', r.image ? '1' : '0', p.twitter || '', p.twitch || '', p.discord || '', p.instagram || '', p.tiktok || '', p.youtube || '', r.twitter || '', r.twitch || ''];
   })) + '|' + camKey + '|' + usesHeroes + '|' + currentState.activeGame
-      + '|active:' + ((currentState.activePlayer && currentState.activePlayer[side]) || '');
+      + '|active:' + ((currentState.activePlayer && currentState.activePlayer[side]) || '')
+      + '|obs:' + JSON.stringify(currentState.observedPlayer || null);
   if (wrap.dataset.sig === sig) return;
   if (wrap.classList.contains('tp-removing')) return;
   if (wrap.contains(document.activeElement)) return;
@@ -8324,6 +8360,22 @@ function renderMatchPlayers(side, players) {
         send('set_active_player', { side, playerId: p.id });
       });
       bar.appendChild(onAir);
+    }
+
+    // Observe — the one player the in-game spectator is following (games with the 'observer'
+    // feature, e.g. THE FINALS). One across BOTH sides; clicking the observed player clears it.
+    if (gameCfg && (gameCfg.features || []).includes('observer')) {
+      const obs = currentState.observedPlayer || {};
+      const isObs = obs.side === side && String(obs.playerId) === String(p.id);
+      const obsBtn = document.createElement('button');
+      obsBtn.className = 'tp-onair' + (isObs ? ' active' : '');
+      obsBtn.textContent = isObs ? 'Observed' : 'Observe';
+      obsBtn.title = isObs ? 'Shown on the broadcast bar as the spectated player (click to clear)' : 'Show this player on the broadcast bar as the spectated player';
+      obsBtn.addEventListener('click', () => {
+        if (!p.id) return;
+        send('set_observed_player', isObs ? {} : { side, playerId: p.id });
+      });
+      bar.appendChild(obsBtn);
     }
 
     // Social icons — player fields + registry fallbacks
@@ -8868,6 +8920,8 @@ function nePrompt(message, def = '') {
     p.style.display = '';
     dest.dataset.merged = '1';
   }
+  // games-hub.js then folds the rest in: the layout picker (Overlay tab), RL scene automation
+  // (RL Automation tab) and the Config Builder (Custom content tab).
 })();
 
 let _assetsTab = 'media';
@@ -9031,8 +9085,8 @@ el('mp-upload-input')?.addEventListener('change', function () {
   reader.readAsDataURL(file);
 });
 // Wire the "Library" buttons next to logo fields.
-el('btn-lib-logo-blue')?.addEventListener('click', () => mpOpen((url) => { pendingLogoBlue = url; setSideLogo('blue', url); }));
-el('btn-lib-logo-orange')?.addEventListener('click', () => mpOpen((url) => { pendingLogoOrange = url; setSideLogo('orange', url); }));
+el('btn-lib-logo-blue')?.addEventListener('click', () => mpOpen((url) => { pendingLogoBlue = url; _logoDirty.blue = true; setSideLogo('blue', url); }));
+el('btn-lib-logo-orange')?.addEventListener('click', () => mpOpen((url) => { pendingLogoOrange = url; _logoDirty.orange = true; setSideLogo('orange', url); }));
 el('btn-lib-brand-logo')?.addEventListener('click', () => mpOpen((url) => { pendingBrandLogo = url; setBrandLogoPreview(url); }));
 el('btn-lib-sponsor-logo')?.addEventListener('click', () => mpOpen((url) => {
   pendingSponsorLogo = url;
@@ -10025,6 +10079,19 @@ el('tv-import-library')?.addEventListener('click', async () => {
   } catch (e) { tvStatus(e.message, false); }
 });
 
+el('tv-delete-all')?.addEventListener('click', async () => {
+  const n = _tvTeams.length;
+  if (!n) { tvStatus('The vault is already empty.', null); return; }
+  const msg = 'Delete all ' + n + ' team' + (n === 1 ? '' : 's') + ' from the vault? Logos, past names and roster history stored here are lost. Teams in your library are left alone.';
+  if (!(await appConfirm(msg, 'Delete all', true))) return;
+  try {
+    const r = await fetch(TV_API, { method: 'DELETE' });
+    const d = await tvJson(r, 'Delete all');
+    tvStatus('Deleted ' + (d.removed || 0) + ' team' + (d.removed === 1 ? '' : 's') + ' from the vault.', true);
+    await tvFetch(true);
+  } catch (e) { tvStatus(e.message, false); }
+});
+
 el('tv-refresh')?.addEventListener('click', async () => {
   const btn = el('tv-refresh');
   btn.disabled = true; btn.textContent = 'Refreshing…';
@@ -10819,6 +10886,7 @@ async function handleLogoInput(side, file) {
   if (!file) return;
   const b64 = await fileToBase64(file);
   if (side === 'blue') pendingLogoBlue = b64; else pendingLogoOrange = b64;
+  _logoDirty[side] = true;
   setSideLogo(side, b64);   // sets src AND clears the white-fallback filter
 }
 
@@ -10854,6 +10922,7 @@ function applyTeam(side) {
   // that WAS here, and carrying them into "TBD" is what made the placeholder look broken on air.
   if (isTbdName(name)) {
     if (side === 'blue') pendingLogoBlue = null; else pendingLogoOrange = null;
+    _logoDirty[side] = false;
     setSideLogo(side, null);
     // Back to the side's default colour too — a placeholder wearing the last team's brand colour
     // is the same stale-identity problem as the logo.
@@ -10863,13 +10932,20 @@ function applyTeam(side) {
     return;
   }
   const t = findTeam(name);
-  const logo = (side === 'blue' ? pendingLogoBlue : pendingLogoOrange) || (t && t.logo) || null;
+  const pending = side === 'blue' ? pendingLogoBlue : pendingLogoOrange;
+  // A crest changed here goes out exactly as set - null included, so Default really clears instead
+  // of falling through to the saved crest - and is flagged so the server makes it the team's crest
+  // in the library and vault. Untouched, the side keeps reading the saved team's crest as before.
+  const dirty = !!_logoDirty[side];
+  const logo = dirty ? (pending || null) : (pending || (t && t.logo) || null);
   const payload = { side, name, logo };
+  if (dirty) payload.logoChanged = true;
   // Picking a saved/event team makes its roster THE side's roster — even an empty one.
   // (A rosterless team like JONZEY must clear the previous team's players, not inherit them.)
   if (t) payload.players = Array.isArray(t.players) ? t.players : [];
   if (t && t.color) payload.color = t.color;   // carry the saved team's own colour → Team colour-mode
   send('set_team', payload);
+  _logoDirty[side] = false;
 }
 
 el('btn-apply-blue')?.addEventListener('click', () => applyTeam('blue'));
@@ -11018,14 +11094,26 @@ el('btn-quick-save-blue')?.addEventListener('click', () => {
   const name = el('input-name-blue').value.trim();
   if (!name) { showToast('Enter team name.', '#ef4444'); return; }
   if (isTbdName(name)) { showToast('TBD is a placeholder — nothing to save.', '#fbbf24'); return; }
-  send('save_team', { name, logo: pendingLogoBlue || null, color: teamOwnColor('blue') });
+  const payload = { name, color: teamOwnColor('blue') };
+  // Changed here: send it as set (null = the producer hit Default) and say so. Untouched: send the
+  // crest on show, or nothing when there is none - a bare side used to wipe the saved crest.
+  if (_logoDirty.blue) { payload.logo = pendingLogoBlue || null; payload.logoChanged = true; }
+  else if (pendingLogoBlue) payload.logo = pendingLogoBlue;
+  send('save_team', payload);
+  _logoDirty.blue = false;
 });
 
 el('btn-quick-save-orange')?.addEventListener('click', () => {
   const name = el('input-name-orange').value.trim();
   if (!name) { showToast('Enter team name.', '#ef4444'); return; }
   if (isTbdName(name)) { showToast('TBD is a placeholder — nothing to save.', '#fbbf24'); return; }
-  send('save_team', { name, logo: pendingLogoOrange || null, color: teamOwnColor('orange') });
+  const payload = { name, color: teamOwnColor('orange') };
+  // Changed here: send it as set (null = the producer hit Default) and say so. Untouched: send the
+  // crest on show, or nothing when there is none - a bare side used to wipe the saved crest.
+  if (_logoDirty.orange) { payload.logo = pendingLogoOrange || null; payload.logoChanged = true; }
+  else if (pendingLogoOrange) payload.logo = pendingLogoOrange;
+  send('save_team', payload);
+  _logoDirty.orange = false;
 });
 
 // ── Scorecard (reusable: rendered below Match-Teams on Dashboard + on Teams tab)
@@ -11180,7 +11268,7 @@ function updateMspConnectedState(data) {
     b.classList.toggle('msp-connected', !!plat);
     b.title = plat
       ? `Connected to ${platName} — pull the live round/stage`
-      : 'Load a tournament (ESPORTS ▸ platform) to pull the round automatically';
+      : 'Load a tournament (Events ▸ platform) to pull the round automatically';
   });
   const labelAuto = !((data && data.gameLabel) || '').trim();
   document.querySelectorAll('[data-msp="label-auto"]').forEach((b) => {
@@ -11357,6 +11445,7 @@ el('btn-swap-teams')?.addEventListener('click', () => {
     lo.classList.toggle('game-logo-white', bw);
   }
   const pl = pendingLogoBlue; pendingLogoBlue = pendingLogoOrange; pendingLogoOrange = pl;
+  _logoDirty = { blue: _logoDirty.orange, orange: _logoDirty.blue };
   send('swap_teams');
 });
 
@@ -11369,11 +11458,13 @@ el('btn-reset-all')?.addEventListener('click', async () => {
 
 el('btn-default-logo-blue')?.addEventListener('click', () => {
   pendingLogoBlue = null;
+  _logoDirty.blue = true;
   setSideLogo('blue', null);
 });
 
 el('btn-default-logo-orange')?.addEventListener('click', () => {
   pendingLogoOrange = null;
+  _logoDirty.orange = true;
   setSideLogo('orange', null);
 });
 
@@ -12655,7 +12746,7 @@ el('btn-nxgen-change-key')?.addEventListener('click', () => {
   inp.focus();
 });
 
-// ── Google Sheets integration (Settings ▸ Integrations) ─────────────────────────
+// ── Google Sheets integration (Marketplace ▸ Integrations) ─────────────────────────
 function getSheetsPayload() {
   const p = {
     enabled: !!(el('check-sheets-enabled')?.checked),
@@ -13014,7 +13105,7 @@ function renderDashNxgenQueue(queue, fetchedAt) {
   if (status && fetchedAt) status.textContent = `Updated ${new Date(fetchedAt).toLocaleTimeString()}`;
 }
 
-// ── FACEIT (Settings ▸ Integrations) ─────────────────────────────────────────
+// ── FACEIT (Marketplace ▸ Integrations) ─────────────────────────────────────────
 
 function getFaceitPayload() {
   return {
@@ -13857,7 +13948,7 @@ let _evSelectedSlug = '';   // slug of the tournament chosen from the dashboard 
 // return a picker (handled by the event-result message).
 let _evLoadTimer = null;
 function loadStartggEvent(input, displayName) {
-  if (!currentState.startgg?.hasToken) { showToast('Add your Start.gg API token in Settings → Integrations first.', '#f59e0b'); return; }
+  if (!currentState.startgg?.hasToken) { showToast('Add your Start.gg API token in Marketplace → Integrations first.', '#f59e0b'); return; }
   const url = (input || '').trim();
   if (!url) { showToast('Paste a start.gg link or pick a tournament first.', '#f59e0b'); return; }
   console.info('[start.gg] load_startgg_url →', url);
@@ -14373,7 +14464,7 @@ function evRenderDropdown() {
   box.innerHTML = '';
 
   if (!currentState.startgg?.hasToken) {
-    box.innerHTML = '<div class="ev-dropdown-msg" style="color:#f59e0b;"><svg class="svg-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg> Add a start.gg API token in Settings → Integrations first.</div>';
+    box.innerHTML = '<div class="ev-dropdown-msg" style="color:#f59e0b;"><svg class="svg-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg> Add a start.gg API token in Marketplace → Integrations first.</div>';
     box.style.display = 'block';
     return;
   }
@@ -14536,6 +14627,8 @@ function updateEvTokenBadge() {
     badge.style.display = currentState.nxgen?.hasKey ? 'none' : '';
   } else if (_evActivePlatform === 'faceit') {
     badge.style.display = currentState.faceit?.hasKey ? 'none' : '';
+  } else {
+    badge.style.display = 'none';   // My league needs no platform key
   }
 }
 
@@ -14548,6 +14641,12 @@ document.querySelectorAll('.ev-plat-tab').forEach(tab => {
     const chalPanel  = el('ev-plat-panel-challonge');
     const nxgenPanel = el('ev-plat-panel-nxgen');
     const faceitPanel = el('ev-plat-panel-faceit');
+    const leaguePanel = el('ev-plat-panel-league');
+    if (leaguePanel) leaguePanel.style.display = _evActivePlatform === 'league'    ? '' : 'none';
+    // Load Event / Clear belong to the platform importers; My league has its own buttons.
+    if (el('ev-actions')) el('ev-actions').style.display = _evActivePlatform === 'league' ? 'none' : '';
+    if (_evActivePlatform === 'league' && typeof window.evLeagueRender === 'function') window.evLeagueRender(true);
+    try { localStorage.setItem('ne_ev_plat_tab', _evActivePlatform); } catch (_) {}
     if (sggPanel)    sggPanel.style.display    = _evActivePlatform === 'startgg'   ? '' : 'none';
     if (chalPanel)   chalPanel.style.display   = _evActivePlatform === 'challonge' ? '' : 'none';
     if (nxgenPanel)  nxgenPanel.style.display  = _evActivePlatform === 'nxgen'     ? '' : 'none';
@@ -14877,7 +14976,7 @@ function renderNxgenDropdown(events, filterQuery) {
       }
       if (_evFaceitMyComps.length) { renderFaceitDropdown(_evFaceitMyComps, (query || '').toLowerCase(), true); return; }
       if (!query) {
-        resultsDiv.innerHTML = '<div class="ev-dropdown-msg">Type to search FACEIT championships, or paste a championship / hub link.<br><span style="opacity:.7;">Set your organiser name in Settings ▸ Integrations ▸ FACEIT to list your own competitions here.</span></div>';
+        resultsDiv.innerHTML = '<div class="ev-dropdown-msg">Type to search FACEIT championships, or paste a championship / hub link.<br><span style="opacity:.7;">Set your organiser name in Marketplace ▸ Integrations ▸ FACEIT to list your own competitions here.</span></div>';
         return;
       }
       const found = await post('/api/faceit/search', { name: query, limit: 30 });
@@ -15241,18 +15340,7 @@ function saveCasters() {
 el('btn-apply-casters')?.addEventListener('click', saveCasters);
 el('btn-apply-casters-footer')?.addEventListener('click', saveCasters);
 
-// ── Ad Slots / Desk Footer tab panel ────────────────────────────────────────
-(function () {
-  document.querySelectorAll('.adslot-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('.adslot-tab').forEach(t => t.classList.remove('active'));
-      document.querySelectorAll('.adslot-panel').forEach(p => { p.style.display = 'none'; });
-      tab.classList.add('active');
-      const panel = document.getElementById(tab.dataset.panel);
-      if (panel) panel.style.display = '';
-    });
-  });
-})();
+// Dashboard ▸ Game Settings is driven by games-hub.js (GamesHub.onState).
 
 el('check-casters-visible')?.addEventListener('change', function() {
   send('set_casters_visibility', { visible: this.checked });
@@ -15315,7 +15403,7 @@ el('select-winner-side')?.addEventListener('change', function() {
   if (window._winnerAuto) window._winnerAuto.sideManual = true;   // producer chose a side → stop auto-picking the winner
   const row = el('winner-custom-row');
   if (row) row.style.display = this.value === '__custom__' ? '' : 'none';
-  doWinnerPreview && doWinnerPreview();
+  // (the live preview push is wired on this same change event inside the Graphics block)
 });
 function winnerPayload(visible) {
   const sel = el('select-winner-side')?.value || 'blue';
@@ -15324,7 +15412,7 @@ function winnerPayload(visible) {
   const subtitle = (el('input-winner-subtitle')?.value || '').trim()
     || (window._winnerSeriesScore ? window._winnerSeriesScore(currentState, isSide ? sel : '') : '');
   if (isSide) return { visible, side: sel, name: '', subtitle };
-  return { visible, side: '', name: _winnerNameFromSel(sel), subtitle };
+  return { visible, side: '', name: window._winnerNameFromSel ? window._winnerNameFromSel(sel) : '', subtitle };
 }
 el('btn-show-winner')?.addEventListener('click', () => send('set_winner', winnerPayload(true)));
 el('btn-hide-winner')?.addEventListener('click', () => {
@@ -15461,12 +15549,14 @@ function renderVetoManager(data) {
       // back left it holding that game's lone "All" option — silently turning a deliberate
       // "Counterpicks only" into a strike through the whole pool.
       const chosen = _vetoTierPick[selGame] || '';
-      tierSel.innerHTML = tiers.map((t) => `<option value="${tlEsc(t)}">${tlEsc(t)}s only</option>`).join('')
+      // "Starters only" / "Reserves only" — but "Active Duty only", not "Active Dutys".
+      tierSel.innerHTML = tiers.map((t) => `<option value="${tlEsc(t)}">${tlEsc(t)}${/y$/i.test(t) ? '' : 's'} only</option>`).join('')
         + `<option value="all">All ${tlEsc(unit)}s</option>`;
       const dflt = ((data.vetoMeta || {})[selGame] || {}).strikeFrom || 'all';
       const has = (v) => !!v && [...tierSel.options].some((o) => o.value === v);
       tierSel.value = has(chosen) ? chosen : (has(dflt) ? dflt : 'all');
     }
+    tierSel.title = 'Which ' + unit + 's this veto ' + (((data.vetoMeta || {})[selGame] || {}).banWord || 'Ban').toLowerCase() + 's from';
     tierSel.style.display = tiers.length ? '' : 'none';
   }
   const selMeta = (data.vetoMeta && data.vetoMeta[selGame]) || { banWord: 'Ban', unit: 'map' };
@@ -16510,6 +16600,7 @@ const SCENE_SOURCES = [
     { name: 'Valorant HUD', path: '/valorant.html', live: 'always', desc: 'Round scorebar, agents, spike + economy.' },
     { name: 'Overwatch 2 HUD', path: '/overwatch.html', live: 'always', desc: 'Hero line-up, objective + score HUD.' },
     { name: 'Marvel Rivals HUD', path: '/marvel-rivals.html', live: 'always', desc: 'Hero roster + objective scorebar.' },
+    { name: 'THE FINALS Broadcast Bar', path: '/the-finals.html', live: 'always', desc: 'Bottom bar under the in-game spectator HUD — event, series score, round, observed player + scores ticker. ?ticker=0 hides the ticker.' },
     { name: 'LoL HUD', path: '/lol-hud.html', live: 'always', desc: 'Team gold estimate + player loadouts, auto champ-select fill.' },
     { name: 'Apex Observer', path: '/apex-observer.html?live=1', live: 'always', desc: 'ALGS-style full-observer: side standings (rank/logo/legends/pts), map badge, squads/players remaining. LiveAPI + scoring.' },
     { name: 'Apex HUD', path: '/apex.html?live=1', live: 'always', desc: 'Apex spectated-player card, kill feed + squad standings from LiveAPI.' },
@@ -16519,6 +16610,7 @@ const SCENE_SOURCES = [
     { name: 'Director Preview', path: '/director-preview.html', live: 'always', desc: 'Producer-only director bug — add ?director=1.' },
   ]},
   { group: 'Fighting Games (FGC)', icon: 'gamepad', items: [
+    { name: 'Marvel Tokon Scoreboard', path: '/tokon.html', live: 'always', desc: 'Built around the Tokon HUD — players, flags, set score, round + "Best of 3 · Game 2 of 3" top middle; event title, casters and rotating sponsors under the super meters. Set in Match ▸ Teams ▸ Marvel Tokon.' },
     { name: 'Tekken 8 Scoreboard (Blue)', path: '/fgc/tekken8-blue/template.html', live: 'always', desc: 'FGCaster lower-third — fed by Match ▸ Teams (player names, series score, casters).' },
     { name: 'Tekken 8 Scoreboard (Red)', path: '/fgc/tekken8-red/template.html', live: 'always', desc: 'Red variant of the Tekken 8 scoreboard.' },
     { name: 'Street Fighter 6 Scoreboard', path: '/fgc/sf6/template.html', live: 'always', desc: 'SF6-styled 1v1 scoreboard — names, clan tags, series score, casters.' },
@@ -17213,18 +17305,18 @@ GOLIVE_TRIGGERS.forEach((t) => {
       if (!t.pushOnly) send(t.msg, { visible: false });
       send('set_gfx_active', { scene: '' });
       if (currentState) currentState.gfxActive = '';
-      if (typeof refreshTopBar === 'function') refreshTopBar('');
+      if (window._gfxRefreshTopBar) window._gfxRefreshTopBar();
     } else {
       // Clear whichever GFX scene is currently active before pushing ours.
       const prev = currentState && currentState.gfxActive;
-      if (prev && prev !== t.sceneKey && typeof SCENE_META !== 'undefined' && SCENE_META[prev]) {
-        const pm = SCENE_META[prev];
+      if (prev && prev !== t.sceneKey && window._gfxSceneMeta && window._gfxSceneMeta[prev]) {
+        const pm = window._gfxSceneMeta[prev];
         el(pm.clearId || ('btn-hide-' + prev))?.click();
       }
       if (!t.pushOnly) send(t.msg, t.show());
       send('set_gfx_active', { scene: t.sceneKey });
       if (currentState) currentState.gfxActive = t.sceneKey;
-      if (typeof refreshTopBar === 'function') refreshTopBar(t.sceneKey);
+      if (window._gfxRefreshTopBar) window._gfxRefreshTopBar();
       if (el('gfx-autocut-on')?.checked) {
         const sc = (el('gfx-autocut-scene')?.value || '').trim();
         if (sc) send('obs_switch_scene', { sceneName: sc });
@@ -17287,7 +17379,7 @@ el('ck-view-hud')?.addEventListener('click', () => send('force_hud'));
 
 // (Events domain lives in events.js)
 
-// (Seeding studio + Spotlight domains live in seeding-spotlight.js)
+// (Spotlight domain + shared event helpers live in spotlight.js)
 
 // (Leagues domain lives in leagues.js)
 
@@ -17443,7 +17535,8 @@ const DASH_WIDGETS = [
   { id: 'teams',    title: 'Teams',          icon: 'users',      desc: 'Team names, rosters, scores and side swap',         sel: '[data-dash-id="teams"]',    defaultOn: true,  span: 'full' },
   { id: 'graphics', title: 'Graphics',       icon: 'sparkles',   desc: 'Full graphics hub — scenes, preview and settings',  sel: '[data-dash-id="graphics"]', defaultOn: true,  span: 'full', fixedSpan: 'full' },
   { id: 'onair',    title: 'On Air',         icon: 'zap',        desc: 'Quick-toggle card grid for all overlays',           sel: '[data-dash-id="onair"]',    defaultOn: false, span: 'full' },
-  { id: 'adslots',  title: 'Ad Slots',       icon: 'film',       desc: 'Sponsor ad slots and commercial break controls',    sel: '[data-dash-id="adslots"]',  defaultOn: true,  span: 'full' },
+  { id: 'gamesettings', title: 'Game Settings', icon: 'gamepad', desc: 'Settings for the active game — look, sponsor slots, player cams, stocks', sel: '[data-dash-id="gamesettings"]', defaultOn: true, span: 'full' },
+  { id: 'adslots',  title: 'Sponsors',       icon: 'film',       desc: 'Desk footer text, footer logos and the active brand', sel: '[data-dash-id="adslots"]',  defaultOn: true,  span: 'full' },
   // 'showdeck' retired as a standalone widget — the Show Deck lives INSIDE the Talent Monitor
   // (DCC ▸ Show Deck tab) now; see placeShowDeck. Old saved configs may still carry a 'showdeck'
   // panel entry; getDashPanel() returns undefined for it and applyDashLayout skips it.
@@ -17499,7 +17592,12 @@ function applyDashLayout() {
   const panels = cfg.panels || DASH_WIDGETS.map((w) => ({ id: w.id, on: w.defaultOn, span: w.span }));
   // Fill in any widget added after the user last saved their config (keeps them visible at the end).
   DASH_WIDGETS.forEach((w) => {
-    if (!panels.find((p) => p.id === w.id)) panels.push({ id: w.id, on: w.defaultOn, span: w.span });
+    if (panels.find((p) => p.id === w.id)) return;
+    // Game Settings took over controls that used to sit inside Teams — place it right after Teams
+    // rather than at the bottom of an existing layout.
+    const after = w.id === 'gamesettings' ? panels.findIndex((p) => p.id === 'teams') : -1;
+    if (after >= 0) panels.splice(after + 1, 0, { id: w.id, on: w.defaultOn, span: w.span });
+    else panels.push({ id: w.id, on: w.defaultOn, span: w.span });
   });
   panels.forEach((p, i) => {
     const w = getDashPanel(p.id); if (!w) return;
@@ -17817,7 +17915,7 @@ function renderDashMiniPanels(data) {
     const recPill = el('dmobs-record');
     if (recPill) { recPill.textContent = obs.recording ? 'Recording' : 'Record Off'; recPill.classList.toggle('on', !!obs.recording); }
     const bufPill = el('dmobs-replay');
-    if (bufPill) { bufPill.textContent = obs.replayBufferActive ? 'Buffer On' : 'Buffer Off'; bufPill.classList.toggle('on', !!obs.replayBufferActive); }
+    rbPill(bufPill, obs);
     const scenesList = el('dmobs-scenes-list');
     if (scenesList) {
       // Skip the collection's blank "═══ DIVIDER ═══" separator scenes — clicking one cuts
@@ -17984,9 +18082,10 @@ function renderQuickToolbar(data) {
     if (!btn.disabled) {
       btn.dataset.mode = wantStart ? 'startbuf' : 'clip';
       const lbl = btn.querySelector('.bb-clip-lbl');
-      if (lbl) lbl.textContent = wantStart ? 'Start Replay Buffer' : 'Clip';
-      btn.title = wantStart
-        ? 'OBS replay buffer is OFF — click to start it so clips can capture'
+      const offInObs = rbOffInObs(data.obs);
+      if (lbl) lbl.textContent = offInObs ? 'Replay Buffer off in OBS' : wantStart ? 'Start Replay Buffer' : 'Clip';
+      btn.title = offInObs ? RB_OFF_HINT
+        : wantStart ? 'OBS replay buffer is OFF — click to start it so clips can capture'
         : 'Save OBS replay buffer + create Twitch clip (channel must be live for Twitch clip)';
     }
   })();
@@ -19103,6 +19202,11 @@ function pvStopObs() {
   const v = el('pv-obs-video'); if (v) { v.srcObject = null; v.style.display = 'none'; }
   const lb = el('pv-obs-live'); if (lb) { lb.classList.remove('on'); lb.style.display = 'none'; }
 }
+// Both were deleted with the old switcher panel while their callers stayed: swBackend's callers are
+// typeof-guarded, so vMix producers were silently checked against OBS; SW_VCAM_RE threw outright,
+// so the live OBS preview never found the virtual camera.
+function swBackend(data) { return (data && data.switcher && data.switcher.target) === 'vmix' ? 'vmix' : 'obs'; }
+const SW_VCAM_RE = /obs\s*virtual|obs-camera|obs cam|vmix|virtual cam/i;
 // Smooth live OBS feed via the Virtual Camera (getUserMedia). Auto-starts OBS's virtual cam first.
 async function pvObsLiveStart(silent) {
   const lb = el('pv-obs-live'), v = el('pv-obs-video'), img = el('pv-obs-img'), msg = el('pv-obs-msg');
@@ -19336,7 +19440,8 @@ function renderPlayerCams(data) {
   });
 }
 document.querySelectorAll('.js-goto-facecams').forEach((b) => b.addEventListener('click', () => {
-  document.querySelector('.tab-btn[data-tab="facecams"]')?.click();
+  document.querySelector('.tab-btn[data-tab="produccion"]')?.click();
+  if (typeof window._pdShow === 'function') window._pdShow('cameras');
 }));
 document.querySelectorAll('.js-goto-scenes').forEach((b) => b.addEventListener('click', () => {
   document.querySelector('.tab-btn[data-tab="media"]')?.click();
@@ -19344,7 +19449,7 @@ document.querySelectorAll('.js-goto-scenes').forEach((b) => b.addEventListener('
 }));
 
 // ── Camera Feeds / VDO talent domain (cf*, vdo*) — extracted to camera-feeds.js ──
-function tlEsc(s) { return esc(s); }   // legacy alias — canonical esc() lives in core.js; kept in app.js (used across app.js + seeding-spotlight.js)
+function tlEsc(s) { return esc(s); }   // legacy alias — canonical esc() lives in core.js; kept in app.js (used across app.js + spotlight.js)
 // ── Dashboard: start.gg stream queue ────────────────────────────────────────
 let _sggQueueSig = '';
 let _sggStreamHintKey = '';   // event the hint currently refers to (used by the Follow-all button)
@@ -19371,6 +19476,25 @@ el('sgg-stream-hint-all')?.addEventListener('click', () => {
   send('startgg_set_autofollow', { enabled: !!el('sgg-autofollow')?.checked, streamName: '' });
   if (typeof showToast === 'function') showToast('Following all streams');
 });
+// Two "you are not being moved" states, both deliberately visible: the producer's station has
+// dropped off start.gg's queue and is being held from cache (never swapped for another station),
+// and auto-follow parking on the match that is already on air instead of jumping to the next one.
+function renderStationNote(sg) {
+  const note = el('sgg-stream-note'); if (!note) return;
+  const hold = sg.autoFollowHold;
+  const lines = [];
+  if (sg.streamOffQueue && sg.streamName) {
+    lines.push(`No sets on "${sg.streamName}" right now — holding your station. Nothing from another stream will be pushed.`);
+  }
+  if (hold && hold.setId) {
+    const q = (sg.queue || []);
+    const nxt = q.find((x) => String(x.setId) === String(hold.nextSetId));
+    const who = nxt ? `${nxt.teamA || 'TBD'} vs ${nxt.teamB || 'TBD'}` : 'the next match';
+    lines.push(`Auto-follow is holding the match on air — ${who} is waiting. Push it yourself to switch now.`);
+  }
+  note.textContent = lines.join(' ');
+  note.style.display = lines.length ? '' : 'none';
+}
 function renderStreamQueue(data) {
   const sg = data.startgg || {};
   const tEl = el('sgg-tournament');
@@ -19411,21 +19535,26 @@ function renderStreamQueue(data) {
   // Show the picker as soon as the tournament has ANY stream, not just when it has several. On a
   // multi-station championship the producer needs to pin their station before their stream has a
   // set queued on it — waiting until streams.length > 1 hid the control exactly when it mattered.
-  if (streamRow) streamRow.style.display = streams.length ? '' : 'none';
+  if (streamRow) streamRow.style.display = (streams.length || sg.streamName) ? '' : 'none';
 
   const queue = sg.queue || [];
-  const sig = JSON.stringify({ queue, streams, sel: streamSel && streamSel.value, pushed: sg.lastPushedSetId });
+  const sig = JSON.stringify({ queue, streams, sel: streamSel && streamSel.value, pushed: sg.lastPushedSetId, off: !!sg.streamOffQueue, hold: sg.autoFollowHold || null });
   if (sig === _sggQueueSig) return;
   _sggQueueSig = sig;
 
   if (streamSel) {
     const cur = streamSel.value;
     // An explicit "All streams" entry: following every station is a deliberate choice, not the
-    // accident you get when a station name fails to match.
+    // accident you get when a station name fails to match. And the station we're ON is always an
+    // option, even if this poll's queue didn't list it (the server pins it too — belt and braces):
+    // rebuilding the list without it silently reset the selector to "All streams" the moment a
+    // station ran out of queued sets, which is exactly when a producer must NOT be moved off it.
+    const pinned = cur || sg.streamName || '';
+    const opts = pinned && !streams.includes(pinned) ? [...streams, pinned] : streams;
     streamSel.innerHTML = '<option value="">All streams</option>'
-      + streams.map((s) => `<option value="${_stEsc(s)}">${_stEsc(s)}</option>`).join('');
-    if (streams.includes(cur)) streamSel.value = cur;
-    else if (sg.streamName && streams.includes(sg.streamName)) streamSel.value = sg.streamName;
+      + opts.map((s) => `<option value="${_stEsc(s)}">${_stEsc(s)}</option>`).join('');
+    if (opts.includes(cur)) streamSel.value = cur;
+    else if (sg.streamName && opts.includes(sg.streamName)) streamSel.value = sg.streamName;
     else if (!cur) streamSel.value = '';
   }
   // Nudge the producer to pick their stream when the event runs several and none is chosen — inline
@@ -19433,6 +19562,7 @@ function renderStreamQueue(data) {
   const _evKey = (sg.tournamentSlug || '') + '|' + (sg.eventSlug || '');
   _sggStreamHintKey = _evKey;
   renderStreamFollowHint(streams, _evKey, !!sg.streamName);
+  renderStationNote(sg);
   const wantStream = (streamSel && streamSel.value) || '';
   const wrap = el('sgg-queue'); if (!wrap) return;
   // Once a station is picked the list shows THAT station only — previously a single-stream
@@ -20184,7 +20314,13 @@ function applyTickerState(data) {
   // Say what the live feed actually holds. A scores ticker whose platform has no matches scrolls
   // nothing at all, and there was no way to tell that from an empty ticker on air.
   const feedEl = el('ticker-feed-status');
-  if (feedEl) {
+  if (feedEl && ticker.source === 'competition') {
+    const cf = data.compFeed;
+    feedEl.textContent = !cf
+      ? 'No competition is live — pick one on Events > Competitions, or nothing will scroll.'
+      : `${cf.name || 'League'}: ${cf.live.length} live, ${cf.upcoming.length} upcoming, ${cf.results.length} recent final${cf.results.length === 1 ? '' : 's'}.`;
+    feedEl.style.color = cf ? '' : '#f59e0b';
+  } else if (feedEl) {
     const plat = ticker.source === 'startgg' ? 'start.gg' : ticker.source === 'nxgen' ? 'NXGEN' : '';
     const feed = !plat ? [] : ((ticker.source === 'nxgen' ? data.nxgen?.matchFeed : data.startgg?.matchFeed) || []);
     const live = feed.filter((m) => m && m.status === 'live').length;
@@ -20460,6 +20596,88 @@ function bktAgo(ts) {
 let _bktSourceFoldAuto = false;   // collapse the Source fold ONCE — never fight a producer who opened it
 let _bktSrcTabSynced = false;     // light the source tab that matches the bracket actually loaded
 
+// ── Connected-event bar (Graphics hub header) ───────────────────────────────
+// The bracket panel used to be the only place that showed which event the graphics follow, so a
+// producer on Standings or Schedule had no idea what was feeding them. One bar, every scene.
+function gfxRenderEventBar(data) {
+  const bar = el('gfx-eventbar'); if (!bar) return;
+  const d = data || {};
+  const ae = d.activeEvent || {};
+  const b = d.bracket || {};
+  const isManualBkt = b.mode === 'manual';
+  // Which event are the graphics following? In order: an imported platform event, the league that
+  // is LIVE on Events > Competitions (run here / Google Sheet / feed — activeEvent never sees these),
+  // a hand-built bracket, and finally the Event Name typed on the Dashboard.
+  const liveId = d.competition && d.competition.leagueId;
+  const league = liveId ? (d.leagues || (typeof currentState !== 'undefined' && currentState && currentState.leagues) || []).find((l) => l && l.id === liveId) : null;
+  let kind = '', name = '', platLabel = '';
+  if (ae.name) { kind = 'platform'; name = ae.name; platLabel = BKT_SRC_LABEL[ae.platform] || ae.platform || 'Event'; }
+  else if (league) { kind = 'league'; name = league.name || 'League'; platLabel = 'League'; }
+  else if (isManualBkt) { kind = 'manual'; name = b.title || 'Custom bracket'; platLabel = 'Custom'; }
+  else if (d.eventName) { kind = 'named'; name = d.eventName; }
+  bar.classList.toggle('is-empty', !name);
+
+  const plat = el('gfx-ev-plat');
+  if (plat) { plat.textContent = platLabel; plat.hidden = !platLabel; plat.dataset.plat = kind === 'platform' ? (ae.platform || '') : kind; }
+  const nm = el('gfx-ev-name'); if (nm) nm.textContent = name || 'No event connected';
+
+  // Badges + meta describe the SAME thing the name does — bracket facts only when the bracket
+  // belongs to that event, so a league never shows an unrelated double-elim import.
+  const badges = [], meta = [];
+  const bktIsOurs = kind === 'platform' || kind === 'manual' || (kind === 'league' && b.source === 'league');
+  if (kind === 'platform') {
+    const fmt = (ae.format || b.type || '').replace(/_/g, ' ').trim(); if (fmt) badges.push(fmt);
+    if (ae.gameName) meta.push(ae.gameName);
+    if (ae.numEntrants) meta.push(ae.numEntrants + ' entrants');
+  } else if (kind === 'league') {
+    // Same facts, same sources as the live-league card on Events (competitions.js), so the two
+    // panels can never disagree: where the data comes from, how fresh, and the next match.
+    const src = (league.source && league.source.type) || 'manual';
+    badges.push((typeof CMP_SRC_LABEL !== 'undefined' && CMP_SRC_LABEL[src]) || (src === 'manual' ? 'Entered here' : src));
+    if (league.season) badges.push(String(league.season));
+    const teams = (league.teams || []).length; if (teams) meta.push(teams + ' teams');
+    const sync = (d.compSync || {})[league.id];
+    if ((src === 'sheet' || src === 'feed') && sync) {
+      meta.push(sync.lastError ? 'sync failed' : sync.lastOkAt ? 'synced ' + (bktAgo(sync.lastOkAt) || 'just now') : 'syncing');
+    }
+    const next = d.compFeed && d.compFeed.next && d.compFeed.next.id ? d.compFeed.next : null;
+    if (next) meta.push((next.status === 'live' ? 'Live: ' : 'Next: ') + next.teamA + ' vs ' + next.teamB);
+  } else if (kind === 'manual') {
+    const fmt = (b.type || '').replace(/_/g, ' ').trim(); if (fmt) badges.push(fmt);
+  }
+  if (bktIsOurs) {
+    const phases = (b.phases || []).length;
+    if (phases && kind !== 'league') meta.push(phases === 1 ? '1 stage' : phases + ' stages');
+    const ago = bktAgo(b.lastFetchAt);
+    if (ago && kind !== 'league') meta.push((isManualBkt ? 'edited ' : 'synced ') + ago);
+  }
+  const bEl = el('gfx-ev-badges');
+  if (bEl) bEl.innerHTML = badges.map((t) => `<span class="gfx-ev-badge">${tlEsc(t)}</span>`).join('');
+  const mEl = el('gfx-ev-meta');
+  if (mEl) mEl.innerHTML = meta.map(tlEsc).join(' <span class="gfx-ev-sep">·</span> ');
+
+  const open = el('gfx-ev-open');
+  if (open) {
+    const url = kind === 'platform' ? ae.url : '';
+    open.hidden = !url && kind !== 'league';
+    open.textContent = kind === 'league' ? 'Open league' : 'Event \u2197';
+    if (url) { open.href = url; open.target = '_blank'; }
+    else if (kind === 'league') { open.href = '#'; open.removeAttribute('target'); }
+    open.dataset.league = kind === 'league' ? league.id : '';
+  }
+  const sync = el('gfx-ev-sync'); if (sync) sync.hidden = kind !== 'platform';
+  const conn = el('gfx-ev-connect'); if (conn) conn.hidden = !!name;
+}
+// "Open league" jumps to that league on Events > Leagues instead of leaving the app.
+el('gfx-ev-open')?.addEventListener('click', (e) => {
+  const id = e.currentTarget.dataset.league; if (!id) return;
+  e.preventDefault();
+  document.querySelector('.tab-btn[data-tab="events"]')?.click();
+  if (typeof cmpOpenLeague === 'function') cmpOpenLeague(id, 'overview');
+});
+el('gfx-ev-sync')?.addEventListener('click', () => { if (typeof window._bktReloadActiveEvent === 'function') window._bktReloadActiveEvent(); });
+el('gfx-ev-connect')?.addEventListener('click', () => document.querySelector('.tab-btn[data-tab="principal"]')?.click());
+
 function renderBracketCC(bracket) {
   const cc = el('gfx-bkt-cc'); if (!cc) return;
   const b = bracket || {};
@@ -20475,6 +20693,7 @@ function renderBracketCC(bracket) {
   // ── Status header — what is on air, from where, how big, how fresh.
   const st = el('gfx-bkt-cc-status');
   if (st) {
+    st.hidden = false;
     if (!hasData) {
       st.className = 'bkp-status is-empty';
       st.innerHTML = 'No bracket loaded yet — open Source below to connect an event or build one.';
@@ -20487,23 +20706,28 @@ function renderBracketCC(bracket) {
         const i = pools.findIndex((p) => p.id === b.activePoolId);
         meta.push('pool ' + (i >= 0 ? i + 1 : 1) + ' of ' + pools.length);
       }
-      const ago = bktAgo(b.lastFetchAt);
-      // Only an auto-refreshing (imported) bracket can go stale; a custom one is as fresh as
-      // the last hand edit, so flagging it amber would be nonsense.
+      // Freshness + "Sync now" live on the hub's event bar now (gfxRenderEventBar) — this panel
+      // keeps only what is specific to the bracket itself.
       const stale = !isManual && b.lastFetchAt && (Date.now() - (typeof b.lastFetchAt === 'number' ? b.lastFetchAt : Date.parse(b.lastFetchAt))) > 180000;
-      if (ago) meta.push((isManual ? 'edited ' : 'synced ') + ago);
+      // The hub's event bar already names the connected event — repeat the title here only when it
+      // says something different (a custom bracket, or a title the producer overrode).
+      const evName = ((typeof currentState !== 'undefined' && currentState && currentState.activeEvent) || {}).name || '';
+      const title = b.title || 'Bracket';
+      const showTitle = isManual || !evName || title.trim().toLowerCase() !== evName.trim().toLowerCase();
       st.innerHTML =
         `<div class="bkp-st-text">
            <div class="bkp-st-main">
-             <span class="bkp-st-name">${tlEsc(b.title || 'Bracket')}</span>
-             <span class="bkp-badge ${isManual ? 'is-custom' : 'is-src'}">${tlEsc(isManual ? 'Custom' : (BKT_SRC_LABEL[b.source] || 'Imported'))}</span>
-             ${typeLabel ? `<span class="bkp-badge">${tlEsc(typeLabel)}</span>` : ''}
+             ${showTitle ? `<span class="bkp-st-name">${tlEsc(title)}</span>` : ''}
+             ${isManual ? '<span class="bkp-badge is-custom">Custom</span>' : ''}
+             ${(isManual && typeLabel) ? `<span class="bkp-badge">${tlEsc(typeLabel)}</span>` : ''}
              ${stale ? '<span class="bkp-badge is-stale">stale</span>' : ''}
              ${b.visible ? '<span class="bkp-badge is-onair">On air</span>' : ''}
            </div>
            <div class="bkp-st-meta">${meta.map(tlEsc).join(' <span class="bkp-sep">·</span> ')}</div>
          </div>
-         ${isManual ? '' : `<div class="bkp-st-actions"><button type="button" class="btn btn-ghost btn-xs" data-bktact="reload" title="Pull the latest scores from the connected event now">Sync now</button></div>`}`;
+         `;
+      // Nothing left to say that the hub's event bar doesn't already show — drop the card.
+      st.hidden = !showTitle && !isManual && !stale && !b.visible && meta.length <= 1;
     }
   }
 
@@ -20633,6 +20857,7 @@ let _bracketAutoLoadDone = false;
 function applyBracketState(data) {
   const bracket = data.bracket || {};
   renderBracketCC(bracket);   // mini control center on the Graphics front panel
+  gfxRenderEventBar(data);    // connected-event bar in the Graphics hub header
   bbHydrate(bracket);   // restore a manual bracket into the builder once
 
   const slugEl = el('input-bracket-slug');
@@ -21089,6 +21314,21 @@ function fillGameSelect(sel, games) {
 
 // Header game picker is a custom dropdown (native <select> can't show logos).
 function gameLogoSrc(g) { return g && g.logo ? `../assets/${g.logo}` : '../assets/rl.png'; }
+// The menu pins the most recently used games on top ("Recent") and has a name search, so switching
+// between the handful of games a producer actually runs never means scrolling the whole registry.
+const GAME_DD_RECENT_KEY = 'ne_recent_games_v1';
+const GAME_DD_RECENT_MAX = 5;
+let _gameDDGames = {}, _gameDDActive = '', _gameDDSig = '';
+function gameDDRecent() {
+  try { const v = JSON.parse(localStorage.getItem(GAME_DD_RECENT_KEY) || '[]'); return Array.isArray(v) ? v : []; } catch { return []; }
+}
+// Recorded whenever the active game changes, whatever switched it (header, dashboard grid, Stream Deck).
+function gameDDRemember(id) {
+  if (!id) return;
+  const list = [id, ...gameDDRecent().filter((x) => x !== id)].slice(0, GAME_DD_RECENT_MAX);
+  try { localStorage.setItem(GAME_DD_RECENT_KEY, JSON.stringify(list)); } catch {}
+}
+const _gameDDNorm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 function renderGameHeaderDD(games, activeId) {
   const trig = el('game-dd-trigger'), menu = el('game-dd-menu');
   if (!trig || !menu) return;
@@ -21096,24 +21336,89 @@ function renderGameHeaderDD(games, activeId) {
   const tLogo = el('game-dd-logo'), tName = el('game-dd-name');
   if (tLogo) tLogo.src = gameLogoSrc(active);
   if (tName) tName.textContent = active ? (active.name + (active.comingSoon ? ' (preview)' : '')) : '—';
+  if (active && activeId !== _gameDDActive) gameDDRemember(activeId);
+  _gameDDGames = games; _gameDDActive = activeId;
   const sig = JSON.stringify([Object.keys(games), activeId]);   // rebuild list only when it changes
-  if (menu.dataset.sig === sig) return;
-  menu.dataset.sig = sig;
-  menu.innerHTML = '';
-  Object.values(games).forEach((g) => {
+  if (_gameDDSig === sig) return;
+  _gameDDSig = sig;
+  renderGameDDList();
+}
+function renderGameDDList() {
+  const list = el('game-dd-list');
+  if (!list) return;
+  const games = _gameDDGames, activeId = _gameDDActive;
+  const q = _gameDDNorm(el('game-dd-search')?.value);
+  list.innerHTML = '';
+  const addGroup = (label) => {
+    const h = document.createElement('div');
+    h.className = 'game-dd-group';
+    h.textContent = label;
+    list.appendChild(h);
+  };
+  const addItem = (g) => {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'game-dd-item' + (g.id === activeId ? ' active' : '');
     item.dataset.gameId = g.id;
     item.setAttribute('role', 'option');
     item.innerHTML = `<img class="game-dd-logo" src="${gameLogoSrc(g)}" alt=""><span>${g.name}${g.comingSoon ? ' (preview)' : ''}</span>`;
-    item.addEventListener('click', () => { closeGameHeaderDD(); if (g.id !== currentState.activeGame) onGameSelectChange(g.id); });
-    menu.appendChild(item);
-  });
+    item.addEventListener('click', () => pickGameDD(g.id));
+    list.appendChild(item);
+  };
+  const all = Object.values(games).sort((a, b) => a.name.localeCompare(b.name));
+  if (q) {
+    const hits = all.filter((g) => _gameDDNorm(g.name).includes(q) || _gameDDNorm(g.id).includes(q));
+    hits.forEach(addItem);
+    if (!hits.length) {
+      const empty = document.createElement('div');
+      empty.className = 'game-dd-empty';
+      empty.textContent = 'No games match.';
+      list.appendChild(empty);
+    }
+  } else {
+    const recent = gameDDRecent().map((id) => games[id]).filter(Boolean);
+    if (recent.length) { addGroup('Recent'); recent.forEach(addItem); addGroup('All games'); }
+    all.forEach(addItem);
+  }
+  gameDDHighlight(0);
 }
-function openGameHeaderDD() { const m = el('game-dd-menu'); if (!m) return; m.hidden = false; el('game-dd-trigger')?.setAttribute('aria-expanded', 'true'); el('game-header-dd')?.classList.add('open'); }
+function gameDDHighlight(idx) {
+  const items = [...(el('game-dd-list')?.querySelectorAll('.game-dd-item') || [])];
+  items.forEach((it) => it.classList.remove('kb'));
+  if (!items.length) return null;
+  const i = Math.max(0, Math.min(items.length - 1, idx));
+  items[i].classList.add('kb');
+  items[i].scrollIntoView({ block: 'nearest' });
+  return items[i];
+}
+function pickGameDD(id) {
+  closeGameHeaderDD();
+  if (id && id !== currentState.activeGame) onGameSelectChange(id);
+}
+function openGameHeaderDD() {
+  const m = el('game-dd-menu'); if (!m) return;
+  m.hidden = false;
+  el('game-dd-trigger')?.setAttribute('aria-expanded', 'true');
+  el('game-header-dd')?.classList.add('open');
+  const s = el('game-dd-search');
+  if (s) s.value = '';
+  renderGameDDList();
+  // The first item is the highlight target; with no query that's the most recent game (the active one),
+  // so start on the next item — the usual reason to open the menu is to go back to the previous game.
+  const items = el('game-dd-list')?.querySelectorAll('.game-dd-item') || [];
+  if (items.length > 1 && items[0].dataset.gameId === _gameDDActive) gameDDHighlight(1);
+  s?.focus();
+}
 function closeGameHeaderDD() { const m = el('game-dd-menu'); if (!m) return; m.hidden = true; el('game-dd-trigger')?.setAttribute('aria-expanded', 'false'); el('game-header-dd')?.classList.remove('open'); }
 el('game-dd-trigger')?.addEventListener('click', (e) => { e.stopPropagation(); const m = el('game-dd-menu'); if (m && m.hidden) openGameHeaderDD(); else closeGameHeaderDD(); });
+el('game-dd-search')?.addEventListener('input', () => renderGameDDList());
+el('game-dd-search')?.addEventListener('keydown', (e) => {
+  const items = [...(el('game-dd-list')?.querySelectorAll('.game-dd-item') || [])];
+  const cur = items.findIndex((it) => it.classList.contains('kb'));
+  if (e.key === 'ArrowDown') { e.preventDefault(); gameDDHighlight(cur + 1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); gameDDHighlight(cur - 1); }
+  else if (e.key === 'Enter') { e.preventDefault(); const it = items[cur] || items[0]; if (it) pickGameDD(it.dataset.gameId); }
+});
 document.addEventListener('click', (e) => { if (!el('game-header-dd')?.contains(e.target)) closeGameHeaderDD(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeGameHeaderDD(); });
 
@@ -21227,6 +21532,9 @@ function applyGameDesignState(data) {
       note.textContent = 'No dedicated in-game HUD yet — use Production browser sources (countdown, casters, bracket).';
     }
   }
+
+  const rlLinks = el('rl-layouts');
+  if (rlLinks) rlLinks.style.display = activeId === 'rocket-league' ? '' : 'none';
 
   renderGameSwitcher(data);
 }
@@ -21806,17 +22114,23 @@ function renderBrands(data) {
     const isActive = k.id === data.activeBrandKitId;
     const nSp = (kitActivePackage(k).sponsors || []).length;
     const nPkg = (k.packages || []).length || 1;
-    const item = document.createElement('div'); item.className = 'preset-item brand-kit-item' + (k._org ? ' is-org' : '');
+    const item = document.createElement('div'); item.className = 'preset-item brand-kit-item' + (k._org ? ' is-org' : '') + (isActive ? ' is-active' : '');
     // Left: brand logo + name, with sponsors (and a package quick-switch) on a second line.
     const main = document.createElement('div'); main.className = 'brand-kit-main';
     const logo = document.createElement('div'); logo.className = 'brand-kit-logo';
     if (k.logo) { const im = document.createElement('img'); im.src = k.logo; im.alt = ''; logo.appendChild(im); }
     else { logo.textContent = ((k.name || '?').trim().charAt(0) || '?').toUpperCase(); }
     const info = document.createElement('div'); info.className = 'brand-kit-info';
+    // Name alone on its line (ellipsised), counts on a meta line under it. The counts used to be glued
+    // onto the name, and with seven buttons beside it the name column shrank to ~110px, so "Nameless
+    // Esports · 1 package · 6 sponsors" wrapped over four lines on every card.
     const nameLine = document.createElement('div'); nameLine.className = 'brand-kit-name';
-    nameLine.textContent = (isActive ? '● ' : '') + k.name
-      + `  ·  ${nPkg} package${nPkg === 1 ? '' : 's'} · ${nSp} sponsor${nSp === 1 ? '' : 's'}`;
-    if (k._org) { const b = document.createElement('span'); b.className = 'tc-org-badge'; b.style.marginLeft = '6px'; b.textContent = 'ORG'; b.title = 'From organization' + (k._orgOwner ? ' · ' + k._orgOwner : ''); nameLine.appendChild(b); }
+    const nameTxt = document.createElement('span'); nameTxt.className = 'brand-kit-name-txt';
+    nameTxt.textContent = k.name; nameTxt.title = k.name; nameLine.appendChild(nameTxt);
+    if (isActive) { const lv = document.createElement('span'); lv.className = 'brand-kit-live'; lv.textContent = 'Live'; nameLine.appendChild(lv); }
+    if (k._org) { const b = document.createElement('span'); b.className = 'tc-org-badge'; b.textContent = 'ORG'; b.title = 'From organization' + (k._orgOwner ? ' · ' + k._orgOwner : ''); nameLine.appendChild(b); }
+    const metaLine = document.createElement('div'); metaLine.className = 'brand-kit-meta';
+    metaLine.textContent = `${nPkg} package${nPkg === 1 ? '' : 's'} · ${nSp} sponsor${nSp === 1 ? '' : 's'}`;
     const subLine = document.createElement('div'); subLine.className = 'brand-kit-sub';
     const sponsors = (kitActivePackage(k).sponsors || []);
     if (sponsors.length) {
@@ -21828,7 +22142,7 @@ function renderBrands(data) {
     } else {
       const none = document.createElement('span'); none.className = 'brand-kit-sub-empty'; none.textContent = 'No sponsors in this package'; subLine.appendChild(none);
     }
-    info.appendChild(nameLine); info.appendChild(subLine);
+    info.appendChild(nameLine); info.appendChild(metaLine); info.appendChild(subLine);
     main.appendChild(logo); main.appendChild(info);
     const actions = document.createElement('div'); actions.className = 'preset-actions';
     // Live-package quick-switch, inline with the action buttons (only when there's more than one).
@@ -21897,10 +22211,27 @@ function renderBrands(data) {
       const ok = await customConfirm('Delete Brand Kit', `Delete "${k.name}"? This deletes the entire client profile and ALL of its brand packages — this cannot be undone.${pkgWarn}`, 'Delete Everything');
       if (ok) send('delete_brand_kit', { id: k.id });
     });
-    actions.appendChild(actBtn); actions.appendChild(capBtn); actions.appendChild(editBtn); actions.appendChild(dupBtn); actions.appendChild(expBtn); actions.appendChild(urlBtn); actions.appendChild(delBtn);
+    // Activate and Edit are what a producer reaches for every show; capture, duplicate, export, banner
+    // URL and delete go behind More. Seven buttons in a row is what crushed the name column.
+    actBtn.textContent = isActive ? 'Live' : 'Activate';
+    const more = document.createElement('details'); more.className = 'bk-more';
+    const moreSum = document.createElement('summary'); moreSum.className = 'btn btn-ghost btn-sm bk-more-sum'; moreSum.textContent = 'More';
+    const menu = document.createElement('div'); menu.className = 'bk-more-menu';
+    [capBtn, dupBtn, expBtn, urlBtn].forEach((b) => { b.className = 'bk-more-item'; });
+    urlBtn.textContent = 'Copy banner URL';
+    delBtn.className = 'bk-more-item is-danger'; delBtn.textContent = 'Delete kit…';
+    const sep = document.createElement('div'); sep.className = 'bk-more-sep';
+    [capBtn, dupBtn, expBtn, urlBtn, sep, delBtn].forEach((n) => menu.appendChild(n));
+    menu.addEventListener('click', (e) => { if (e.target.closest('.bk-more-item')) more.open = false; });
+    more.appendChild(moreSum); more.appendChild(menu);
+    actions.appendChild(actBtn); actions.appendChild(editBtn); actions.appendChild(more);
     item.appendChild(main); item.appendChild(actions); list.appendChild(item);
   });
 }
+// A kit's More menu closes when you click anywhere else.
+document.addEventListener('click', (e) => {
+  document.querySelectorAll('details.bk-more[open]').forEach((d) => { if (!d.contains(e.target)) d.open = false; });
+});
 
 // Compact Dashboard brand-kit strip (above Event): shows the active client + its sponsors, and lets
 // you search/switch/edit/add kits without leaving the Dashboard. Reuses the Profiles editor modal.
@@ -22592,6 +22923,14 @@ function wireRlSceneAuto() {
       send('set_rl_replay_transitions', { on: this.checked });
     });
   }
+  // Occasional title-sponsor roll-out from the bottom-right statcard on the RL HUD.
+  const srTog = el('chk-rl-sponsor-roll');
+  if (srTog && !srTog._rlWired) {
+    srTog._rlWired = true;
+    srTog.addEventListener('change', function () {
+      send('set_rl_sponsor_roll', { on: this.checked });
+    });
+  }
   // Stats-screen skin (show/hide the stat table + pick the design) — applies to the scoreboard scene.
   // Two copies of each control now — Settings ▸ Games ▸ Rocket League and the Match — Teams gear.
   // Whichever the producer touches wins; the other re-hydrates from the next full_state.
@@ -22742,22 +23081,15 @@ function wireSmashControls() {
   if (_smashWired) return; _smashWired = true;
   const dl = el('smash-fighters');
   if (dl && !dl.childElementCount) dl.innerHTML = smashFighterList().map((n) => `<option value="${tlEsc(n)}"></option>`).join('');
-  document.querySelectorAll('.smash-stock-btn').forEach((btn) => {
-    btn.addEventListener('click', () => send('smash_stock_delta', { side: btn.dataset.smashSide, delta: parseInt(btn.dataset.smashDelta, 10) }));
-  });
-  ['blue', 'orange'].forEach((side) => {
-    const ci = el('smash-char-' + side);
-    if (!ci) return;
-    const thumb = el('smash-char-thumb-' + side);
-    smashBindPicker(ci, (name) => {
-      smashSetThumb(thumb, name);
-      send('set_smash_character', { side, character: name });
-    });
-  });
-  const ss = el('smash-start-stocks');
-  if (ss) ss.addEventListener('change', () => send('set_smash_start_stocks', { value: parseInt(ss.value, 10) }));
-  const srp = el('smash-rail-pos');
-  if (srp) srp.addEventListener('change', () => send('set_smash_rail_pos', { value: srp.value }));
+  const on = (id, ev, fn) => { const n = el(id); if (n) n.addEventListener(ev, () => fn(n)); };
+  on('smash-start-stocks', 'change', (n) => send('set_smash_start_stocks', { value: parseInt(n.value, 10) }));
+  on('smash-rail-pos', 'change', (n) => send('set_smash_rail_pos', { value: n.value }));
+  on('smash-best-of', 'change', (n) => send('set_best_of', { value: parseInt(n.value, 10) }));
+  on('smash-crew-size', 'change', (n) => send('set_smash_crew_size', { value: parseInt(n.value, 10) }));
+  on('smash-auto-advance', 'change', (n) => send('set_smash_auto_advance', { value: n.checked }));
+  on('btn-smash-reset', 'click', () => send('reset_smash_stocks', {}));
+  on('btn-smash-swap', 'click', () => send('swap_teams', {}));
+  on('btn-smash-reset-series', 'click', () => send('reset_series', {}));
   // Scoreboard title ("Ultimate Singles"). Emptying the box re-arms the start.gg auto-fill rather
   // than blanking the badge - the server falls back to whatever the last event reported.
   const st = el('smash-title');
@@ -22765,88 +23097,140 @@ function wireSmashControls() {
     st.addEventListener('change', () => send('set_smash_title', { value: st.value.trim() }));
     st.addEventListener('keydown', (e) => { if (e.key === 'Enter') st.blur(); });
   }
-  const rb = el('btn-smash-reset');
-  if (rb) rb.addEventListener('click', () => send('reset_smash_stocks', {}));
-  const aa = el('smash-auto-advance');
-  if (aa) aa.addEventListener('change', () => send('set_smash_auto_advance', { value: aa.checked }));
-  // Pip clicks are delegated — the rows are re-rendered on every state update.
-  ['blue', 'orange'].forEach((side) => {
-    const row = el('smash-pips-' + side);
-    if (!row) return;
-    row.addEventListener('click', (e) => {
-      const pip = e.target.closest('.smash-pip');
-      if (!pip) return;
-      // Clicking the pip that's already the last one lit means "take that stock too", which is
-      // what a tracker does on a repeat click — otherwise you could never reach zero by clicking.
-      const idx = Number(pip.dataset.i);
-      const cur = Number(row.dataset.left) || 0;
-      send('set_smash_stocks', { side, value: (idx + 1 === cur) ? idx : idx + 1 });
-    });
-  });
-  // Mode toggle (1v1 singles ↔ team crew).
+  // Format toggle (Singles / Doubles / Crew battle).
   document.querySelectorAll('#smash-mode-seg .seg-btn').forEach((btn) => {
     btn.addEventListener('click', () => send('set_smash_mode', { mode: btn.dataset.smashMode }));
   });
-  // Team-mode controls.
+  // The two side cards are re-rendered from state, so every control in them is delegated here.
+  // Rows carry data-idx; singles (one row, no index on the server) is told apart by _smashMode.
   ['blue', 'orange'].forEach((side) => {
-    const bo = el('smash-bo-' + side);
-    if (!bo || bo._wired) return;
-    bo._wired = true;
-    bo.addEventListener('click', (e) => {
-      const pip = e.target.closest('.bo-pip'); if (!pip) return;
-      const i = Number(pip.dataset.i);
-      const won = Number(bo.dataset.won) || 0;
-      // Clicking the pill that is already the last one won takes it back off, so a mis-click is
-      // undoable without reaching for the − button.
-      const target = (i + 1 === won) ? i : i + 1;
-      send('adjust_series', { side, delta: target - won });
+    const card = el('smash-side-' + side);
+    if (!card) return;
+    card.addEventListener('click', (e) => {
+      const t = e.target.closest('[data-act]'); if (!t || !card.contains(t)) return;
+      const act = t.dataset.act;
+      const row = t.closest('.sm-row');
+      const idx = row ? parseInt(row.dataset.idx, 10) : 0;
+      const pooled = _smashMode !== 'singles';
+      if (act === 'series') send('adjust_series', { side, delta: parseInt(t.dataset.d, 10) });
+      else if (act === 'games') {
+        // Clicking the marker that is already the last one won takes it back off (undo a mis-click).
+        const won = parseInt(card.dataset.won, 10) || 0;
+        const i = parseInt(t.dataset.i, 10);
+        const target = (i + 1 === won) ? i : i + 1;
+        send('adjust_series', { side, delta: target - won });
+      } else if (act === 'stock' || act === 'stock-step') {
+        const cur = parseInt(row.dataset.stocks, 10) || 0;
+        const max = parseInt(row.dataset.max, 10) || 3;
+        let value;
+        if (act === 'stock') {
+          // a tracker's click: the last lit stock clicked again drops it, so zero is reachable
+          const i = parseInt(t.dataset.i, 10);
+          value = (i + 1 === cur) ? i : i + 1;
+        } else value = Math.max(0, Math.min(max, cur + parseInt(t.dataset.d, 10)));
+        if (pooled) send('set_smash_player_stock', { side, index: idx, value });
+        else send('set_smash_stocks', { side, value });
+      }
     });
-  });
-  const cs = el('smash-crew-size');
-  if (cs) cs.addEventListener('change', () => send('set_smash_crew_size', { value: parseInt(cs.value, 10) }));
-  const bo = el('smash-best-of');
-  if (bo) bo.addEventListener('change', () => send('set_best_of', { value: parseInt(bo.value, 10) }));
-  const sw = el('btn-smash-swap');
-  if (sw) sw.addEventListener('click', () => send('swap_teams', {}));
-  const rs = el('btn-smash-reset-series');
-  if (rs) rs.addEventListener('click', () => send('reset_series', {}));
-  document.querySelectorAll('[data-smash-series]').forEach((btn) => {
-    btn.addEventListener('click', () => send('adjust_series', { side: btn.dataset.smashSeries, delta: parseInt(btn.dataset.smashDelta, 10) }));
-  });
-  // Per-player crew pips (event-delegated — the pip rows are re-rendered on every state update).
-  ['blue', 'orange'].forEach((side) => {
-    const wrap = el('smash-crew-' + side);
-    if (wrap) wrap.addEventListener('click', (e) => {
-      const pip = e.target.closest('.smash-pip'); if (!pip) return;
-      const i = parseInt(pip.dataset.pi, 10);
-      const cur = parseInt(pip.parentElement.dataset.stocks, 10) || 0;
-      // Click the topmost filled pip → drop a stock; click any other pip → fill up to it.
-      const value = (cur === i + 1) ? i : (i + 1);
-      send('set_smash_player_stock', { side, index: parseInt(pip.parentElement.dataset.pidx, 10), value });
-    });
-    // Per-player fighter — the crew rows are rebuilt whenever the crew size or stocks change, so
-    // the picker is bound on demand from a delegated mousedown rather than per-element up front.
-    if (wrap) {
-      wrap.addEventListener('mousedown', (e) => {
-        const inp = e.target.closest('.smash-crew-char'); if (!inp) return;
-        const i = parseInt(inp.dataset.cchar, 10);
-        smashBindPicker(inp, (name) => {
-          smashSetThumb(wrap.querySelector(`[data-cface="${i}"]`), name);
-          send('set_smash_player_character', { side, index: i, character: name });
-        });
-      }, true);
-    }
+    // Fighter fields open the shared icon-grid picker (bound on demand: the rows are rebuilt).
+    card.addEventListener('mousedown', (e) => {
+      const inp = e.target.closest('.sm-fighter-in'); if (!inp) return;
+      const idx = parseInt(inp.closest('.sm-row').dataset.idx, 10) || 0;
+      smashBindPicker(inp, (name) => {
+        smashSetThumb(inp.closest('.sm-row').querySelector('.sm-face'), name);
+        if (_smashMode !== 'singles') send('set_smash_player_character', { side, index: idx, character: name });
+        else send('set_smash_character', { side, character: name });
+      });
+    }, true);
   });
 }
+// Marvel Tokon strip (Match ▸ Teams) — tokon.html's "Best of 3 · Game 2" line and which bottom corner
+// its caster/sponsor card sits in. Best-of and game number are the shared series fields.
+var _tokonWired = false;
+function wireTokonControls() {
+  if (_tokonWired) return; _tokonWired = true;
+  const bo = el('tokon-best-of');
+  if (bo) bo.addEventListener('change', () => send('set_best_of', { value: parseInt(bo.value, 10) }));
+  document.querySelectorAll('[data-tokon-game]').forEach((btn) => {
+    btn.addEventListener('click', () => send('adjust_game_number', { delta: parseInt(btn.dataset.tokonGame, 10) }));
+  });
+  const rp = el('tokon-rail-pos');
+  if (rp) rp.addEventListener('change', () => send('set_tokon_rail_pos', { value: rp.value }));
+  // Position numbers. 'change' fires on each spinner click as well as on blur, so the board can be
+  // nudged into place live; the server clamps every value.
+  document.querySelectorAll('[data-tokon-layout]').forEach((inp) => {
+    inp.addEventListener('change', () => {
+      if (inp.value === '') return;
+      send('set_tokon_layout', { key: inp.dataset.tokonLayout, value: Number(inp.value) });
+    });
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
+  });
+  const lr = el('btn-tokon-layout-reset');
+  if (lr) lr.addEventListener('click', () => send('set_tokon_layout', { reset: true }));
+}
+function applyTokonControls(data) {
+  wireTokonControls();
+  const on = !!(data && data.activeGame === 'marvel-tokon');
+  const strip = el('msp-tokon');
+  if (strip) strip.style.display = on ? '' : 'none';
+  if (!data) return;   // filled even when Tokon isn't on air, so Game Settings can prep it
+  const bo = el('tokon-best-of');
+  if (bo && document.activeElement !== bo) {
+    const v = String(data.bestOf || 3);
+    if (![].some.call(bo.options, (o) => o.value === v)) bo.add(new Option(v, v));
+    bo.value = v;
+  }
+  const gn = el('tokon-game-num');
+  if (gn) gn.textContent = String((data.game && data.game.number) || 1);
+  const rp = el('tokon-rail-pos');
+  if (rp && document.activeElement !== rp) {
+    const v = (data.tokon || {}).railPos;
+    rp.value = (v === 'bottomleft' || v === 'bottomright') ? v : 'meters';
+  }
+  const lay = (data.tokon || {}).layout || {};
+  document.querySelectorAll('[data-tokon-layout]').forEach((inp) => {
+    if (document.activeElement === inp) return;
+    const v = lay[inp.dataset.tokonLayout];
+    if (v != null) inp.value = String(v);
+  });
+}
+let _smashMode = 'singles';
+// Smash's own player colours - the panel mirrors the scoreboard (P1 red, P2 blue).
+const SMASH_SIDE = { blue: { tag: 'P1', label: 'Player 1' }, orange: { tag: 'P2', label: 'Player 2' } };
 function applySmashControls(data) {
   wireSmashControls();
   const strip = el('msp-smash');
   if (strip) strip.style.display = (data && data.activeGame === 'smash') ? '' : 'none';
-  if (!data || data.activeGame !== 'smash') return;
+  if (!data) return;   // filled even when Smash isn't on air, so Game Settings can prep it
   const sm = data.smash || {};
-  const mode = sm.mode === 'team' ? 'team' : 'singles';
-  const ss = el('smash-start-stocks'); if (ss && document.activeElement !== ss) ss.value = String(sm.startStocks || 3);
-  const srp = el('smash-rail-pos'); if (srp && document.activeElement !== srp) srp.value = sm.railPos === 'topleft' ? 'topleft' : 'bottom';
+  const mode = (sm.mode === 'team' || sm.mode === 'doubles') ? sm.mode : 'singles';
+  _smashMode = mode;
+  const pooled = mode !== 'singles';
+  const setVal = (id, v) => { const n = el(id); if (n && document.activeElement !== n) n.value = v; };
+
+  // Format + its one-line explanation.
+  document.querySelectorAll('#smash-mode-seg .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.smashMode === mode));
+  const mh = el('smash-mode-hint');
+  if (mh) {
+    mh.textContent = mode === 'doubles'
+      ? 'Both players show on each side of the scoreboard; the caster bar docks beside it.'
+      : mode === 'team'
+        ? 'The scoreboard switches to the crew board (pooled team stocks); the caster bar docks beside it.'
+        : 'One player per side; the caster bar sits at the bottom of the screen.';
+  }
+
+  // Match-wide settings.
+  setVal('smash-start-stocks', String(sm.startStocks || 3));
+  setVal('smash-rail-pos', (sm.railPos === 'topleft' || sm.railPos === 'bottom') ? sm.railPos : 'auto');
+  const bo = el('smash-best-of');
+  if (bo && document.activeElement !== bo) {
+    const v = String(data.bestOf || 3);
+    if (![].some.call(bo.options, (o) => o.value === v)) bo.add(new Option(v, v));
+    bo.value = v;
+  }
+  setVal('smash-crew-size', String(sm.crewSize || 4));
+  const csw = el('smash-crew-size-wrap'); if (csw) csw.style.display = mode === 'team' ? '' : 'none';
+  const aa = el('smash-auto-advance'); if (aa && document.activeElement !== aa) aa.checked = sm.autoAdvance !== false;
   const st = el('smash-title');
   if (st && document.activeElement !== st) {
     st.value = sm.title || '';
@@ -22854,126 +23238,76 @@ function applySmashControls(data) {
     // clearing the field can see exactly what auto-fill will put back.
     st.placeholder = sm.startggTitle ? ('Auto: ' + sm.startggTitle) : 'Auto from start.gg';
   }
-  // Mode toggle + which sub-panel shows.
-  document.querySelectorAll('#smash-mode-seg .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.smashMode === mode));
-  const singlesEl = el('msp-smash-singles'); if (singlesEl) singlesEl.style.display = mode === 'team' ? 'none' : '';
-  const teamEl = el('msp-smash-team'); if (teamEl) teamEl.style.display = mode === 'team' ? '' : 'none';
 
-  // label each side by the actual player name so the two cells are unambiguous
-  // Resolve the SAME roster member the overlay puts on air (activePlayer[side], else the first) —
-  // the panel used to always take players[0], so on a multi-entrant team it labelled the cells with
-  // someone who wasn't the one showing.
-  const nm = (side) => {
-    const t = (data.teams && data.teams[side]) || {};
-    const roster = Array.isArray(t.players) ? t.players : [];
-    const wantId = (data.activePlayer && data.activePlayer[side]) || '';
-    const p = (wantId && roster.find((x) => x && String(x.id) === String(wantId))) || roster[0];
-    return (p && (p.gamertag || p.name)) || t.name || '';
-  };
-  const lb = el('smash-label-blue'); if (lb) lb.textContent = nm('blue') || 'Player 1';
-  const lo = el('smash-label-orange'); if (lo) lo.textContent = nm('orange') || 'Player 2';
-  const aa = el('smash-auto-advance');
-  if (aa && document.activeElement !== aa) aa.checked = sm.autoAdvance !== false;
+  const start = Math.max(1, Math.min(9, Number(sm.startStocks) || 3));
+  const need = Math.max(1, Math.ceil((Number(data.bestOf) || 3) / 2));
+  const series = data.series || {};
   ['blue', 'orange'].forEach((side) => {
+    const card = el('smash-side-' + side);
+    if (!card) return;
+    const t = (data.teams && data.teams[side]) || {};
+    const roster = Array.isArray(t.players) ? t.players.filter(Boolean) : [];
     const s = sm[side] || {};
-    const left = Number(s.stocks != null ? s.stocks : 3) || 0;
-    const sv = el('smash-stocks-' + side); if (sv) sv.textContent = String(left);
-    // Pool = what this side STARTS a game with. Singles is just startStocks; team mode scales it
-    // by the crew, matching the pooled countdown the crew board renders.
-    const start = Math.max(1, Math.min(9, Number(sm.startStocks) || 3));
-    const pool = (mode === 'team')
-      ? ((s.players || []).length || Number(sm.crewSize) || 4) * start
-      : start;
-    const pe = el('smash-pool-' + side); if (pe) pe.textContent = '/ ' + pool;
-    const row = el('smash-pips-' + side);
-    if (row) {
-      const shown = (mode === 'team')
-        ? (s.players || []).reduce((a, n) => a + Math.max(0, Number(n) || 0), 0)
-        : left;
-      row.dataset.left = String(shown);
-      // Rebuild only when the POOL changes; lit/spent updates in place.
-      if (row.dataset.pool !== String(pool)) {
-        row.dataset.pool = String(pool);
-        row.innerHTML = Array.from({ length: pool }, (_, i) =>
-          `<button type="button" class="smash-pip" data-i="${i}" title="Set to ${i + 1}"></button>`).join('');
-      }
-      [].forEach.call(row.children, (pip, i) => pip.classList.toggle('spent', i >= shown));
-      // In team mode the pool is the crew's shared total, so the per-pip click (which writes a
-      // single side.stocks value) would be meaningless — show it, don't let it be driven.
-      row.style.pointerEvents = (mode === 'team') ? 'none' : '';
-    }
-    const ci = el('smash-char-' + side);
-    if (ci && document.activeElement !== ci) ci.value = s.character || '';
-    smashSetThumb(el('smash-char-thumb-' + side), ci ? ci.value : s.character);
-  });
+    const won = Number(series[side]) || 0;
+    const nameOf = (p) => (p ? String(p.gamertag || p.name || '').trim() : '');
 
-  if (mode === 'team') {
-    const cs = el('smash-crew-size'); if (cs && document.activeElement !== cs) cs.value = String(sm.crewSize || 4);
-    const bo = el('smash-best-of'); if (bo && document.activeElement !== bo) bo.value = String(data.bestOf || 3);
-    const start = Math.max(1, Math.min(9, Number(sm.startStocks) || 3));
-    const series = data.series || {};
-    ['blue', 'orange'].forEach((side) => {
-      const t = (data.teams && data.teams[side]) || {};
-      const tl = el('smash-team-label-' + side); if (tl) tl.textContent = t.name || (side === 'blue' ? 'Blue' : 'Orange');
-      const won = Number(series[side]) || 0;
-      const sc = el('smash-series-' + side); if (sc) sc.textContent = String(won);
-      // One pill per game NEEDED to take the set (best-of 3 -> 2), filled by games won.
-      const need = Math.max(1, Math.ceil((Number(data.bestOf) || 3) / 2));
-      const bo = el('smash-bo-' + side);
-      if (bo) {
-        if (bo.dataset.need !== String(need)) {
-          bo.dataset.need = String(need);
-          bo.innerHTML = Array.from({ length: need }, (_, i) =>
-            `<button type="button" class="bo-pip" data-i="${i}" title="Set games won to ${i + 1}"></button>`).join('');
-        }
-        bo.dataset.won = String(won);
-        [].forEach.call(bo.children, (pip, i) => pip.classList.toggle('won', i < won));
-      }
-      const players = Array.isArray((sm[side] || {}).players) ? sm[side].players : [];
-      const total = players.reduce((a, n) => a + Math.max(0, Number(n) || 0), 0);
-      // Show the pooled countdown the crew board renders: remaining out of what the crew STARTED
-      // with (players x start stocks), so the panel and the overlay read the same.
-      const pool = (players.length || Number(sm.crewSize) || 4) * start;
-      const tot = el('smash-crew-total-' + side);
-      if (tot) tot.innerHTML = String(total) + ' <span class="msp-hint">/ ' + pool + '</span>';
-      const wrap = el('smash-crew-' + side);
-      if (wrap) {
-        // Signature-gate the rebuild so clicking a pip mid-drag doesn't fight a re-render.
-        const sig = players.join(',') + '|' + start;
-        if (wrap.dataset.sig !== sig) {
-          wrap.dataset.sig = sig;
-          wrap.innerHTML = players.map((rem, pi) => {
-            const left = Math.max(0, Math.min(start, Number(rem) || 0));
-            const pips = Array.from({ length: start }, (_, i) =>
-              `<span class="smash-pip${i < left ? '' : ' lost'}" data-pi="${i}"></span>`).join('');
-            return `<div class="smash-crew-row" data-pidx="${pi}" data-stocks="${left}"><span class="smash-crew-pn">P${pi + 1}</span>` +
-              `<span class="smash-crew-name" data-cname="${pi}"></span>${pips}` +
-              `<img class="smash-crew-face is-empty" data-cface="${pi}" alt="">` +
-              `<input type="text" class="input-text smash-crew-char smash-char-input" data-cchar="${pi}" placeholder="Fighter" readonly></div>`;
-          }).join('');
-        }
-        // Values live outside the sig-gated rebuild above: the signature only covers stocks and
-        // crew size, so re-asserting here keeps a typed fighter visible across every state push.
-        // Who is actually competing in each slot — the crew rows only ever showed "P1"/"P2" and a
-        // fighter, so the producer couldn't tell which of the team's players was up.
-        const roster = Array.isArray(t.players) ? t.players : [];
-        wrap.querySelectorAll('.smash-crew-name').forEach((el2) => {
-          const pi = parseInt(el2.dataset.cname, 10);
-          const rp = roster[pi] || null;
-          const nm = rp ? String(rp.gamertag || rp.name || '').trim() : '';
-          el2.textContent = nm || ('Player ' + (pi + 1));
-          el2.classList.toggle('is-empty', !nm);
-          el2.title = nm ? nm : 'No player in this slot — add one to the team roster';
-        });
-        const chars = Array.isArray((sm[side] || {}).characters) ? sm[side].characters : [];
-        wrap.querySelectorAll('.smash-crew-char').forEach((inp) => {
-          const pi = parseInt(inp.dataset.cchar, 10);
-          if (document.activeElement !== inp) inp.value = chars[pi] || '';
-          smashSetThumb(wrap.querySelector(`[data-cface="${pi}"]`), inp.value);
-        });
-      }
+    // Rows: singles = the one player on the scoreboard (activePlayer, else the first); doubles/crew
+    // = one per slot in players[], named from the roster in order.
+    let rows;
+    if (pooled) {
+      const stocks = Array.isArray(s.players) ? s.players : [];
+      const chars = Array.isArray(s.characters) ? s.characters : [];
+      rows = stocks.map((n, i) => ({ name: nameOf(roster[i]), stocks: Math.max(0, Number(n) || 0), fighter: chars[i] || '' }));
+    } else {
+      const wantId = (data.activePlayer && data.activePlayer[side]) || '';
+      const p = (wantId && roster.find((x) => String(x.id) === String(wantId))) || roster[0];
+      rows = [{ name: nameOf(p), stocks: Math.max(0, Number(s.stocks != null ? s.stocks : start) || 0), fighter: s.character || '' }];
+    }
+    const title = pooled ? (String(t.name || '').trim() || SMASH_SIDE[side].label)
+                         : (rows[0].name || String(t.name || '').trim() || SMASH_SIDE[side].label);
+    const left = rows.reduce((a, r) => a + Math.min(start, r.stocks), 0);
+
+    // Rebuild only when something shown changed, and never under an open fighter picker (the input
+    // it is anchored to would be torn out from under it).
+    const sig = JSON.stringify([mode, title, won, need, start, rows]);
+    if (card.dataset.sig === sig) return;
+    if (typeof SmashPicker !== 'undefined' && SmashPicker.isOpen()) return;
+    card.dataset.sig = sig;
+    card.dataset.won = String(won);
+
+    const pips = (n, lit, act, cls) => Array.from({ length: n }, (_, i) =>
+      `<button type="button" class="${cls}${i < lit ? ' on' : ''}" data-act="${act}" data-i="${i}" title="Set to ${i + 1}"></button>`).join('');
+    card.innerHTML =
+      `<div class="sm-side-hd">` +
+        `<span class="sm-tag">${SMASH_SIDE[side].tag}</span>` +
+        `<span class="sm-side-name" title="${tlEsc(title)}">${tlEsc(title)}</span>` +
+        `<span class="sm-games" title="Games won - click to set">${pips(need, won, 'games', 'sm-game')}</span>` +
+        `<span class="sm-score">` +
+          `<button type="button" class="sm-step" data-act="series" data-d="-1" title="Take a game off">&minus;</button>` +
+          `<span class="sm-score-n">${won}</span>` +
+          `<button type="button" class="sm-step" data-act="series" data-d="1" title="Give this side a game">+</button>` +
+        `</span>` +
+      `</div>` +
+      `<div class="sm-rows${pooled ? '' : ' sm-rows--solo'}">` +
+        rows.map((r, i) => {
+          const lit = Math.min(start, r.stocks);
+          return `<div class="sm-row${lit === 0 ? ' is-out' : ''}" data-idx="${i}" data-stocks="${lit}" data-max="${start}">` +
+            `<img class="sm-face smash-char-thumb is-empty" alt="">` +
+            (pooled ? `<span class="sm-pname${r.name ? '' : ' is-empty'}">${tlEsc(r.name || ('Player ' + (i + 1)))}</span>` : '') +
+            `<input type="text" class="input-text sm-fighter-in smash-char-input" placeholder="Pick a fighter" readonly value="${tlEsc(r.fighter)}">` +
+            `<span class="sm-stocks">` +
+              `<button type="button" class="sm-step" data-act="stock-step" data-d="-1" title="Lose a stock">&minus;</button>` +
+              `<span class="sm-pips">${pips(start, lit, 'stock', 'sm-stock')}</span>` +
+              `<button type="button" class="sm-step" data-act="stock-step" data-d="1" title="Give a stock back">+</button>` +
+            `</span>` +
+          `</div>`;
+        }).join('') +
+      `</div>` +
+      (pooled ? `<div class="sm-side-ft"><b>${left}</b> / ${rows.length * start} ${mode === 'doubles' ? 'stocks left' : 'team stocks'}</div>` : '');
+    card.querySelectorAll('.sm-row').forEach((row) => {
+      smashSetThumb(row.querySelector('.sm-face'), row.querySelector('.sm-fighter-in').value);
     });
-  }
+  });
 }
 
 // ── Built-in chat commands (!bracket / !discord / !casters) ───────────────────
@@ -23085,6 +23419,15 @@ function applyRlSceneAuto(data) {
   const pd = el('inp-rl-postgame-delay'); if (pd && document.activeElement !== pd) pd.value = pg.delaySec || 20;
   const hEn = el('chk-rl-hide-ui'); if (hEn && document.activeElement !== hEn) hEn.checked = !!(data && data.rlHudHidden);
   const rtEn = el('chk-rl-replay-transitions'); if (rtEn && document.activeElement !== rtEn) rtEn.checked = (data && data.rlReplayTransitions) !== false;
+  const srEn = el('chk-rl-sponsor-roll'); if (srEn && document.activeElement !== srEn) srEn.checked = !!(data && data.rlSponsorRoll);
+  { // Sponsors tab card: which title sponsor the roll-out will show (brand kit's title-tagged sponsor)
+    const b = (data && data.brand) || {}, logo = (b.spots && b.spots.title) || '';
+    const sp = (b.sponsors || []).find((x) => x && x.logo && x.placements && x.placements.title);
+    const im = el('preview-sponroll-logo');
+    if (im) { if (logo) { if (im.getAttribute('src') !== logo) im.src = logo; im.style.display = ''; } else im.style.display = 'none'; }
+    const nm = el('sponroll-name'); if (nm) nm.textContent = logo ? ((sp && sp.name) || '') : 'None set';
+    const miss = el('sponroll-missing'); if (miss) miss.style.display = logo ? 'none' : '';
+  }
   setRlSbLocSeg(!!(data && data.rlScoreboardSeparate));
   // RL auto-spectate + first-kickoff camera reflection REMOVED 2026-08 (the camera automation is gone).
   // Live-match pause button: label + data-state track the true pause state (which the
@@ -23270,6 +23613,8 @@ function applyObsState(data) {
   if (typeof syncSheetsUi === 'function') syncSheetsUi(data);   // Google Sheets integration settings
   if (typeof syncCreditsShiftEventSelect === 'function') syncCreditsShiftEventSelect();   // credits event picker
   applySmashControls(data); // Smash-only stocks + fighters strip
+  if (window.GamesHub) window.GamesHub.onState(data); // Settings ▸ Games + Dashboard Game Settings (games-hub.js)
+  applyTokonControls(data); // Marvel Tokon format/game + rail corner
   applyChatCommands(data);  // !bracket / !discord / !casters config + live reply preview
   if (typeof syncReplayProgramScene === 'function') syncReplayProgramScene(obs);
   if (typeof syncGfxAutocutScene === 'function') syncGfxAutocutScene(obs);
@@ -23359,43 +23704,50 @@ el('btn-vmix-test')?.addEventListener('click', () => {
 });
 document.querySelectorAll('#switcher-target-seg .seg-btn').forEach((b) => b.addEventListener('click', () => send('set_switcher_target', { target: b.dataset.target })));
 
-// ── Integrations page — pill subnav (Video Switcher / Cameras / Games & GSI / Tournament Platforms / Twitch) ──
+// ── Marketplace page (tab id 'integrations') — top pills: Integrations (the 'store' grid) / Plugins / Developers.
+// Per-app panels (Video Switcher / Cameras / Tournament Platforms / Twitch / Stream Deck) open from the cards with a back bar. ──
 // 'chatgames' (Marble Race) is parked — unlisted from Integrations, implementation intact.
 // To restore: add 'chatgames' back here, re-add the panels/titles entries below, and
 // un-comment the subnav button + store card in index.html (the #integration-chatgames panel
 // itself was left in place, just orphaned).
-const INT_TABS = ['store', 'switcher', 'streamdeck', 'cameras', 'tournaments', 'twitch', 'developers'];   // 'games' moved to Settings ▸ Games
+const INT_TABS = ['store', 'api', 'plugins', 'switcher', 'streamdeck', 'cameras', 'tournaments', 'twitch'];
+const INT_TOP_TABS = ['store', 'api', 'plugins'];   // top-level Marketplace sections — no back bar   // 'games' moved to Settings ▸ Games
 let _intTab = 'store';
 function _intShowTab(which) {
+  if (which === 'developers') which = 'api';   // the API page used to be called Developers
   _intTab = INT_TABS.includes(which) ? which : 'store';
   document.querySelectorAll('#int-subnav .ev-subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.inttab === _intTab));
   const panels = {
     store: [el('integration-store')],
+    plugins: [el('integration-plugins')],
     switcher: [el('integration-obs')],
     streamdeck: [el('integration-streamdeck')],
     cameras: [el('integration-vdo')],
     tournaments: [el('integration-startgg')],
     twitch: [el('integration-twitch')],   // Games & Features (#integration-twitchgames) moved to Settings ▸ Features
-    developers: [el('integration-developers')]
+    api: [el('integration-api')]
     // chatgames: [el('integration-chatgames')]   — parked, see INT_TABS above
   };
   Object.entries(panels).forEach(([key, els]) => els.forEach((p) => { if (p) p.style.display = key === _intTab ? '' : 'none'; }));
-  // Browse is the landing; every app panel shows a way back.
-  // Inside an app, the back bar is the only header — the page-head ('Integrations /
-  // Connect and configure...') stacked above it read as a second back bar.
+  // Top-level sections keep the page head + pill row; every app panel shows a way back instead.
+  // Inside an app, the back bar is the only header — the page-head stacked above it read as a
+  // second back bar.
+  const isTop = INT_TOP_TABS.includes(_intTab);
   const intHead = document.querySelector('#tab-integrations-content .page-head');
-  if (intHead) intHead.style.display = _intTab === 'store' ? '' : 'none';
+  if (intHead) intHead.style.display = isTop ? '' : 'none';
+  const subnav = el('int-subnav');
+  if (subnav) subnav.style.display = isTop ? '' : 'none';
   const backbar = el('int-backbar');
   if (backbar) {
-    backbar.style.display = _intTab === 'store' ? 'none' : 'flex';
+    backbar.style.display = isTop ? 'none' : 'flex';
     const titles = { switcher: 'Video Switcher', cameras: 'Cameras', streamdeck: 'Elgato Stream Deck',
-      games: 'Games & GSI', tournaments: 'Tournament Platforms', twitch: 'Twitch',
-      developers: 'Developers — Build your own overlays' };
+      games: 'Games & GSI', tournaments: 'Tournament Platforms', twitch: 'Twitch' };
     const t = el('int-backbar-title');
     if (t) t.textContent = (typeof INT_APP_NAMES !== 'undefined' && INT_APP_NAMES[_intAppFilter]) || titles[_intTab] || '';
   }
   if (typeof _intApplyAppFilter === 'function') _intApplyAppFilter();
   if (_intTab === 'cameras' && typeof cfLoadVdoSettings === 'function') cfLoadVdoSettings();
+  if (_intTab === 'api' && typeof cmpLoadKey === 'function') cmpLoadKey();
   try { localStorage.setItem('integrations_active_tab', _intTab); } catch (_) {}
 }
 window._intShowTab = _intShowTab;
@@ -23403,7 +23755,7 @@ document.querySelectorAll('#int-subnav .ev-subnav-btn').forEach((b) => b.addEven
 // Deferred like Assets' subnav restore — some panel init code referenced here isn't defined until
 // later in the script; calling synchronously here risks the same TDZ crash documented for that case.
 setTimeout(() => {
-  // Always land on Browse — the store grid is the Integrations page.
+  // Always land on the Integrations grid — the first Marketplace section.
   _intShowTab('store');
 }, 0);
 
@@ -24278,7 +24630,7 @@ function rpPreviewStop(finished) {
   if (v && !finished) v.pause();
   _plPreview = null;
   rpPreviewSyncBar();
-  const title = el('rp-editor-title'); if (title) title.textContent = 'Video Editor';
+  const title = el('rp-editor-title'); if (title) title.innerHTML = '<span class="rp-step-num">2</span> Trim';
 }
 
 function rpPreviewSyncBar() {
@@ -24380,7 +24732,7 @@ function renderPlaylistPane(c) {
         const badge = montageBadgeInfo(x, encodeActive, encodeQueue);
         return `<div class="rp-pl-row${isActive ? ' active' : ''}${isActive && _plCollapsed ? ' collapsed' : ''}" data-mid="${x.id}">
           <span class="rp-pl-row-chev">&#9660;</span>
-          <button class="rp-pl-row-prev" data-mid="${x.id}" title="Watch this playlist in the Video Editor (off air)"${n ? '' : ' disabled'}>&#9654;</button>
+          <button class="rp-pl-row-prev" data-mid="${x.id}" title="Watch this playlist in Trim (off air)"${n ? '' : ' disabled'}>&#9654;</button>
           <span class="rp-pl-row-name">${(x.name || 'Playlist').replace(/</g, '&lt;')}</span>
           <span class="rp-pl-row-count">${n} clip${n === 1 ? '' : 's'}</span>
           <span class="rp-pl-badge rp-pl-badge--${badge.cls}">${badge.label}</span>
@@ -24817,7 +25169,7 @@ async function poolPlayLive(ids) {
   _plLiveItems = (ids || []).map((id) => lib.find((cl) => cl.id === id)).filter(Boolean).map(clipToLiveItem);
   if (!_plLiveItems.length) return;
   const programScene = (el('rp-program-scene')?.value || '').trim();
-  if (!programScene) showToast('No OBS scene selected — pick a scene in the Video Editor\'s On-Air row so OBS switches to the replay-player source.', '#fbbf24', 5000);
+  if (!programScene) showToast('No OBS scene selected — pick a scene in the Replays page\'s On-Air row so OBS switches to the replay-player source.', '#fbbf24', 5000);
   _plLoop = !!el('rp-loop')?.checked;
   _plReturnScene = '';
   _plScene = programScene;
@@ -25542,9 +25894,6 @@ function refreshDeckLive() {
   });
 }
 function renderDeck() {
-  const grid = el('prod-deck-grid'); if (!grid) return;
-  grid.style.setProperty('--deck-cols', _deck.cols || 4);
-  grid.classList.toggle('deck-editing', _deckEdit);
   const mkTile = (b, edit) => {
     const accent = b.color ? ` style="--tile-accent:${dEsc(b.color)}"` : '';
     const lc = deckLiveClass(b), liveCls = lc === 'on' ? ' deck-on' : lc === 'muted' ? ' deck-muted' : '';
@@ -25560,18 +25909,23 @@ function renderDeck() {
       + (edit ? `<button class="deck-tile-del" title="Remove">✕</button>` : '')
       + `</div>`;
   };
-  grid.innerHTML = (_deck.buttons || []).map((b) => mkTile(b, _deckEdit)).join('');
-  const dashGrid = el('dash-deck-grid');
-  if (dashGrid) {
-    dashGrid.style.setProperty('--deck-cols', _deck.cols || 4);
-    dashGrid.innerHTML = (_deck.buttons || []).map((b) => mkTile(b, false)).join('');
-    const dashEmpty = el('dash-deck-empty'); if (dashEmpty) dashEmpty.style.display = (_deck.buttons || []).length ? 'none' : '';
-  }
-  const empty = el('deck-empty'); if (empty) empty.style.display = (_deck.buttons || []).length ? 'none' : '';
+  // The deck's home is the Dashboard widget now that Production dropped its Deck pane — render
+  // whichever grids are actually present, all of them honouring edit mode.
+  const grids = ['prod-deck-grid', 'dash-deck-grid'].map((gid) => el(gid)).filter(Boolean);
+  grids.forEach((g) => {
+    g.style.setProperty('--deck-cols', _deck.cols || 4);
+    g.classList.toggle('deck-editing', _deckEdit);
+    g.innerHTML = (_deck.buttons || []).map((b) => mkTile(b, _deckEdit)).join('');
+  });
+  const count = (_deck.buttons || []).length;
+  const dashEmpty = el('dash-deck-empty'); if (dashEmpty) dashEmpty.style.display = count ? 'none' : '';
+  const empty = el('deck-empty'); if (empty) empty.style.display = count ? 'none' : '';
   const cols = el('deck-cols'); if (cols) cols.value = String(_deck.cols || 4);
   // Audio tiles get the wheel / right-click / long-press volume ride (click still = mute via deckFire).
-  const attachDeckVol = (g) => { if (!g) return; (_deck.buttons || []).forEach((b) => { if (b.type !== 'audio' || !b.target) return; const t = g.querySelector('.deck-tile[data-id="' + b.id + '"]'); if (t) attachAudioVolume(t, b.target); }); };
-  attachDeckVol(grid); attachDeckVol(dashGrid);
+  grids.forEach((g) => (_deck.buttons || []).forEach((b) => {
+    if (b.type !== 'audio' || !b.target) return;
+    const t = g.querySelector('.deck-tile[data-id="' + b.id + '"]'); if (t) attachAudioVolume(t, b.target);
+  }));
 }
 
 // Build the Target field for the editor (a select, or a seconds input for countdowns).
@@ -25664,31 +26018,6 @@ el('deck-ed-save')?.addEventListener('click', () => {
   el('deck-editor-dlg')?.close(); _deckEditingId = null; window.__deckCapturing = false;
 });
 
-// Grid click: fire (normal) or edit/delete (edit mode). Drag to reorder in edit mode.
-(function wireDeckGrid() {
-  const grid = el('prod-deck-grid'); if (!grid) return;
-  grid.addEventListener('click', (e) => {
-    const tile = e.target.closest('.deck-tile'); if (!tile) return;
-    const id = tile.dataset.id; const b = _deck.buttons.find((x) => x.id === id);
-    if (e.target.closest('.deck-tile-del')) { _deck.buttons = _deck.buttons.filter((x) => x.id !== id); deckSave(); renderDeck(); renderDeckHkLegend(); return; }
-    if (_deckEdit) { openDeckEditor(b); return; }
-    if (b) { deckFire(b); tile.classList.remove('deck-fire'); void tile.offsetWidth; tile.classList.add('deck-fire'); }
-  });
-  let dragId = null;
-  grid.addEventListener('dragstart', (e) => { const t = e.target.closest('.deck-tile'); if (!t || !_deckEdit) { e.preventDefault(); return; } dragId = t.dataset.id; t.classList.add('deck-drag'); });
-  grid.addEventListener('dragend', (e) => { const t = e.target.closest('.deck-tile'); if (t) t.classList.remove('deck-drag'); dragId = null; });
-  grid.addEventListener('dragover', (e) => { if (_deckEdit) e.preventDefault(); });
-  grid.addEventListener('drop', (e) => {
-    if (!_deckEdit || !dragId) return; e.preventDefault();
-    const tgt = e.target.closest('.deck-tile'); if (!tgt) return;
-    const from = _deck.buttons.findIndex((x) => x.id === dragId);
-    const to = _deck.buttons.findIndex((x) => x.id === tgt.dataset.id);
-    if (from < 0 || to < 0 || from === to) return;
-    const [m] = _deck.buttons.splice(from, 1); _deck.buttons.splice(to, 0, m);
-    deckSave(); renderDeck();
-  });
-})();
-
 // Maps a deck button to its preview overlay URL path.
 function deckDashPreviewPath(b) {
   const TRIG = { breakScreen: '/countdown.html', winner: '/winner.html', intro: '/intro.html', spotlight: '/spotlightdesk.html', veto: '/mapscreen.html' };
@@ -25716,6 +26045,16 @@ function deckDashPreviewPath(b) {
   grid.addEventListener('click', (e) => {
     const tile = e.target.closest('.deck-tile'); if (!tile) return;
     const id = tile.dataset.id;
+    // Edit mode (the controls the retired Production Deck pane used to own): ✕ removes a button,
+    // any other click opens its editor. Nothing fires, and anything armed is stood down first.
+    if (_deckEdit) {
+      if (armedId) arm(null);
+      if (e.target.closest('.deck-tile-del')) {
+        _deck.buttons = _deck.buttons.filter((x) => x.id !== id);
+        deckSave(); renderDeck(); renderDeckHkLegend(); return;
+      }
+      openDeckEditor(_deck.buttons.find((x) => x.id === id)); return;
+    }
     if (id === armedId) {
       const b = _deck.buttons.find((x) => x.id === id);
       if (b) { deckFire(b); tile.classList.remove('deck-fire'); void tile.offsetWidth; tile.classList.add('deck-fire'); }
@@ -25740,6 +26079,21 @@ function deckDashPreviewPath(b) {
   el('dash-pv-reload')?.addEventListener('click', () => { const f = el('dash-pv-frame'); if (f) f.src = f.src; });
 
   el('dash-deck-add')?.addEventListener('click', () => openDeckEditor(null));
+
+  // Drag to reorder — edit mode only.
+  let dragId = null;
+  grid.addEventListener('dragstart', (e) => { const t = e.target.closest('.deck-tile'); if (!t || !_deckEdit) { e.preventDefault(); return; } dragId = t.dataset.id; t.classList.add('deck-drag'); });
+  grid.addEventListener('dragend', (e) => { const t = e.target.closest('.deck-tile'); if (t) t.classList.remove('deck-drag'); dragId = null; });
+  grid.addEventListener('dragover', (e) => { if (_deckEdit) e.preventDefault(); });
+  grid.addEventListener('drop', (e) => {
+    if (!_deckEdit || !dragId) return; e.preventDefault();
+    const tgt = e.target.closest('.deck-tile'); if (!tgt) return;
+    const from = _deck.buttons.findIndex((x) => x.id === dragId);
+    const to = _deck.buttons.findIndex((x) => x.id === tgt.dataset.id);
+    if (from < 0 || to < 0 || from === to) return;
+    const [m] = _deck.buttons.splice(from, 1); _deck.buttons.splice(to, 0, m);
+    deckSave(); renderDeck();
+  });
 })();
 
 deckSave();   // persist the seeded defaults on first run
@@ -26037,7 +26391,6 @@ el('onair-edit-toggle')?.addEventListener('click', function () {
   });
 })();
 // Live-preview reloads + jump to the full qrail Twitch panel from the Deck.
-el('deck-pv-reload')?.addEventListener('click', () => { const f = el('deck-pv-frame'); if (f) f.src = f.src; });
 el('gfx-pv-reload')?.addEventListener('click', () => { const f = el('gfx-pv-frame'); if (f) f.src = f.src; });
 el('prod-open-twitch')?.addEventListener('click', () => document.querySelector('.qrail-tab[data-qtab="twitch"]')?.click());
 // Scale the live-preview iframes (1920x1080 overlays) to fit their boxes — JS scaling so it
@@ -26050,7 +26403,7 @@ function fitLivePreview(frame) {
 }
 function fitLivePreviews() { document.querySelectorAll('.live-pv iframe').forEach(fitLivePreview); }
 window.addEventListener('resize', () => { clearTimeout(window.__lpvTimer); window.__lpvTimer = setTimeout(fitLivePreviews, 120); });
-['deck-pv-frame', 'gfx-pv-frame'].forEach((id) => { const fr = el(id); if (fr) fr.addEventListener('load', () => fitLivePreview(fr)); });
+['dash-pv-frame', 'gfx-pv-frame'].forEach((id) => { const fr = el(id); if (fr) fr.addEventListener('load', () => fitLivePreview(fr)); });
 setTimeout(fitLivePreviews, 250);
 // Live-preview boxes can resize without a window.resize firing — the graphics hub's own columns
 // relayout when the qrail expands/collapses, and the floating OBS Program panel is user-resizable
@@ -28096,7 +28449,7 @@ function renderCreditsCountryStat() {
     if (cc) flag++;
     else if (cname) { nameOnly++; unmapped.add(cname); }
   }));
-  if (!total) { box.textContent = 'Countries: no event roster loaded — sync the event (Events/Seeding).'; box.style.color = 'var(--muted)'; return; }
+  if (!total) { box.textContent = 'Countries: no event roster loaded — sync the event (Events ▸ My Events).'; box.style.color = 'var(--muted)'; return; }
   let txt = `Countries: ${flag}/${total} players get a flag`;
   if (nameOnly) txt += ` · ${nameOnly} have a country start.gg couldn't map (see console)`;
   else if (flag < total) txt += ` · ${total - flag} have no country set on start.gg`;
@@ -28175,16 +28528,28 @@ function renderQros() {
   const st = el('qros-status');
   const cancelBtn = el('qros-cancel');
   const curSeg = _rdRunning && _rdSegs[_rdIdx];
-  // Status line
+  const sum = rdSummary();
+  // Status: one plain sentence for where the show is.
   if (st) {
     if (curSeg) {
-      const holdIcon = _rdTimer ? ' <span style="color:#fb923c;font-size:10px;" title="Auto-advancing…">&#8987;</span>' : '';
-      st.innerHTML = `<span style="color:#48bb78;font-weight:700;">&#9679; ${_rdIdx + 1}/${_rdSegs.length}</span>&nbsp;${poEsc(curSeg.label || rdTargetLabel(curSeg))}${holdIcon}`;
+      st.innerHTML = `<span class="qros-live">On air ${sum.pos}/${sum.total}</span>`
+        + `<span class="qros-cur-lbl">${poEsc(curSeg.label || rdTargetLabel(curSeg))}</span>`
+        + (_rdTimer ? '<span class="qros-auto" title="Auto-advancing when the hold ends">auto</span>' : '')
+        + (sum.next ? `<span class="qros-then">Next: ${poEsc(sum.next)}</span>` : '<span class="qros-then">Last segment</span>');
+    } else if (_rdSegs.length) {
+      st.innerHTML = `<span class="qros-idle">${sum.total} segment${sum.total === 1 ? '' : 's'} ready</span>`;
     } else {
-      st.textContent = _rdSegs.length ? `${_rdSegs.length} segments — idle` : 'No segments — build on Production.';
+      st.innerHTML = '<span class="qros-idle">No rundown yet.</span>'
+        + '<button type="button" class="btn btn-sm qnext-quiet qros-build js-goto-rundown">Build a rundown</button>';
     }
   }
-  // Cancel button: only visible while a hold-timer countdown is running
+  // Only show the buttons that apply right now.
+  const show = (id, on) => { const b = el(id); if (b) b.style.display = on ? '' : 'none'; };
+  show('qros-start', !_rdRunning && _rdSegs.length > 0);
+  show('qros-next', _rdRunning);
+  show('qros-stop', _rdRunning);
+  const nextBtn = el('qros-next'); if (nextBtn) nextBtn.textContent = sum.atEnd ? 'Finish show' : 'Next segment';
+  // Hold: only while an auto-advance countdown is running
   if (cancelBtn) cancelBtn.style.display = (_rdRunning && _rdTimer) ? '' : 'none';
   const dot = el('qrail-ros-dot'); if (dot) dot.style.display = _rdRunning ? '' : 'none';
 
@@ -28530,6 +28895,13 @@ el('qros-next')?.addEventListener('click', () => { rdNext(); renderQros(); });
 el('qros-stop')?.addEventListener('click', () => { rdStop(); renderQros(); });
 el('qros-cancel')?.addEventListener('click', rdCancelHold);
 document.querySelectorAll('.js-goto-ros, .js-goto-flows').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); document.querySelector('.tab-btn[data-tab="produccion"]')?.click(); }));
+// Rail "Edit" / "Build a rundown" -> Production ▸ Rundown. Delegated: the Build button is re-rendered.
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.js-goto-rundown')) return;
+  e.preventDefault();
+  document.querySelector('.tab-btn[data-tab="produccion"]')?.click();
+  if (typeof window._pdShow === 'function') window._pdShow('rundown');
+});
 document.querySelectorAll('.js-goto-dashboard').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); document.querySelector('.tab-btn[data-tab="principal"]')?.click(); }));
 
 // ── Qrail panel: start.gg stream queue ──────────────────────────────────────
@@ -28678,6 +29050,20 @@ function qsggClearDemo() {
 el('qsgg-demo-btn')?.addEventListener('click', qsggLoadDemo);
 el('qsgg-clear-btn')?.addEventListener('click', qsggClearDemo);
 
+// Replay Buffer switched off in OBS's own settings (state.obs.replayBufferAvailable === false).
+// Every buffer pill/button uses this so they all say the same thing — and none of them keep
+// offering a Start button that OBS will refuse.
+const RB_OFF_HINT = 'Replay Buffer is turned off in OBS. In OBS: Settings > Output > Replay Buffer > Enable Replay Buffer, then Apply. (The suite never changes OBS settings for you.)';
+function rbOffInObs(obs) { return !!(obs && obs.connected && obs.replayBufferAvailable === false); }
+function rbPill(pill, obs) {
+  if (!pill) return;
+  const off = rbOffInObs(obs);
+  pill.textContent = off ? 'Off in OBS' : obs.replayBufferActive ? 'Buffer On' : 'Buffer Off';
+  pill.classList.toggle('on', !!obs.replayBufferActive);
+  pill.classList.toggle('is-obs-off', off);
+  pill.title = off ? RB_OFF_HINT : '';
+}
+
 function renderQrailStartgg(data) {
   const list = el('qsgg-list'); if (!list) return;
   const sgg = data.startgg || {};
@@ -28704,9 +29090,14 @@ function renderQrailStartgg(data) {
 
   const pollEl = el('qsgg-poll-status');
   if (pollEl) {
-    pollEl.textContent = isDemo ? 'Preview' : queueEnabled ? 'Live' : 'Queue off';
+    pollEl.textContent = isDemo ? 'Preview' : queueEnabled ? 'Tracking' : 'Off';
+    pollEl.title = isDemo ? 'Showing sample sets from your history' : queueEnabled ? 'Following the start.gg stream queue' : 'Queue tracking is off — turn it on from the Dashboard';
     pollEl.className = 'qsgg-poll-status ' + (isDemo ? 'preview' : queueEnabled ? 'enabled' : 'disabled');
   }
+
+  // Preview is a testing aid — only offer it when there is nothing real to look at.
+  const demoBtn = el('qsgg-demo-btn'); if (demoBtn) demoBtn.style.display = (!isDemo && !queue.length) ? '' : 'none';
+  const changeLink = document.querySelector('#qsgg-event-name ~ .js-goto-dashboard'); if (changeLink) changeLink.style.display = evName && !isDemo ? '' : 'none';
 
   const badgeEl = el('qsgg-queue-badge');
   if (badgeEl) badgeEl.textContent = queue.length ? queue.length + ' set' + (queue.length > 1 ? 's' : '') : '';
@@ -28724,13 +29115,13 @@ function renderQrailStartgg(data) {
     // a connected event with nothing marked shows empty forever. Say so, with the fix.
     const slug = (currentState?.startgg?.tournamentSlug || '').trim();
     const adminLink = slug
-      ? `<br><a href="https://www.start.gg/admin/tournament/${encodeURIComponent(slug)}/stream-queue" target="_blank" style="color:var(--cp-accent);text-decoration:underline;">Open start.gg stream queue admin ↗</a>`
+      ? `<a class="qnext-link qsgg-empty-link" href="https://www.start.gg/admin/tournament/${encodeURIComponent(slug)}/stream-queue" target="_blank">Open stream queue on start.gg</a>`
       : '';
     list.innerHTML = evName
       ? '<div class="qsgg-empty">' + (queueEnabled
-          ? 'No sets on the stream queue. On start.gg, attach sets to your stream (Match Settings → Stream) and they’ll appear here.' + adminLink
-          : 'Enable queue polling on the Dashboard to track live sets.') + '</div>'
-      : '<div class="qsgg-empty">No event loaded.<br><span class="qsgg-goto-dash" style="color:var(--cp-accent);cursor:pointer;text-decoration:underline;">Load one in Dashboard ↗</span></div>';
+          ? 'Nothing queued yet. Attach sets to your stream on start.gg and they show up here.' + adminLink
+          : 'Queue tracking is off. Turn it on from the Dashboard.') + '</div>'
+      : '<div class="qsgg-empty">Load an event on the Dashboard to see its stream queue.<button type="button" class="btn btn-sm qnext-quiet qsgg-goto-dash">Open Dashboard</button></div>';
     list.querySelector('.qsgg-goto-dash')?.addEventListener('click', () => { document.querySelector('.tab-btn[data-tab="principal"]')?.click(); });
     return;
   }
@@ -29169,7 +29560,7 @@ function applyClipsState(c) {
         <div class="montage-card-name" title="${(m.name || 'Montage').replace(/"/g, '&quot;').replace(/</g, '&lt;')}">${(m.name || 'Montage').replace(/</g, '&lt;')}</div>
         <div class="montage-card-meta">${n} clip${n === 1 ? '' : 's'} &middot; encoded</div>
         <div class="montage-card-actions">
-          <button class="btn btn-secondary btn-sm btn-montage-prev" data-mid="${m.id}" title="Watch this export in the Video Editor (off air)">Preview</button>
+          <button class="btn btn-secondary btn-sm btn-montage-prev" data-mid="${m.id}" title="Watch this export in Trim (off air)">Preview</button>
           <button class="btn btn-danger btn-sm btn-montage-screen" data-mid="${m.id}" title="Play this export on Program">To air</button>
           <button class="btn btn-secondary btn-sm btn-montage-save" data-mid="${m.id}" title="Save encoded file to disk">Save As&hellip;</button>
           <button class="rp-vi-del btn-montage-delx" data-mid="${m.id}" title="Delete this encoded file (the playlist stays)">&times;</button>
@@ -29803,7 +30194,74 @@ function sendToScreen(bus, transitionOverride) {
   }
 }
 el('rp-buffer-toggle')?.addEventListener('click', () => send('obs_toggle_replay_buffer'));
-el('rp-buffer-save')?.addEventListener('click', () => send('obs_save_replay'));
+el('rp-capture')?.addEventListener('click', () => rpCaptureReplay('page'));
+
+// ── Capture: one click saves the OBS replay buffer AND imports the clip (clip_capture_manual
+// starts the buffer first if it's off). The reply carries the new clip's id; a capture fired
+// from the Replays page opens that clip in Trim so the next step is just Show Now / Add.
+let _rpCaptureOpenId = null;
+let _rpCaptureBusy = false;
+function rpCaptureReplay(source) {
+  if (_rpCaptureBusy) return;
+  const obs = (currentState && currentState.obs) || {};
+  if (!obs.connected) { showToast('Connect to OBS first (Settings ▸ OBS).', '#f56565'); return; }
+  _rpCaptureBusy = true;
+  rpSyncCaptureUi();
+  const t = new Date();
+  const hhmmss = [t.getHours(), t.getMinutes(), t.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
+  const p = currentState.director?.primary;
+  send('clip_capture_manual', {
+    source,
+    player: p?.name || '',
+    label: 'Replay ' + hhmmss + (p?.name ? ' — ' + p.name : ''),
+    reason: 'Producer capture',
+  });
+  // Never leave the button stuck if the reply is lost.
+  setTimeout(() => { if (_rpCaptureBusy) { _rpCaptureBusy = false; rpSyncCaptureUi(); } }, 15000);
+}
+function rpOnCaptureResult(d) {
+  _rpCaptureBusy = false;
+  rpSyncCaptureUi();
+  const msg = d.message || (d.ok ? 'Replay captured.' : 'Capture failed.');
+  showToast(msg, d.ok ? '#22c55e' : '#f56565', d.ok ? 3000 : 7000);
+  const st = el('rp-capture-status');
+  if (st) { st.textContent = msg; st.style.color = d.ok ? 'var(--good, #48bb78)' : '#f56565'; }
+  const qst = el('qr-replay-status');
+  if (qst) { qst.textContent = msg; qst.style.color = d.ok ? '' : '#f56565'; setTimeout(() => { if (qst.textContent === msg) qst.textContent = ''; }, 5000); }
+  if (!d.ok || !d.clipId) return;
+  if (typeof scanStagingArea === 'function') scanStagingArea(true);   // show the new file as imported
+  if (d.source === 'page') { _rpCaptureOpenId = d.clipId; rpOpenCapturedClip(); }
+}
+// clips_update (carrying the new clip) can land before or after clips-result — try on both.
+function rpOpenCapturedClip() {
+  if (!_rpCaptureOpenId) return;
+  const lib = (currentState.clips && currentState.clips.library) || [];
+  const clip = lib.find((c) => c.id === _rpCaptureOpenId);
+  if (!clip) return;
+  _rpCaptureOpenId = null;
+  // New captures land on the Replays shelf — flip to it so the clip shows in the pool too.
+  const shelfTab = document.querySelector('#rp-folder-tabs .rp-folder-tab[data-folder="replays"]');
+  if (shelfTab && _rpFolder !== 'replays') shelfTab.click();
+  loadClipPreview(clip);
+}
+function rpSyncCaptureUi(data) {
+  const obs = (data || currentState || {}).obs || {};
+  const pill = el('rp-buffer-pill');
+  rbPill(pill, obs);
+  const tb = el('rp-buffer-toggle');
+  if (tb) {
+    tb.textContent = obs.replayBufferActive ? 'Stop Buffer' : 'Start Buffer';
+    tb.disabled = !obs.connected;
+    tb.title = !obs.connected ? 'Connect to OBS in Settings ▸ OBS first'
+      : rbOffInObs(obs) ? RB_OFF_HINT
+      : (obs.replayBufferActive ? 'Stop the OBS replay buffer' : 'Start the OBS replay buffer (Capture also starts it automatically)');
+  }
+  ['rp-capture', 'qr-save-replay'].forEach((id) => {
+    const b = el(id); if (!b) return;
+    b.disabled = !obs.connected || _rpCaptureBusy;
+    b.textContent = _rpCaptureBusy ? 'Capturing…' : (id === 'rp-capture' ? 'Capture Replay' : 'Capture');
+  });
+}
 el('rp-to-program')?.addEventListener('click', () => sendToScreen('program'));
 el('rp-to-preview')?.addEventListener('click', () => sendToScreen('preview'));
 
@@ -29819,17 +30277,23 @@ el('rp-to-preview')?.addEventListener('click', () => sendToScreen('preview'));
 // so the pill/button track the real OBS buffer state immediately instead of only refreshing
 // whenever a clip happens to be saved/imported.
 function renderQrailBufferStatus(data) {
+  rpSyncCaptureUi(data);
   const obs = (data || currentState || {}).obs || {};
   const pill = el('qr-buffer-pill');
-  if (pill) { pill.textContent = obs.replayBufferActive ? 'Buffer On' : 'Buffer Off'; pill.classList.toggle('on', !!obs.replayBufferActive); }
+  rbPill(pill, obs);
   const toggleBtn = el('qr-buffer-toggle');
   if (toggleBtn) {
     toggleBtn.textContent = obs.replayBufferActive ? 'Stop Buffer' : 'Start Buffer';
     toggleBtn.disabled = !obs.connected;
     toggleBtn.style.opacity = obs.connected ? '1' : '0.45';
-    toggleBtn.title = obs.connected
-      ? (obs.replayBufferActive ? 'Stop the OBS replay buffer' : 'Start the OBS replay buffer — required before Save Replay can capture anything')
-      : 'Connect to OBS in Settings → OBS first';
+    toggleBtn.title = !obs.connected ? 'Connect to OBS in Settings → OBS first'
+      : rbOffInObs(obs) ? RB_OFF_HINT
+      : (obs.replayBufferActive ? 'Stop the OBS replay buffer' : 'Start the OBS replay buffer — required before Save Replay can capture anything');
+  }
+  const st = el('qr-replay-status');
+  if (st) {
+    if (rbOffInObs(obs)) { st.textContent = 'Replay Buffer is turned off in OBS — enable it in OBS: Settings > Output > Replay Buffer.'; st.dataset.rbOff = '1'; }
+    else if (st.dataset.rbOff) { st.textContent = ''; delete st.dataset.rbOff; }
   }
 }
 
@@ -29882,7 +30346,7 @@ function renderQrailReplay(data) {
         <span class="qr-clip-dur">${dur}</span>
       </div>
       <div class="qr-clip-btns">
-        <button class="btn btn-secondary btn-sm qr-edit" title="Quick edit — opens the Video Editor in a popup to trim and push live (raw folder files are imported into the library on save)">Edit</button>
+        <button class="btn btn-secondary btn-sm qr-edit" title="Quick edit — opens Trim in a popup to trim and push live (raw folder files are imported into the library on save)">Edit</button>
         <button class="btn btn-primary btn-sm qr-toair" title="Play this clip on the program bus now (cuts OBS to the replay scene, returns when it ends)">To Air</button>
       </div>`;
     const thumbImg = row.querySelector('.qr-clip-thumb-img');
@@ -29947,10 +30411,7 @@ function qrailClipToAir(clip) {
   const d = Number(clip.duration) || 0;
   if (d > 0) _replayFallbackTimer = setTimeout(() => { if (_replayActive && !_plLiveActive) endReplayProgram(); }, d * 1000 + 1500);
 }
-el('qr-save-replay')?.addEventListener('click', () => {
-  send('obs_save_replay');
-  const st = el('qr-replay-status'); if (st) { st.textContent = 'Replay buffer save requested — the clip appears below once imported.'; setTimeout(() => { if (st) st.textContent = ''; }, 4000); }
-});
+el('qr-save-replay')?.addEventListener('click', () => rpCaptureReplay('rail'));
 el('qr-replay-stop')?.addEventListener('click', () => endReplayProgram());
 
 // ── Qrail REPLAY sub-tabs: Clips | Twitch | Playlists ─────────────────────────
@@ -31483,6 +31944,7 @@ async function connect() {
     } else if (msg.type === 'clips_update') {
       currentState.clips = msg.data;
       applyClipsState(msg.data);
+      if (_rpCaptureOpenId) rpOpenCapturedClip();
       if (typeof renderQrailReplay === 'function') { try { renderQrailReplay(currentState); } catch (e) { console.error('[render:renderQrailReplay]', e); } }
       if (typeof renderQrailPlaylists === 'function') { try { renderQrailPlaylists(currentState); } catch (e) { console.error('[render:renderQrailPlaylists]', e); } }
     } else if (msg.type === 'replay_progress') {
@@ -31548,6 +32010,7 @@ async function connect() {
     } else if (msg.type === 'clips-result') {
       const st = el('clips-status');
       if (st) { st.textContent = msg.data.message || ''; st.style.color = msg.data.ok ? '#9ae6b4' : '#f56565'; }
+      if (msg.data.source) rpOnCaptureResult(msg.data);
     } else if (msg.type === 'state_update') {
       // Sync facecam grid live as players join — skip when between matches (empty array)
       if (msg.data.players && msg.data.players.length > 0) {
@@ -31606,6 +32069,8 @@ async function connect() {
     } else if (msg.type === 'perm-denied') {
       const r = (msg.data && msg.data.role) || 'your seat role';
       showToast('Not allowed: ' + ((msg.data && msg.data.type) || 'action') + ' — ' + r + ' seats are ' + (r === 'operator' ? 'blocked from credential changes' : 'view-only') + '. Ask your org\'s producer/admin.', '#c53030', 6000);
+    } else if (msg.type === 'competition_result') {
+      if (typeof window.cmpOnResult === 'function') window.cmpOnResult(msg.data);
     } else if (msg.type === 'eventops-result') {
       if (typeof window.eventOpsResult === 'function') window.eventOpsResult(msg.data);
     } else if (msg.type === 'cloud_status') {
@@ -31736,6 +32201,9 @@ async function connect() {
       if (typeof rpOnArmPreparing === 'function') rpOnArmPreparing();
     } else if (msg.type === 'obs-result') {
       const color = msg.data.ok ? '#9ae6b4' : '#f56565';
+      // Replay-buffer replies used to land only in Settings ▸ OBS, so a refused Start looked like
+      // a dead button. Those are flagged toast:true server-side.
+      if (msg.data.toast && msg.data.message) showToast(msg.data.message, msg.data.ok ? '#22c55e' : '#f56565', msg.data.ok ? 3000 : 8000);
       ['obs-result', 'replay-status'].forEach((id) => {
         const elx = el(id);
         if (elx) { elx.textContent = msg.data.message || ''; elx.style.color = color; }
@@ -31965,15 +32433,7 @@ async function connect() {
   ws.onerror = () => ws.close();
 }
 
-// Game-data sub-section switching (CS2 / Valorant / League / Rocket League).
-document.querySelectorAll('.game-tab-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const g = btn.dataset.game;
-    document.querySelectorAll('.game-tab-btn').forEach(b => b.classList.toggle('active', b === btn));
-    document.querySelectorAll('.game-section').forEach(s => s.classList.toggle('active', s.id === 'games-section-' + g));
-    if (g === 'apex') loadApexSetup();
-  });
-});
+// Game-data section switching lives in games-hub.js (picker + standard tabs).
 wireApexSetup();
 wireApexScoring();
 
@@ -32034,105 +32494,56 @@ const TWITCH_SCOPES = [
   'bits:read',                      // bits events & leaderboard
 ];
 
-el('btn-twitch-login')?.addEventListener('click', () => {
+// "Continue with Twitch". The server builds the authorize URL (code flow with a refresh token when
+// signed in to the cloud, implicit otherwise) and its callback page finishes the sign-in on its own
+// — it applies the token and broadcasts state — so all the panel has to do is open Twitch's page
+// somewhere that isn't blocked. In the app that's a managed login window from the main process
+// (window.open of a blank popup is denied by the control panel's window-open handler, which is why
+// this button used to do nothing); in a plain browser, a normal popup.
+let _twitchLoginWatch = null;
+el('btn-twitch-login')?.addEventListener('click', async () => {
+  const btn = el('btn-twitch-login');
+  const label = btn ? btn.textContent : '';
+  const legacyUrl = `https://id.twitch.tv/oauth2/authorize?client_id=${TWITCH_CLIENT_ID}`
+    + `&redirect_uri=${encodeURIComponent(TWITCH_REDIRECT_URI)}&response_type=token`
+    + `&scope=${TWITCH_SCOPES.join('%20')}&state=temp-${Math.random().toString(36).slice(2, 9)}&force_verify=true`;
+  const inApp = !!(window.electronAPI && window.electronAPI.openTwitchOAuth);
+  // Outside Electron a popup must open synchronously inside the click or the browser blocks it.
+  const popup = inApp ? null : window.open('about:blank', 'twitch_oauth', 'width=600,height=760');
+  if (btn) { btn.disabled = true; btn.textContent = 'Opening Twitch…'; }
+  let authUrl = legacyUrl;
   try {
-    // Legacy implicit-grant URL — only used if the server init call fails entirely.
-    const sessionId = 'temp-' + Math.random().toString(36).substring(7);
-    const legacyUrl = `https://id.twitch.tv/oauth2/authorize?` +
-      `client_id=${TWITCH_CLIENT_ID}&` +
-      `redirect_uri=${encodeURIComponent(TWITCH_REDIRECT_URI)}&` +
-      `response_type=token&` +
-      `scope=${TWITCH_SCOPES.join('%20')}&` +
-      `state=${sessionId}&` +
-      `force_verify=true`;
-
-    // Open the window IMMEDIATELY (popup blockers only allow synchronous opens), then point it
-    // at the server-built authorize URL: code flow via the cloud backend when signed in (tokens
-    // come back WITH a refresh token — no more mid-show expiry), legacy implicit otherwise.
-    const oauthWindow = window.open('', 'twitch_oauth', 'width=600,height=700');
-    fetch(`${OAUTH_BASE_URL}/api/oauth/twitch/init`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+    const r = await fetch(`${OAUTH_BASE_URL}/api/oauth/twitch/init`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ scopes: TWITCH_SCOPES })
-    }).then(r => r.json()).then((d) => {
-      if (oauthWindow && !oauthWindow.closed) oauthWindow.location = (d && d.authUrl) ? d.authUrl : legacyUrl;
-    }).catch(err => {
-      console.warn('[OAuth] Init failed, using legacy implicit URL:', err.message);
-      if (oauthWindow && !oauthWindow.closed) oauthWindow.location = legacyUrl;
     });
-
-    // Step 4: Check if window opened successfully
-    if (!oauthWindow) {
-      console.error('[OAuth] Failed to open OAuth window - popup may be blocked');
-      showToast('Could not open the Twitch login window — allow popups for this app and try again.', '#c53030', 7000);
-      return;
-    }
-
-    // Poll for token every 1 second
-    let pollInterval = setInterval(async () => {
-      // Stop polling if OAuth window is closed
-      if (oauthWindow.closed) {
-        clearInterval(pollInterval);
-        return;
-      }
-
-      try {
-        const tokenRes = await fetch(`${OAUTH_BASE_URL}/api/oauth/twitch/token/${sessionId}`);
-
-        if (tokenRes.status === 200) {
-          // Token is ready!
-          const { accessToken, displayName, channelId, profilePicture } = await tokenRes.json();
-          clearInterval(pollInterval);
-          oauthWindow?.close();
-
-          // Send token to local broadcast server
-          try {
-            const setTokenRes = await fetch('http://127.0.0.1:3000/api/twitch/set-token', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                apiToken: accessToken,
-                displayName,
-                channelId,
-                profilePicture
-              })
-            });
-
-            if (!setTokenRes.ok) {
-              throw new Error(`Failed to set token: ${setTokenRes.status}`);
-            }
-
-            send('request_state');
-          } catch (err) {
-            console.error('[OAuth] Error sending token to server:', err);
-            showToast('Twitch login succeeded but saving the token failed — try again.', '#c53030', 7000);
-          }
-        } else if (tokenRes.status === 401) {
-          clearInterval(pollInterval);
-          oauthWindow?.close();
-          showToast('Twitch login session expired — click "Sign in with Twitch" again.', '#c53030', 7000);
-        }
-        // 202 = pending, keep polling
-      } catch (err) {
-        console.error('[OAuth] Poll error:', err);
-      }
-    }, 1000);
-
-    // Timeout after 10 minutes
-    setTimeout(() => {
-      if (pollInterval) {
-        clearInterval(pollInterval);
-      }
-      if (oauthWindow && !oauthWindow.closed) {
-        oauthWindow.close();
-        showToast('Twitch login timed out — click "Sign in with Twitch" to retry.', '#fbbf24', 7000);
-      }
-    }, 600000);
-
+    const d = await r.json();
+    if (d && d.authUrl) authUrl = d.authUrl;
   } catch (err) {
-    console.error('[OAuth] Error:', err);
-    showToast('Twitch login failed: ' + (err.message || 'unknown error'), '#c53030', 5000);
+    console.warn('[OAuth] Init failed, using the legacy implicit URL:', err.message);
   }
+  let opened = false;
+  try {
+    if (inApp) opened = await window.electronAPI.openTwitchOAuth(authUrl);
+    else if (popup) { popup.location = authUrl; opened = true; }
+  } catch (err) { console.error('[OAuth] Could not open the Twitch login window:', err); }
+  if (btn) { btn.disabled = false; btn.textContent = label; }
+  if (!opened) {
+    showToast('Could not open the Twitch login window. Try again, or restart the app if this keeps happening.', '#c53030', 7000);
+    return;
+  }
+  showToast('Finish signing in to Twitch in the window that just opened.', '#9146ff', 5000);
+  // The panel flips to "connected" on its own when the server broadcasts; this just confirms it.
+  clearInterval(_twitchLoginWatch);
+  const startedAt = Date.now();
+  _twitchLoginWatch = setInterval(() => {
+    if (currentState && currentState.twitch && currentState.twitch.connected) {
+      clearInterval(_twitchLoginWatch);
+      showToast('Twitch connected.', '#22c55e', 4000);
+    } else if (Date.now() - startedAt > 10 * 60 * 1000) {
+      clearInterval(_twitchLoginWatch);
+    }
+  }, 1000);
 });
 
 el('btn-twitch-token-manual')?.addEventListener('click', () => {

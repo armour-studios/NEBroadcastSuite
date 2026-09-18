@@ -157,22 +157,26 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
     return false;
   }
 
+  // Arm OBS's Replay Buffer before a capture. Used to return true even when the start FAILED, so a
+  // buffer switched off in OBS fell through to SaveReplayBuffer and the raw "Replay buffer is not
+  // available." came back on every single capture instead of this one clear message.
   async function ensureReplayBuffer(obs) {
     if (!obs || !obs.isConnected()) return false;
     try {
-      const active = await obs.isReplayBufferActive();
-      if (!active) await obs.startReplayBuffer();
-      return true;
+      if (await obs.isReplayBufferActive()) return true;
+      return !!(await obs.startReplayBuffer());
     } catch (e) {
       return false;
     }
   }
+  const RB_OFF = 'OBS Replay Buffer is turned off in OBS. Turn it on in OBS: Settings > Output > Replay Buffer > Enable Replay Buffer, then Apply.';
+  let _rbOffLogged = false;
 
   async function captureHighlight(meta) {
     if (!shouldCapture(meta)) return null;
     const now = Date.now();
     const cooldown = meta.force ? CAPTURE_COOLDOWN_FORCE_MS : CAPTURE_COOLDOWN_MS;
-    if (now - lastCaptureAt < cooldown) return null;
+    if (now - lastCaptureAt < cooldown) { lastCaptureError = 'Still saving the last replay — try again in a moment.'; return null; }
     if (!meta.force && isDuplicateCapture(meta)) return null;
     lastCaptureAt = now;
 
@@ -183,12 +187,21 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
       return null;
     }
 
+    // Known to be switched off in OBS: automatic captures (goals, director) skip quietly instead of
+    // hammering OBS and re-logging the same failure on every event. A manual capture still retries,
+    // so turning it on in OBS works on the very next click.
+    const knownOff = obs.isReplayBufferAvailable && obs.isReplayBufferAvailable() === false;
+    if (knownOff && !meta.force && meta.type !== 'manual') { lastCaptureError = RB_OFF; lastCaptureAt = 0; return null; }
     const buf = await ensureReplayBuffer(obs);
     if (!buf) {
-      lastCaptureError = 'Replay Buffer is off — enable it in OBS (Settings → Output → Replay Buffer).';
-      console.warn('[Clips] ' + lastCaptureError);
+      const off = obs.isReplayBufferAvailable && obs.isReplayBufferAvailable() === false;
+      lastCaptureError = off ? RB_OFF : 'Could not start OBS Replay Buffer — ' + ((obs.getLastError && obs.getLastError()) || 'OBS refused the request') + '.';
+      if (!off || !_rbOffLogged) console.warn('[Clips] ' + lastCaptureError);
+      if (off) _rbOffLogged = true;
+      lastCaptureAt = 0;   // a failed arm isn't a capture — don't make the next try wait out the cooldown
       return null;
     }
+    _rbOffLogged = false;
 
     const before = Date.now();
     // Preferred path: save + get the exact saved file from the ReplayBufferSaved

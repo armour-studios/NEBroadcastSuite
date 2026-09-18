@@ -5,7 +5,7 @@
    Extracted verbatim from app.js (2026-07). Loads after app.js; inbound calls
    (cfShowSubtab/cfUpdateListenPill/cfLoadGroups/cfLoadTalent/renderCfStreamStations/
    …) are all runtime, typeof-guarded at the prominent sites. tlEsc stays in
-   app.js (shared alias used by app.js + seeding-spotlight.js). */
+   app.js (shared alias used by app.js + spotlight.js). */
 
 // ══════════════ Camera Feeds tab — Players / Casters / Gameplay / Settings ══════════════
 const CF_OVERLAY_BASE = 'http://127.0.0.1:3000';
@@ -1671,15 +1671,32 @@ function cfStationCard(s) {
     <div class="cf-stm-rooms">${rooms || '<p class="section-desc" style="margin:6px 0 0;">No rooms yet — add a caster or observer room.</p>'}</div>
   </div>`;
 }
+// Talkback panels — isolated sub-groups inside ONE room. A placement with no panel hears the whole
+// room (how every room worked before panels), so this is opt-in per placement. Keep in step with
+// the website's lib/stations.js STATION_PANELS.
+const CF_PANELS = [['', 'Whole room'], ['booth', 'Booth'], ['desk', 'Desk']];
+function cfPanelLabel(p) { const m = CF_PANELS.find((x) => x[0] === (p || '')); return m ? m[1] : (p || 'Whole room'); }
+
 function cfRoomBlock(r) {
   const kind = r.kind === 'observer' ? 'observer' : 'caster';
   const slots = (r.slots || []).map((sl) => cfSlotRow(sl)).join('');
   const nSlots = (r.slots || []).length;
+  // Which panels are actually in use here — the handoff only means anything with two or more,
+  // since one panel (or none) already hears everyone.
+  const panels = CF_PANELS.map((p) => p[0]).filter((v) => v && (r.slots || []).some((s) => (s.panel || '') === v));
+  const panelMeta = panels.length
+    ? `<span class="cf-rm-meta" title="How this room's talkback is split">${panels.map((p) => `${tlEsc(cfPanelLabel(p))} ${(r.slots || []).filter((s) => (s.panel || '') === p).length}`).join(' · ')}</span>`
+    : '';
+  const bridgeBtn = panels.length > 1
+    ? `<button class="btn btn-xs cf-handoff ${r.bridged ? 'is-on' : 'btn-ghost'}" data-act="room-bridge" title="${r.bridged ? 'Close the handoff — each panel goes back to hearing only itself.' : `Open a handoff — ${panels.map(cfPanelLabel).join(' and ')} hear each other until you close it. Nobody has to rejoin.`}">${r.bridged ? 'HANDOFF OPEN' : 'Open handoff'}</button>`
+    : '';
   return `<div class="cf-rm" data-rm="${tlEsc(r.id)}" data-kind="${kind}">
     <div class="cf-rm-head">
       <span class="cf-rm-badge ${kind}">${kind === 'observer' ? 'OBSERVER' : 'CASTER'}</span>
       <input class="cf-rm-name input-text" value="${tlEsc(r.name || '')}" data-act="room-name" placeholder="Room name" spellcheck="false">
       <span class="cf-rm-meta">${nSlots} slot${nSlots === 1 ? '' : 's'}</span>
+      ${panelMeta}
+      ${bridgeBtn}
       <button class="btn btn-ghost btn-xs" data-act="room-copy" title="Copy the join link your talent open to claim a slot">Copy invite</button>
       ${kind === 'observer' ? `<label class="qt-toggle cf-rm-share" title="Let other producers in the org pull these observer feeds"><span>Share to org</span><span class="switch"><input type="checkbox" data-act="room-share" ${r.shareToOrg ? 'checked' : ''}><span class="slider"></span></span></label>` : ''}
       <button class="btn btn-ghost btn-xs" data-act="slot-add" title="Add a placement slot">+ Slot</button>
@@ -1697,6 +1714,9 @@ function cfSlotRow(sl) {
     <span class="cf-slot-idx" title="${tlEsc(sl.label || '')}">${tlEsc(String(num))}</span>
     <input class="cf-slot-name input-text" value="${tlEsc(who)}" data-act="slot-name" placeholder="${tlEsc(sl.label || 'Unassigned')}" spellcheck="false">
     ${connected ? '<span class="cf-slot-live" title="Someone is connected on this placement">LIVE</span>' : ''}
+    <select class="cf-slot-panel input-text ${sl.panel ? 'has-panel' : ''}" data-act="slot-panel" title="Which panel this person talks in. Panels don't hear each other until you open a handoff.">
+      ${CF_PANELS.map(([v, lbl]) => `<option value="${v}" ${(sl.panel || '') === v ? 'selected' : ''}>${tlEsc(lbl)}</option>`).join('')}
+    </select>
     <label class="cf-slot-en" title="${on ? 'Enabled' : 'Disabled'}"><span class="switch sw-xs"><input type="checkbox" data-act="slot-enabled" ${on ? 'checked' : ''}><span class="slider"></span></span></label>
     <button class="cf-ico-btn" data-act="slot-copy" title="Copy this placement's join link">\u{1F517}</button>
     <button class="cf-ico-btn cf-danger" data-act="slot-del" title="Remove this slot">×</button>
@@ -1719,6 +1739,13 @@ el('cf-stations-list')?.addEventListener('click', async (e) => {
   if (act === 'room-add') { send('cloud_room_create', { stationId, kind: btn.dataset.kind }); return; }
   if (act === 'room-del') { if (await appConfirm('Delete this room and its placement slots?', 'Delete Room', true)) send('cloud_room_delete', { stationId, roomId }); return; }
   if (act === 'room-copy') { const r = cfFindRoom(stationId, roomId); cfStationCopy(r && r.url, btn); return; }
+  if (act === 'room-bridge') {
+    // HANDOFF: flip the room's bridge. Every talent page picks it up on its next poll and
+    // re-groups itself live over the VDO iframe API — no rejoin, nobody drops off air.
+    const r = cfFindRoom(stationId, roomId);
+    send('cloud_room_patch', { stationId, roomId, patch: { bridged: !(r && r.bridged) } });
+    return;
+  }
   if (act === 'slot-add') { send('cloud_slot_add', { stationId, roomId }); return; }
   if (act === 'slot-del') { send('cloud_slot_delete', { stationId, roomId, slotId }); return; }
   if (act === 'slot-copy') { const r = cfFindRoom(stationId, roomId); const sl = r && (r.slots || []).find((x) => x.id === slotId); cfStationCopy((sl && sl.customJoinUrl) || (r && r.url), btn); return; }
@@ -1735,6 +1762,7 @@ el('cf-stations-list')?.addEventListener('change', (e) => {
   if (act === 'room-share') { send('cloud_room_patch', { stationId, roomId, patch: { shareToOrg: ctl.checked } }); return; }
   if (act === 'slot-name') { send('cloud_slot_patch', { stationId, roomId, slotId, patch: { assignedName: ctl.value.trim() } }); return; }
   if (act === 'slot-enabled') { send('cloud_slot_patch', { stationId, roomId, slotId, patch: { enabled: ctl.checked } }); return; }
+  if (act === 'slot-panel') { send('cloud_slot_patch', { stationId, roomId, slotId, patch: { panel: ctl.value } }); return; }
 });
 el('cf-stations-list')?.addEventListener('keydown', (e) => {
   if (e.target.matches && e.target.matches('input.input-text')) {

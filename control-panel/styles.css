@@ -15,16 +15,20 @@
   --accent-grad: linear-gradient(95deg, #7C3AED, #06B6D4);
   --primary:     #7C3AED;   /* was the dashboard-customize blue #7C3AED — unified onto the one accent hue */
   --good:        #10B981;
-  /* Neutral black / dark-grey base — matched to the website's --background/--surface/--surface-light */
-  --bg:       #08080F;
-  --surface:  #131320;
-  --surface2: #1C1C30;
-  --surface3: #23233A;      /* raised chips/pills — one step lighter than surface2 */
-  --border:   rgba(124,58,237,.15);
+  /* Neutral near-black base (2026-09-17: moved off the purple-tinted greys toward the rail's
+     Talent-panel look — dark neutral cards, hairline borders, colour only where it means something).
+     Was #08080F / #131320 / #1C1C30 / #23233A with rgba(124,58,237,.15) borders. */
+  --bg:       #07070b;
+  --surface:  #1a1a22;      /* cards sit ABOVE the page, not level with it */
+  --surface2: #232330;      /* rows / sub-cards inside a card */
+  --surface3: #262630;      /* raised chips/pills */
+  --field:    #0d0d12;      /* inputs read as wells: darker than the card they sit in */
+  --border:   rgba(255,255,255,.14);
+  --border-strong: rgba(255,255,255,.20);   /* control outlines — inputs, buttons */
   /* Text */
   --text:       #F0F0FF;
   --fg:         var(--text);    /* alias — some sections use --fg */
-  --muted:      #9090B8;
+  --muted:      #9a9ac2;
   --text2:      var(--muted);
   --text-muted: var(--muted);   /* alias — was referenced but never defined */
   --label:      #C4C4D8;        /* field labels / section titles */
@@ -240,8 +244,9 @@ html, body {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 16px;
-  margin-bottom: 14px;
+  padding: 18px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 6px rgba(0,0,0,.5);
 }
 .section-title {
   font-family: var(--font-display);
@@ -249,7 +254,7 @@ html, body {
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #6b7280;
+  color: #b7bccd;           /* was #6b7280 — section headings were dimmer than the body text under them */
   margin-bottom: 14px;
 }
 /* Section titles with a leading icon (Camera Feeds → Casters / Talent) */
@@ -304,8 +309,8 @@ html, body {
   letter-spacing: 0.06em;
 }
 .input-text, .input-select {
-  background: var(--surface2);
-  border: 1px solid var(--border);
+  background: var(--field);
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
   color: var(--text);
   font-family: inherit;
@@ -319,6 +324,7 @@ html, body {
   border-color: var(--blue);
 }
 .input-select option { background: var(--surface2); }
+textarea.input-text { background: var(--field); }
 .input-file {
   font-size: 13px;
   color: var(--muted);
@@ -1916,11 +1922,23 @@ body.popout-match #btn-mt-popout { display: none; }
 .game-dd-name { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: uppercase; }
 .game-dd-caret { flex: 0 0 auto; font-size: 10px; color: var(--muted); }
 .game-dd-menu {
-  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 1200;
+  position: absolute; top: calc(100% + 4px); left: 0; min-width: 100%; width: 240px; z-index: 1200;
   background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
-  padding: 4px; max-height: 340px; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,0,0,.5);
+  padding: 4px; box-shadow: 0 10px 30px rgba(0,0,0,.5);
+  display: flex; flex-direction: column;
 }
 .game-dd-menu[hidden] { display: none; }
+.game-dd-search {
+  flex: 0 0 auto; width: 100%; box-sizing: border-box; margin: 0 0 4px; padding: 6px 8px;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font-size: 13px;
+}
+.game-dd-search:focus { outline: none; border-color: var(--blue); }
+.game-dd-list { max-height: 340px; overflow-y: auto; }
+.game-dd-group {
+  padding: 6px 8px 3px; font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+}
+.game-dd-empty { padding: 8px; font-size: 12px; color: var(--muted); }
+.game-dd-item.kb { outline: 1px solid var(--blue); outline-offset: -1px; }
 .game-dd-item {
   width: 100%; display: flex; align-items: center; gap: 9px; padding: 6px 8px;
   background: transparent; color: var(--text); border: 0; border-radius: 4px; font-size: 13px; cursor: pointer; text-align: left;
@@ -2719,7 +2737,7 @@ body.popout-match #btn-mt-popout { display: none; }
 .sc-header-btns { display: flex; gap: 6px; justify-content: center; }
 /* Match-Teams settings panel (gear button dropdown) */
 .match-settings-panel {
-  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   background: var(--surface); border: 1px solid var(--border);
   border-radius: 8px; margin: 0 auto 12px; overflow: hidden;
 }
@@ -3304,26 +3322,43 @@ input.sponsor-name-input:focus { border-color: var(--cp-accent); background: var
   font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 .brand-logo-sm { width: 38px; height: 38px; flex: 0 0 38px; }
 
-/* Saved Brand Kits list — logo + name with a sponsor quick-view on a second line. */
-.brand-kit-item { align-items: flex-start; gap: 12px; }
-/* Seven actions + a package switcher don't fit one line inside the Settings modal (narrower than
-   the old full-width page), and .preset-actions doesn't shrink — so the tail of the row (Export,
-   Banner URL, Delete) used to run off the edge. Wrap instead of overflowing. */
-.brand-kit-item .preset-actions { flex-wrap: wrap; justify-content: flex-end; row-gap: 6px; }
-.brand-kit-main { display: flex; gap: 10px; align-items: flex-start; flex: 1 1 auto; min-width: 0; }
-.brand-kit-logo { width: 40px; height: 40px; flex: 0 0 40px; border-radius: 8px; overflow: hidden;
+/* Saved Brand Kits list — one row per kit: logo · name / counts / sponsors · Activate, Edit, More. */
+.brand-kit-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 12px 14px; }
+/* The live kit is marked by the card, not by a bullet in front of its name. */
+.brand-kit-item.is-active { border-color: var(--cp-accent); box-shadow: 0 0 0 1px var(--cp-accent) inset; background: var(--white-a06); }
+.brand-kit-item .preset-actions { flex-wrap: nowrap; align-items: center; }
+.brand-kit-main { display: flex; gap: 12px; align-items: center; min-width: 0; }
+.brand-kit-logo { width: 44px; height: 44px; flex: 0 0 44px; border-radius: 8px; overflow: hidden;
   background: var(--white-a06); border: 1px solid var(--white-a12);
   display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 16px; color: #cdd2dd; }
 .brand-kit-logo img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .brand-kit-info { min-width: 0; flex: 1 1 auto; }
-.brand-kit-name { font-weight: 700; font-size: 13px; color: #e6e8ee; }
-.brand-kit-sub { display: flex; align-items: center; gap: 6px; margin-top: 5px; flex-wrap: wrap; }
-.brand-kit-sponsor { height: 18px; max-width: 64px; object-fit: contain; background: var(--white-a08);
+.brand-kit-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.brand-kit-name-txt { font-weight: 700; font-size: 14px; color: #e6e8ee; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brand-kit-live { flex: 0 0 auto; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+  color: #04210f; background: #22c55e; border-radius: 4px; padding: 2px 6px; }
+.brand-kit-meta { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+/* Sponsors stay on ONE line; a long list is clipped rather than growing the card. */
+.brand-kit-sub { display: flex; align-items: center; gap: 6px; margin-top: 7px; flex-wrap: nowrap; overflow: hidden; }
+.brand-kit-sponsor { flex: 0 0 auto; height: 20px; max-width: 70px; object-fit: contain; background: var(--white-a08);
   border-radius: 3px; padding: 1px 4px; }
-.brand-kit-sponsor-txt { font-size: 10px; font-weight: 600; color: #c9cedb; background: var(--white-a08);
+.brand-kit-sponsor-txt { flex: 0 0 auto; white-space: nowrap; font-size: 10px; font-weight: 600; color: #c9cedb; background: var(--white-a08);
   border-radius: 3px; padding: 2px 7px; }
 .brand-kit-sub-empty { font-size: 11px; color: var(--muted); font-style: italic; }
 .brand-kit-pkg { width: auto; min-width: 130px; font-size: 11px; padding: 4px 8px; }
+/* Per-kit More menu (capture, duplicate, export, banner URL, delete). */
+.bk-more { position: relative; }
+.bk-more > summary { list-style: none; }
+.bk-more > summary::-webkit-details-marker { display: none; }
+.bk-more-sum::after { content: ''; display: inline-block; margin-left: 6px; border: 4px solid transparent; border-top-color: currentColor; transform: translateY(2px); }
+.bk-more-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 190px; display: flex; flex-direction: column;
+  padding: 5px; background: var(--surface2); border: 1px solid var(--border); border-radius: 9px; box-shadow: 0 14px 34px rgba(0,0,0,.5); }
+.bk-more-item { display: block; width: 100%; text-align: left; border: 0; background: transparent; color: var(--text); font: inherit;
+  font-size: 12.5px; padding: 8px 10px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+.bk-more-item:hover { background: var(--white-a08); }
+.bk-more-item.is-danger { color: #f87171; }
+.bk-more-item.is-danger:hover { background: rgba(248,113,113,.12); }
+.bk-more-sep { height: 1px; background: var(--border); margin: 4px 2px; }
 
 /* ═══════════ Go Live rail — compact live-state triggers ═══════════ */
 .gl-tip { font-size: 11px; color: var(--muted); line-height: 1.5; margin: 2px 0 10px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -5409,6 +5444,19 @@ span.lg-pl-role { color: var(--muted); }
 .tm-fields { min-width: 0; }
 
 /* ════════════════════════════ Replays — Staging Area ════════════════════════════ */
+.rp-capture-strip {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 12px; margin-bottom: 12px;
+  background: var(--surface2); border: 1px solid var(--border); border-radius: 10px;
+}
+.rp-capture-strip .dmobs-pill { white-space: nowrap; }
+.rp-capture-btn { font-weight: 700; padding: 8px 18px; font-size: 13px; letter-spacing: .02em; }
+.rp-capture-status { font-size: 12px; color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 360px; }
+.rp-flow-steps { display: flex; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: rpstep; font-size: 11px; color: var(--muted); }
+.rp-flow-steps li { counter-increment: rpstep; white-space: nowrap; }
+.rp-flow-steps li::before { content: counter(rpstep); display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: 4px; border-radius: 50%; background: var(--surface3, #222631); font-weight: 700; font-size: 10px; color: var(--text); }
+.rp-step-num { display: inline-grid; place-items: center; width: 17px; height: 17px; margin-right: 5px; border-radius: 50%; background: var(--cp-accent, #7C3AED); color: #fff; font-size: 10px; font-weight: 800; vertical-align: 1px; }
+@media (max-width: 900px) { .rp-flow-steps { display: none; } .rp-capture-status { max-width: 100%; flex-basis: 100%; } }
 .rp-staging-hdr {
   display: flex; align-items: center; justify-content: space-between;
   padding: 8px 10px 7px; border-bottom: 1px solid var(--border);
@@ -6116,173 +6164,8 @@ span.lg-pl-role { color: var(--muted); }
 .ed-checklist a { color: var(--cp-accent-2); text-decoration: none; }
 .ed-checklist a:hover { text-decoration: underline; }
 
-/* ── Seeding studio — sidebar layout ───────────────────────────────── */
-.seed-titlebar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 14px; background: var(--surface2); border: 1px solid var(--border); border-bottom: none; border-radius: 12px 12px 0 0; }
-.seed-titlebar-left  { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; overflow: hidden; }
-.seed-titlebar-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.seed-topbar-title { font-size: 14px; font-weight: 800; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.seed-topbar-chip { font-size: 10px; font-weight: 700; padding: 2px 9px; border-radius: 10px; background: rgba(124,58,237,.12); border: 1px solid rgba(124,58,237,.25); color: var(--cp-accent); white-space: nowrap; flex-shrink: 0; }
-.seed-conn-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--muted); transition: background .3s, box-shadow .3s; }
-.seed-conn-dot.ok  { background: #34d399; box-shadow: 0 0 0 3px rgba(52,211,153,.18); }
-.seed-conn-dot.err { background: #f87171; }
-/* Status bar */
-.seed-statusbar { display: flex; align-items: center; gap: 12px; padding: 4px 14px; border: 1px solid var(--border); border-top: none; border-bottom: none; background: rgba(0,0,0,.18); min-height: 24px; }
-.seed-orderby { font-size: 11px; font-style: italic; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px; }
-.seed-status  { font-size: 11px; color: var(--muted); }
-/* ── Auto-seed bar — the front door ───────────────────────────────────────────
-   Placements seed the board; the options here only decide what happens to teams that have
-   no tournament history. Everything else (rank systems, review queue, manual sorts) lives
-   behind Advanced, which hides the whole sidebar + tab bar when off. */
-.seed-autobar { border: 1px solid var(--border); border-top: none; border-bottom: none; background: linear-gradient(180deg, rgba(124,58,237,.10), rgba(124,58,237,.03)); padding: 9px 14px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-.seed-autobar-main { display: flex; align-items: center; gap: 11px; flex: 1 1 320px; min-width: 0; }
-.seed-auto-summary { font-size: 11px; color: var(--muted); line-height: 1.45; min-width: 0; }
-.seed-auto-summary b { color: #fff; font-weight: 700; }
-.seed-auto-summary .seed-auto-warn { color: #fbbf24; }
-.seed-autobar-opts { display: flex; align-items: center; gap: 12px; flex-shrink: 0; flex-wrap: wrap; }
-.seed-sig { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); cursor: pointer; white-space: nowrap; }
-.seed-sig input { margin: 0; cursor: pointer; }
-.seed-sig-sel select { font-size: 11px; padding: 2px 6px; height: 24px; }
-.seed-sig.is-off { opacity: .5; }
-/* Verified / Unverified tab bar */
-.seed-tab-bar { display: flex; border: 1px solid var(--border); border-top: none; border-bottom: none; background: var(--surface2); padding: 0 14px; }
-/* Advanced off — the manual toolkit collapses away and the board runs full width. */
-#seeding-studio.seed-adv-off .seed-tab-bar,
-#seeding-studio.seed-adv-off .seed-sidebar { display: none; }
-#seeding-studio.seed-adv-off .seed-studio-layout { border-top: 1px solid var(--border); }
-#seed-adv-toggle.is-on { color: #fff; background: rgba(124,58,237,.22); border-color: rgba(124,58,237,.45); }
-.seed-tab { background: none; border: none; border-bottom: 2px solid transparent; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .04em; padding: 7px 14px; cursor: pointer; transition: color .12s, border-color .12s; }
-.seed-tab:hover { color: #fff; }
-.seed-tab.active { color: #fff; border-bottom-color: var(--cp-accent); }
-/* Unverified panel — mirrors seed-studio-layout */
-.seed-unverified-panel { display: flex; border: 1px solid var(--border); border-top: none; border-radius: 0 0 12px 12px; overflow: hidden; min-height: 500px; max-height: calc(100vh - 200px); }
-.seed-unv-sidebar { border-radius: 0 0 0 12px; }
-.seed-unv-badge { flex: 0 0 auto; font-size: 11px; font-weight: 700; background: rgba(239,68,68,.18); color: #f87171; border-radius: 6px; padding: 2px 7px; }
-.seed-unv-verified-badge { flex: 0 0 auto; font-size: 11px; font-weight: 700; background: rgba(34,197,94,.15); color: var(--ok-2); border-radius: 6px; padding: 2px 7px; }
-.seed-unv-player { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; background: var(--surface3); border-radius: 8px; margin-top: 6px; }
-.seed-unv-player-ranked { opacity: .48; }
-.seed-unv-player-top { display: flex; align-items: center; gap: 8px; }
-.seed-unv-prank { flex: 0 0 110px; min-width: 0; }
-.seed-unv-sortbtn.active { background: var(--cp-accent) !important; border-color: var(--cp-accent) !important; color: #fff !important; }
-/* Tracker.gg lookup row (platform selector + username input + Rank button) */
-.seed-tg-row { display: flex; align-items: center; gap: 5px; margin-top: 4px; }
-.seed-tg-plat-sel { flex: 0 0 72px; background: var(--input-bg, var(--white-a06)); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 12px; padding: 3px 6px; }
-.seed-tg-id-inp { flex: 1 1 0; min-width: 0; font-size: 12px !important; padding: 3px 8px !important; height: 26px !important; }
-/* tracker.gg result block */
-.seed-tg-result { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 4px; padding: 5px 8px; background: var(--white-a04); border-radius: 6px; font-size: 12px; border-left: 2px solid rgba(99,102,241,.4); }
-.seed-tg-result.seed-tg-err { color: #f87171; font-style: italic; border-left-color: rgba(248,113,113,.4); }
-.seed-tg-tier { font-weight: 800; color: #fff; }
-.seed-tg-mmr { color: var(--cp-accent); font-weight: 700; }
-.seed-tg-6mmap { font-size: 11px; color: var(--muted); }
-.seed-tg-playlist { font-size: 10px; color: var(--muted); }
-/* rl6mans.com lookup result */
-.seed-6m-result { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 4px; padding: 5px 8px; background: var(--white-a04); border-radius: 6px; font-size: 12px; }
-.seed-6m-result.seed-6m-err { color: #f87171; font-style: italic; }
-.seed-6m-rank { font-weight: 800; color: #fff; }
-.seed-6m-elo { color: var(--cp-accent); font-weight: 700; }
-.seed-6m-region { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
-.seed-6m-record { font-size: 11px; color: var(--muted); }
-/* Two-pane layout */
-.seed-studio-layout { display: flex; border: 1px solid var(--border); border-top: none; border-radius: 0 0 12px 12px; overflow: hidden; min-height: 500px; max-height: calc(100vh - 200px); }
-.seed-sidebar { width: 200px; flex-shrink: 0; border-right: 1px solid var(--border); overflow-y: auto; background: var(--surface2); display: flex; flex-direction: column; scrollbar-width: thin; }
-.seed-main-col { flex: 1; min-width: 0; overflow-y: auto; padding: 10px; background: var(--bg); }
-/* Sidebar sections */
-.seed-sb-sec { padding: 10px 12px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 5px; }
-.seed-sb-sec:last-child { border-bottom: none; }
-.seed-sb-hd { font-size: 8.5px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); padding-bottom: 2px; }
-.seed-sb-lbl { font-size: 10px; color: var(--muted); line-height: 1.2; }
-/* Numbered workflow steps — the sidebar reads top-to-bottom as the actual job:
-   load -> resolve -> review -> settings -> order. */
-.seed-sb-hd { display: flex; align-items: center; gap: 6px; }
-.seed-sb-step { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px;
-  border-radius: 50%; background: rgba(139,92,246,.18); color: #a78bfa; border: 1px solid rgba(139,92,246,.4);
-  font-size: 8px; font-weight: 800; letter-spacing: 0; flex: 0 0 auto; }
-.seed-sb-check { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--muted); cursor: pointer; }
-.seed-sb-check input { margin: 0; cursor: pointer; }
-/* Advanced — collapsed by default; the things you set once, not every event. */
-.seed-sb-adv > summary { cursor: pointer; list-style: none; user-select: none; }
-.seed-sb-adv > summary::-webkit-details-marker { display: none; }
-.seed-sb-adv > summary::after { content: '▸'; margin-left: auto; font-size: 9px; opacity: .7; }
-.seed-sb-adv[open] > summary::after { content: '▾'; }
-.seed-sb-adv[open] { gap: 5px; }
-
-/* ── Identity gate (seeding step 2) ────────────────────────────────────────
-   A gamertag is not a person. These are the surfaces that say how sure we are who each player is:
-   an inline badge on any player we can't fully vouch for, and the triage modal where the producer
-   settles the ambiguous ones. */
-.seed-ident-badge {
-  display: inline-flex; align-items: center; margin-left: 6px; padding: 1px 6px;
-  border-radius: 8px; font-size: 9px; font-weight: 700; letter-spacing: .3px;
-  border: 1px solid currentColor; background: rgba(255,255,255,.04);
-}
-.seed-ident-warn   { color: #d69e2e; }
-.seed-ident-rename { color: #4299e1; font-size: 10px; }
-
-.si-tab-btn {
-  padding: 8px 14px; background: none; border: none; border-bottom: 2px solid transparent;
-  color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer;
-}
-.si-tab-btn.active { border-bottom-color: var(--cp-accent); color: var(--text); }
-
-.si-empty { padding: 28px 16px; text-align: center; color: var(--muted); font-size: 12px; }
-.si-row {
-  display: grid; grid-template-columns: 1.1fr 1.6fr auto; gap: 12px; align-items: start;
-  padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 12px;
-}
-.si-row-review { grid-template-columns: 1fr; gap: 8px; }
-.si-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.si-main > b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.si-team  { font-size: 10px; color: var(--muted); }
-.si-match { color: var(--text); }
-.si-muted { color: var(--muted); }
-.si-on    { color: var(--muted); font-size: 10px; }
-.si-contested { color: #e53e3e; font-size: 10px; font-weight: 600; }
-.si-check { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); }
-
-.si-tier { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 2px 7px; border-radius: 8px; align-self: center; }
-.si-tier-verified   { color: #48bb78; background: rgba(72,187,120,.13); }
-.si-tier-probable   { color: #d69e2e; background: rgba(214,158,46,.13); }
-.si-tier-unverified { color: #718096; background: rgba(113,128,150,.13); }
-.si-tier-conflicted { color: #e53e3e; background: rgba(229,62,62,.13); }
-
-/* Candidate picker — one row per possible human, so the choice is explicit rather than a guess */
-.si-cands { display: flex; flex-direction: column; gap: 4px; }
-.si-cand {
-  display: grid; grid-template-columns: auto 1fr 1.2fr auto; gap: 9px; align-items: center;
-  padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
-  background: rgba(255,255,255,.02);
-}
-.si-cand:hover   { background: rgba(255,255,255,.05); }
-.si-cand-sel     { border-color: var(--cp-accent); background: rgba(66,153,225,.09); }
-.si-cand-name    { font-weight: 600; }
-.si-cand-meta    { color: var(--muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.si-cand-score   { color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
-
-@media (max-width: 720px) {
-  .si-row  { grid-template-columns: 1fr; }
-  .si-cand { grid-template-columns: auto 1fr; row-gap: 2px; }
-  .si-cand-meta, .si-cand-score { grid-column: 2; }
-}
-
-/* Review queue — how much of the field is settled, and how much still wants a human */
-.seed-review-stat { display: flex; flex-direction: column; gap: 4px; }
-.seed-review-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: rgba(255,255,255,.07); }
-.seed-review-bar > span { display: block; }
-.seed-review-ok   { background: #48bb78; }
-.seed-review-warn { background: #d69e2e; }
-.seed-review-ovr  { background: #a78bfa; }
-.seed-review-nums { font-size: 10px; color: var(--muted); line-height: 1.4; }
-.seed-review-nums b { color: #d69e2e; }
-.seed-review-ovr-txt { color: #a78bfa; }
-.seed-review-none { font-size: 10px; color: var(--muted); font-style: italic; }
-/* A player auto couldn't stand behind — muted amber, quieter than an override */
-.seed-player-review { border-color: rgba(214,158,46,.45); }
-.seed-sb-btn { width: 100%; text-align: left; }
-.seed-sortbtn.is-on, #seed-unv-showall-btn.is-on { background: var(--cp-accent) !important; border-color: var(--cp-accent) !important; color: #fff !important; }
-/* Seeding list */
-.seed-list { display: flex; flex-direction: column; gap: 5px; }
-.seed-empty { font-size: 12.5px; color: var(--muted); font-style: italic; padding: 20px; text-align: center; }
 .seed-sel { font-size: 12px; padding: 4px 7px; max-width: 190px; }
-/* CSV column-mapping modal */
+/* Modal shell (used by the Challonge link / sync modals; class names predate them) */
 .seed-csv-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 9000; display: flex; align-items: center; justify-content: center; }
 .seed-csv-backdrop[hidden] { display: none; }
 .seed-csv-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 22px; width: 620px; max-width: 96vw; display: flex; flex-direction: column; gap: 16px; box-shadow: 0 24px 64px rgba(0,0,0,.65); }
@@ -6297,107 +6180,12 @@ span.lg-pl-role { color: var(--muted); }
 .seed-csv-foot { display: flex; align-items: center; gap: 12px; }
 .seed-csv-remember { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; flex: 1; user-select: none; }
 .seed-csv-remember input { accent-color: var(--cp-accent); }
-/* CSV modal match preview */
-.seed-csv-prev { border-radius: 8px; padding: 10px 13px; font-size: 11.5px; }
-.seed-csv-prev-ok   { background: rgba(34,197,94,.07); border: 1px solid rgba(34,197,94,.22); }
-.seed-csv-prev-warn { background: rgba(239,68,68,.07); border: 1px solid rgba(239,68,68,.22); }
-.seed-csv-prev-idle { background: var(--white-a04); border: 1px solid var(--border); color: var(--muted); font-size: 11px; font-style: italic; text-align: center; padding: 8px; border-radius: 8px; }
-.seed-csv-prev-entry-build { font-size: 11.5px; color: var(--text); padding: 2px 0; }
-.seed-csv-prev-lbl  { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; display: block; margin-bottom: 7px; opacity: .8; }
-.seed-csv-prev-ok   .seed-csv-prev-lbl { color: var(--ok-2); }
-.seed-csv-prev-warn .seed-csv-prev-lbl { color: #f87171; }
-/* match preview table */
-.seed-csv-prev-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
-.seed-csv-prev-table th { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding: 0 10px 6px 0; text-align: left; border-bottom: 1px solid rgba(255,255,255,.1); }
-.seed-csv-prev-table td { padding: 5px 10px 5px 0; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.seed-csv-prev-table tr:not(:last-child) td { border-bottom: 1px solid var(--white-a04); }
-.seed-csv-prev-table .pcol-row { width: 30px; color: var(--muted); font-size: 9.5px; }
-.seed-csv-prev-table .pcol-gamer { width: 36%; }
-.seed-csv-prev-table .pcol-team  { width: 36%; }
-.seed-csv-prev-table .pcol-rank  { width: 58px; text-align: center; }
-.pcell-csv  { color: rgba(255,255,255,.55); }
-.pcell-arr  { color: var(--muted); margin: 0 4px; font-size: 10px; }
-.pcell-sgg  { color: var(--ok-2); font-weight: 600; }
-.pcell-rank-badge { display: inline-block; background: rgba(124,58,237,.14); border: 1px solid rgba(124,58,237,.3); color: var(--cp-accent); font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 4px; }
-.pcell-rank-none  { color: var(--muted); font-size: 10px; font-style: italic; }
-/* no-match detail rows */
-.seed-csv-prev-rows { display: flex; flex-direction: column; gap: 4px; }
-.seed-csv-prev-row  { display: grid; grid-template-columns: 80px 1fr; align-items: center; gap: 6px; }
-.seed-csv-prev-field { font-size: 10px; color: var(--muted); white-space: nowrap; }
-.seed-csv-prev-val   { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.seed-csv-prev-sgg   { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.seed-csv-prev-warn .seed-csv-prev-sgg { color: #f87171; opacity: .8; }
-.seed-csv-prev-unmatched { font-size: 10.5px; color: #f87171; opacity: .7; margin-top: 7px; padding-top: 7px; border-top: 1px solid rgba(255,255,255,.07); }
 
 /* My Events — live-sync badge */
 .me-meta { margin-top: 4px; }
 .me-sync { font-size: 10px; font-weight: 700; letter-spacing: .02em; color: #34d399; }
 .me-sync.me-sync-wait { color: var(--muted); }
 .me-sync.me-sync-err { color: #f87171; }
-
-/* Seeding studio — team cards (team → players → per-player rank) */
-.seed-team { background: var(--surface2); border: 1px solid var(--border); border-radius: 11px; padding: 9px 12px 11px; cursor: grab; transition: border-color .12s, background .12s; }
-.seed-team.dragging { opacity: .45; }
-.seed-team.drag-over { border-color: var(--cp-accent); background: #232833; }
-.seed-team-head { display: flex; align-items: center; gap: 10px; }
-.seed-team-name { flex: 1; min-width: 0; font-size: 14px; font-weight: 800; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.seed-tv { flex: 0 0 auto; font-size: 13px; font-weight: 900; font-variant-numeric: tabular-nums; color: #fff; background: var(--cp-accent); border-radius: 7px; padding: 2px 9px; min-width: 30px; text-align: center; }
-.seed-tv.seed-tv-empty { background: transparent; color: var(--muted); border: 1px dashed var(--border); }
-.seed-perf-badge { flex: 0 0 auto; font-size: 10px; font-weight: 700; color: #63b3ed; background: rgba(66,153,225,0.12); border: 1px solid rgba(66,153,225,0.25); border-radius: 5px; padding: 2px 6px; white-space: nowrap; }
-/* What this team's seed is actually standing on — placements, ranks, or nothing at all. */
-.seed-basis { flex: 0 0 auto; font-size: 9px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; border-radius: 5px; padding: 2px 6px; white-space: nowrap; }
-.seed-basis-placements { color: #6ee7b7; background: rgba(16,185,129,.12); border: 1px solid rgba(16,185,129,.28); }
-.seed-basis-ranks      { color: #a78bfa; background: rgba(139,92,246,.12); border: 1px solid rgba(139,92,246,.30); }
-.seed-basis-none       { color: var(--muted); background: var(--white-a04); border: 1px solid var(--border); }
-.seed-players-wrap { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 6px; margin-top: 9px; }
-/* Two-row cell: gamertag + chips on top, rank input full-width below — so the name never gets
-   squeezed to nothing by the profile/confidence chips in a narrow column. */
-.seed-player { display: flex; flex-direction: column; align-items: stretch; gap: 5px; background: var(--surface); border: 1px solid var(--border); border-radius: 7px; padding: 6px 8px; }
-.seed-player-id { display: flex; align-items: center; gap: 5px; min-width: 0; }
-.seed-ptag { flex: 1 1 auto; min-width: 40px; font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.seed-player .seed-prank { flex: 0 0 auto; width: 100%; }
-.seed-prank { flex: 0 0 92px; font-size: 12px; padding: 4px 7px; cursor: text; }
-/* Rank-alert animations — flags ranks that warrant a double-check before finalising seeds */
-@keyframes seed-flag-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 transparent; border-color: rgba(245,158,11,.5); }
-  50%       { box-shadow: 0 0 0 3px rgba(245,158,11,.25); border-color: rgba(245,158,11,.9); }
-}
-@keyframes seed-flag-high-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 transparent; border-color: rgba(6,182,212,.55); }
-  50%       { box-shadow: 0 0 0 3px rgba(6,182,212,.28); border-color: rgba(6,182,212,1); }
-}
-.seed-prank-flag      { animation: seed-flag-pulse      2.4s ease-in-out infinite; }
-.seed-prank-flag-high { animation: seed-flag-high-pulse 2s   ease-in-out infinite; }
-.seed-noplayers { grid-column: 1 / -1; font-size: 11.5px; font-style: italic; color: var(--muted); padding: 4px 2px; }
-
-/* Manual override — the producer's own call. Deliberately the loudest state on a player card: it is
-   the one rank auto-resolve is not allowed to touch, so it must be obvious at a glance. */
-.seed-player-ovr { border-color: rgba(167,139,250,.55); background: linear-gradient(180deg, rgba(167,139,250,.10), transparent 60%); }
-.seed-prank-ovr { border-color: rgba(167,139,250,.7) !important; color: #c4b5fd; font-weight: 700; }
-
-/* "why" — opens the derivation panel for one player */
-.seed-why-btn { flex: 0 0 auto; background: transparent; border: 1px solid var(--border); color: var(--muted);
-  font-size: 9px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; padding: 1px 5px;
-  border-radius: 6px; cursor: pointer; line-height: 1.5; }
-.seed-why-btn:hover { color: var(--text); border-color: var(--muted); }
-.seed-why-btn.open { color: #a78bfa; border-color: rgba(167,139,250,.6); background: rgba(167,139,250,.12); }
-.seed-why { margin-top: 4px; padding: 7px 8px; background: rgba(0,0,0,.22); border: 1px solid var(--border);
-  border-radius: 6px; font-size: 10.5px; line-height: 1.5; }
-.seed-why-tbl { width: 100%; border-collapse: collapse; }
-.seed-why-tbl th { text-align: left; font-size: 9px; text-transform: uppercase; letter-spacing: .4px;
-  color: var(--muted); font-weight: 700; padding: 0 6px 3px 0; border-bottom: 1px solid var(--border); }
-.seed-why-tbl td { padding: 3px 6px 3px 0; vertical-align: middle; white-space: nowrap; }
-.seed-why-src { font-weight: 700; text-transform: uppercase; font-size: 9px; letter-spacing: .3px; }
-/* Pull bar — how much each source actually moved the blend */
-.seed-why-bar { display: inline-block; width: 42px; height: 5px; margin-right: 5px; border-radius: 3px;
-  background: rgba(255,255,255,.09); overflow: hidden; vertical-align: middle; }
-.seed-why-bar > span { display: block; height: 100%; border-radius: 3px; }
-.seed-why-sub { margin-top: 5px; color: var(--muted); font-size: 10px; line-height: 1.55; }
-.seed-why-empty { color: var(--muted); font-style: italic; }
-.seed-why-override { padding: 6px 8px; margin-bottom: 6px; border-radius: 5px; color: #ddd6fe;
-  background: rgba(167,139,250,.14); border: 1px solid rgba(167,139,250,.4); }
-.seed-why-override .seed-why-sub { color: rgba(221,214,254,.75); }
-.seed-why-revert { margin-top: 5px; }
 
 /* Events page — hero */
 .ev-detail-section { background: var(--surface); }
@@ -8798,29 +8586,151 @@ body.perf-noanim *, body.perf-noanim *::before, body.perf-noanim *::after {
 .dcc-slot-toggle { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; font-size: 11px; font-weight: 600; color: var(--muted); cursor: pointer; margin-left: auto; flex-shrink: 0; }
 .dcc-slot-toggle input { width: 15px; height: 15px; cursor: pointer; accent-color: #e83a8b; }
 
-/* ── Guided walkthrough / new-user tour (tour.js) ── */
-.tour-overlay { display: none; position: fixed; inset: 0; z-index: 100000; }
-.tour-overlay.show { display: block; }
+/* ── Walkthroughs (tour.js + tour-steps.js) ──
+   .tour-root holds the coach-mark layer: four transparent shades that swallow clicks around the
+   spotlight, a cover over the spotlight itself (lifted on "try it" steps), the spotlight whose huge
+   box-shadow does the dimming, and the card. .tourhub is the chapter library. */
+.tour-root { display: none; position: fixed; inset: 0; z-index: 100050; pointer-events: none; }
+.tour-root.show { display: block; }
+.tour-shade, .tour-cover { position: fixed; pointer-events: auto; background: transparent; }
+.tour-root.is-try .tour-cover { pointer-events: none; }
 .tour-hl {
-  position: fixed; border-radius: 8px; pointer-events: none;
-  box-shadow: 0 0 0 9999px rgba(6, 8, 12, 0.74), 0 0 0 2px var(--cp-accent, var(--cp-accent)), 0 0 22px rgba(124,58,237, 0.5);
-  transition: left .22s cubic-bezier(.4,0,.2,1), top .22s cubic-bezier(.4,0,.2,1), width .22s cubic-bezier(.4,0,.2,1), height .22s cubic-bezier(.4,0,.2,1);
+  position: fixed; border-radius: 10px; pointer-events: none;
+  box-shadow: 0 0 0 9999px rgba(5, 6, 10, .72), 0 0 0 2px var(--cp-accent, #7c3aed), 0 0 26px rgba(124, 58, 237, .45);
+  transition: left .24s cubic-bezier(.4,0,.2,1), top .24s cubic-bezier(.4,0,.2,1), width .24s cubic-bezier(.4,0,.2,1), height .24s cubic-bezier(.4,0,.2,1);
 }
+.tour-root.is-center .tour-hl { box-shadow: 0 0 0 9999px rgba(5, 6, 10, .72); }
+.tour-root.is-try .tour-hl::after {
+  content: ""; position: absolute; inset: -2px; border-radius: inherit;
+  border: 2px solid var(--cp-accent, #7c3aed); animation: tour-ping 1.6s ease-out infinite;
+}
+@keyframes tour-ping { 0% { opacity: .9; transform: scale(1); } 100% { opacity: 0; transform: scale(1.12); } }
+
 .tour-tip {
-  position: fixed; width: 340px; max-width: calc(100vw - 24px);
-  background: #14161d; border: 1px solid var(--white-a12); border-radius: 12px;
-  padding: 16px 18px 14px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6); color: #e8eaf0;
-  transition: left .2s ease, top .2s ease;
+  position: fixed; width: 360px; max-width: calc(100vw - 24px); pointer-events: auto;
+  background: var(--surface, #1a1a22); color: var(--text, #f0f0ff);
+  border: 1px solid var(--border, rgba(255,255,255,.14)); border-radius: 14px;
+  padding: 14px 16px 14px; box-shadow: 0 24px 64px rgba(0, 0, 0, .6);
+  transition: left .22s cubic-bezier(.4,0,.2,1), top .22s cubic-bezier(.4,0,.2,1), opacity .15s ease;
 }
-.tour-tip-step { font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--cp-accent, var(--cp-accent)); margin-bottom: 6px; }
-.tour-tip-title { font-size: 17px; font-weight: 800; margin: 0 0 6px; }
-.tour-tip-body { font-size: 13px; line-height: 1.5; color: #b9c0d0; margin: 0 0 14px; }
-.tour-tip-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.tour-root.is-busy .tour-tip { opacity: 0; pointer-events: none; }
+.tour-tip.is-nudge { animation: tour-nudge .35s ease; }
+@keyframes tour-nudge { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+.tour-tip-arrow {
+  position: absolute; width: 12px; height: 12px; background: inherit;
+  border: 1px solid var(--border, rgba(255,255,255,.14)); transform: rotate(45deg); display: none;
+}
+.tour-tip[data-side="right"] .tour-tip-arrow  { display: block; left: -7px;  margin-top: -6px; border-top: 0; border-right: 0; }
+.tour-tip[data-side="left"] .tour-tip-arrow   { display: block; right: -7px; margin-top: -6px; border-bottom: 0; border-left: 0; }
+.tour-tip[data-side="bottom"] .tour-tip-arrow { display: block; top: -7px;   margin-left: -6px; border-right: 0; border-bottom: 0; }
+.tour-tip[data-side="top"] .tour-tip-arrow    { display: block; bottom: -7px; margin-left: -6px; border-left: 0; border-top: 0; }
+.tour-tip-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.tour-tip-chapter { font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--cp-accent, #7c3aed); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tour-tip-count { font-size: 11px; font-weight: 600; color: var(--muted, #9a9ac2); margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tour-x {
+  width: 26px; height: 26px; margin: -4px -6px -4px 0; border-radius: 7px; border: 0; cursor: pointer;
+  background: transparent; color: var(--muted, #9a9ac2); display: inline-flex; align-items: center; justify-content: center;
+}
+.tour-x:hover { background: var(--white-a08, rgba(255,255,255,.08)); color: var(--text, #f0f0ff); }
+.tour-tip-progress { height: 3px; border-radius: 3px; background: var(--white-a08, rgba(255,255,255,.08)); overflow: hidden; margin-bottom: 12px; }
+.tour-tip-progress > span { display: block; height: 100%; background: var(--cp-accent, #7c3aed); border-radius: inherit; transition: width .25s ease; }
+.tour-tip-title { font-size: 17px; font-weight: 800; line-height: 1.25; margin: 0 0 6px; }
+.tour-tip-body { font-size: 13px; line-height: 1.55; color: #c3c6d8; margin: 0 0 12px; }
+.tour-tip-hint {
+  display: flex; align-items: center; gap: 8px; margin: -2px 0 12px; padding: 8px 10px; border-radius: 8px;
+  font-size: 12.5px; font-weight: 700; color: var(--text, #f0f0ff);
+  background: rgba(124, 58, 237, .16); border: 1px solid rgba(124, 58, 237, .35);
+}
+.tour-tip-hint-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--cp-accent, #7c3aed); animation: tour-blink 1.2s ease-in-out infinite; }
+@keyframes tour-blink { 50% { opacity: .3; } }
+.tour-tip-continue {
+  display: flex; align-items: center; gap: 6px; width: 100%; margin: 0 0 12px; padding: 9px 12px; border-radius: 9px;
+  font: inherit; font-size: 12.5px; color: var(--text, #f0f0ff); text-align: left; cursor: pointer;
+  background: var(--white-a06, rgba(255,255,255,.06)); border: 1px solid var(--border, rgba(255,255,255,.14));
+}
+.tour-tip-continue strong { font-weight: 800; }
+.tour-tip-continue span { margin-left: auto; font-size: 18px; line-height: 1; color: var(--muted, #9a9ac2); }
+.tour-tip-continue:hover { border-color: var(--cp-accent, #7c3aed); }
+.tour-tip-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .tour-tip-nav { display: flex; gap: 8px; }
-.tour-btn { font: inherit; font-size: 13px; font-weight: 600; padding: 7px 14px; border-radius: 7px; cursor: pointer; border: 1px solid rgba(255, 255, 255, 0.14); background: var(--white-a06); color: #e8eaf0; }
-.tour-btn:hover { background: var(--white-a12); }
-.tour-btn.tour-next { background: var(--cp-accent, var(--cp-accent)); border-color: transparent; color: #fff; }
-.tour-btn.tour-skip { border-color: transparent; background: transparent; color: var(--muted, #8a92a6); padding-left: 0; }
+.tour-btn {
+  font: inherit; font-size: 13px; font-weight: 600; padding: 7px 14px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--border, rgba(255,255,255,.14)); background: var(--white-a06, rgba(255,255,255,.06)); color: var(--text, #f0f0ff);
+}
+.tour-btn:hover { background: var(--white-a12, rgba(255,255,255,.12)); }
+.tour-btn.tour-primary { background: var(--cp-accent, #7c3aed); border-color: transparent; color: #fff; }
+.tour-btn.tour-primary:hover { filter: brightness(1.1); }
+.tour-btn.tour-link { border-color: transparent; background: transparent; color: var(--muted, #9a9ac2); padding-left: 0; padding-right: 0; }
+.tour-btn.tour-link:hover { color: var(--text, #f0f0ff); background: transparent; text-decoration: underline; }
+.tour-btn:focus-visible, .tour-x:focus-visible, .tour-tip-continue:focus-visible, .tourhub-card:focus-visible, .tourhub-x:focus-visible {
+  outline: 2px solid var(--cp-accent, #7c3aed); outline-offset: 2px;
+}
+/* Phones: the card docks to the top or bottom edge; no arrow. */
+.tour-tip[data-side="dock"] { width: auto; right: 12px; }
+
+/* Hub */
+.tourhub {
+  display: none; position: fixed; inset: 0; z-index: 100045; padding: 5vh 16px; overflow-y: auto;
+  background: rgba(3, 5, 10, .66); align-items: flex-start; justify-content: center;
+}
+.tourhub.show { display: flex; }
+.tourhub-box {
+  width: 100%; max-width: 880px; background: var(--bg, #07070b); color: var(--text, #f0f0ff);
+  border: 1px solid var(--border, rgba(255,255,255,.14)); border-radius: 16px; padding: 22px 22px 16px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, .6);
+}
+.tourhub-head { display: flex; align-items: flex-start; gap: 16px; }
+.tourhub-headtxt { flex: 1; min-width: 0; }
+.tourhub-head h2 { margin: 0 0 4px; font-size: 22px; font-weight: 800; }
+.tourhub-head p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted, #9a9ac2); max-width: 560px; }
+.tourhub-x {
+  flex-shrink: 0; width: 32px; height: 32px; border-radius: 8px; border: 1px solid transparent; cursor: pointer;
+  background: transparent; color: var(--muted, #9a9ac2); display: inline-flex; align-items: center; justify-content: center;
+}
+.tourhub-x:hover { background: var(--white-a08, rgba(255,255,255,.08)); color: var(--text, #f0f0ff); }
+.tourhub-meter { display: flex; align-items: center; gap: 12px; margin: 16px 0 18px; }
+.tourhub-meter-bar { flex: 1; height: 6px; border-radius: 6px; background: var(--white-a08, rgba(255,255,255,.08)); overflow: hidden; }
+.tourhub-meter-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--cp-accent, #7c3aed); transition: width .3s ease; }
+.tourhub-meter-txt { font-size: 12px; font-weight: 700; color: var(--muted, #9a9ac2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tourhub-featured { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.tourhub-featured:empty { display: none; }
+.tourhub-sub { margin: 20px 0 10px; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted, #9a9ac2); }
+.tourhub-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.tourhub-card {
+  display: flex; flex-direction: column; gap: 6px; min-width: 0; text-align: left; cursor: pointer;
+  font: inherit; color: var(--text, #f0f0ff); padding: 12px 14px; border-radius: 12px;
+  background: var(--surface, #1a1a22); border: 1px solid var(--border, rgba(255,255,255,.14));
+  transition: border-color .15s ease, transform .15s ease;
+}
+.tourhub-card:hover { border-color: var(--cp-accent, #7c3aed); transform: translateY(-1px); }
+.tourhub-card.is-featured {
+  padding: 14px 16px; border-color: rgba(124, 58, 237, .45);
+  background: linear-gradient(135deg, rgba(124, 58, 237, .20), rgba(124, 58, 237, .05)), var(--surface, #1a1a22);
+}
+.tourhub-kicker { font-size: 10.5px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--cp-accent, #7c3aed); }
+.tourhub-card-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tourhub-state {
+  width: 18px; height: 18px; flex-shrink: 0; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  border: 2px solid var(--border, rgba(255,255,255,.2));
+}
+.tourhub-card.is-progress .tourhub-state { border-color: var(--cp-accent, #7c3aed); background: linear-gradient(90deg, var(--cp-accent, #7c3aed) 50%, transparent 50%); }
+.tourhub-card.is-done .tourhub-state { border-color: #22c55e; background: #22c55e; color: #06140b; }
+.tourhub-card-title { font-size: 14.5px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tourhub-card.is-featured .tourhub-card-title { font-size: 16px; }
+.tourhub-card-sum { font-size: 12.5px; line-height: 1.45; color: var(--muted, #9a9ac2); }
+.tourhub-card-meta { display: flex; align-items: center; gap: 8px; width: 100%; margin-top: auto; padding-top: 4px; font-size: 11.5px; color: var(--muted, #9a9ac2); }
+.tourhub-card-go { margin-left: auto; font-weight: 800; color: var(--cp-accent, #7c3aed); white-space: nowrap; }
+.tourhub-card.is-done .tourhub-card-go { color: var(--muted, #9a9ac2); }
+.tourhub-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border, rgba(255,255,255,.1)); }
+.tourhub-keys { font-size: 12px; color: var(--muted, #9a9ac2); }
+@media (max-width: 640px) {
+  .tourhub { padding: 0; }
+  .tourhub-box { border-radius: 0; min-height: 100%; padding: 18px 16px 14px; border: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tour-hl, .tour-tip, .tourhub-card, .tour-tip-progress > span { transition: none; }
+  .tour-root.is-try .tour-hl::after, .tour-tip-hint-dot, .tour-tip.is-nudge { animation: none; }
+}
 
 /* ── Dashboard tour CTA banner ── */
 .dash-tour-cta {
@@ -9160,6 +9070,18 @@ body.perf-noanim *, body.perf-noanim *::before, body.perf-noanim *::after {
 .int-card-body { padding-top: 2px; }
 .int-card { padding-top: 18px; }
 
+/* ════════ Marketplace ▸ Plugins ════════ */
+.mkt-hero { border: 1px solid var(--border); border-radius: 16px; padding: 26px 28px; margin: 2px 0 18px;
+  background: linear-gradient(135deg, var(--white-a06, rgba(255,255,255,.06)), var(--white-a02, rgba(255,255,255,.02))); }
+.mkt-hero-body { max-width: 680px; }
+.mkt-soon { display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
+  padding: 3px 10px; border-radius: 999px; color: #93c5fd; background: rgba(96,165,250,.1); border: 1px solid rgba(96,165,250,.3); }
+.mkt-hero-title { margin: 10px 0 6px; font-size: 22px; font-weight: 800; color: var(--text, #e8eaf0); }
+.mkt-hero-text { margin: 0; font-size: 13px; line-height: 1.6; color: var(--muted); }
+.mkt-empty { padding: 22px 16px; border: 1px dashed var(--border); border-radius: 12px; text-align: center; font-size: 13px; color: var(--muted); }
+.int-card.mkt-cat { cursor: default; }
+.int-card.mkt-cat:hover { transform: none; border-color: var(--border); }
+
 /* "How do I get this?" key helpers */
 .int-keyhelp { margin-top: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--white-a03, rgba(255,255,255,.03)); }
 .int-keyhelp summary { cursor: pointer; padding: 8px 12px; font-size: 12px; font-weight: 700; color: var(--cp-accent, #7C3AED); list-style: none; }
@@ -9336,21 +9258,15 @@ body.perf-noanim *, body.perf-noanim *::before, body.perf-noanim *::after {
 .cf-slot-name:focus { border-color:var(--cp-accent); background:var(--surface); }
 .cf-slot-live { flex:0 0 auto; font-size:8.5px; font-weight:800; letter-spacing:.08em; color:#22c55e; }
 .cf-slot-en { flex:0 0 auto; display:flex; align-items:center; }
+/* Talkback panel picker on a station placement, and the room's handoff button. A placement with
+   no panel hears the whole room; two or more panels in a room unlock the handoff. */
+.cf-slot-panel { flex:0 0 auto; width:96px; font-size:11px; font-weight:700; padding:3px 4px; background:var(--surface); border:1px solid var(--border); color:var(--muted); }
+.cf-slot-panel.has-panel { color:#a78bfa; border-color:rgba(139,92,246,0.45); }
+.cf-handoff.is-on { background:rgba(245,158,11,0.18); color:#f59e0b; border:1px solid rgba(245,158,11,0.45); animation:cfHandoffPulse 1.6s ease-in-out infinite; }
+@keyframes cfHandoffPulse { 0%,100% { opacity:1; } 50% { opacity:0.62; } }
 .switch.sw-xs { transform:scale(.8); transform-origin:center; }
 .cf-danger { color:#f87171 !important; }
 .cf-danger:hover { background:rgba(248,113,113,.12) !important; }
-
-/* Sidebar "More" toggle (nav-simplify.js) — inherits .nav-item layout but reads as a control
-   rather than another page: muted, lighter weight, and set apart by a hairline rule. */
-.nav-more-toggle {
-  opacity: .62;
-  font-weight: 600;
-  margin-top: 4px;
-  border-top: 1px solid var(--white-a05, rgba(255, 255, 255, .05));
-  border-radius: 0 0 8px 8px;
-}
-.nav-more-toggle:hover { opacity: 1; }
-.nav-more-toggle .nav-ico svg { opacity: .8; }
 
 /* ── OBS-style Settings: left category rail + right content pane ───────────── */
 .set-shell { display: flex; gap: 20px; align-items: flex-start; }
@@ -9367,6 +9283,21 @@ body.perf-noanim *, body.perf-noanim *::before, body.perf-noanim *::after {
 .set-rail-btn.active { background: var(--cp-accent); color: #fff; font-weight: 600; }
 .set-content { flex: 1 1 auto; min-width: 0; }
 .set-content > .section:first-child { margin-top: 0; }
+/* Collapsible settings block (Games ▸ Custom game content). */
+.set-fold > summary.set-fold-sum { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; user-select: none; }
+.set-fold > summary.set-fold-sum::-webkit-details-marker { display: none; }
+.set-fold > summary.set-fold-sum::before { content: '▸'; color: var(--muted); font-size: 11px; transition: transform .15s; }
+.set-fold[open] > summary.set-fold-sum::before { transform: rotate(90deg); }
+.set-fold-hint { font-size: 12px; color: var(--muted); }
+/* Games ▸ Game setup. The strip is now the selector for the whole category, so it is a compact tab
+   row, not two rows of 88px tiles — and the per-game blocks sit flat inside the section instead of
+   being a box inside a box, with a rule between consecutive blocks (e.g. RL Stats API → automation). */
+#set-sec-gamesetup .game-tab-row { gap: 6px; padding-bottom: 14px; margin-bottom: 16px; }
+#set-sec-gamesetup .game-tab-btn { flex-direction: row; gap: 8px; padding: 7px 12px; min-width: 0; border-radius: 8px; }
+#set-sec-gamesetup .game-tab-logo { width: 18px; height: 18px; }
+#set-sec-gamesetup .game-tab-name { font-size: 11.5px; letter-spacing: .03em; }
+.gh-body .game-section > .section { background: transparent; border: 0; border-radius: 0; padding: 0; margin: 0 0 18px; }
+.gh-body .game-section > .section + .section { border-top: 1px solid var(--border); padding-top: 18px; }
 /* Settings as an OBS-style modal overlay (main window). In a popped-out window the .as-modal class is
    NOT added, so the box chrome collapses and Settings renders as a normal full page. */
 #tab-ajustes-content.as-modal {
@@ -9420,236 +9351,6 @@ body.perf-noanim *, body.perf-noanim *::before, body.perf-noanim *::after {
   background: var(--white-a05, rgba(255, 255, 255, .05));
   border-color: var(--white-a05, rgba(255, 255, 255, .2));
   color: var(--text, #e8eaf0);
-}
-
-/* ── Seeding cockpit ───────────────────────────────────────────────────────
-   Minimal by default, complete on inspection. The command strip carries the only always-relevant
-   controls; the board carries the decision. Everything else lives behind Setup. */
-.seed-cmd { padding: 10px 14px; border-bottom: 1px solid var(--border); background: rgba(255,255,255,.015); }
-.seed-cmd-row { display: flex; align-items: center; gap: 14px; }
-.seed-cmd-go { min-width: 92px; font-weight: 700; letter-spacing: .02em; }
-.seed-cmd-mid { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
-.seed-cmd-line { font-size: 11.5px; color: var(--text); line-height: 1.45; }
-.seed-cmd-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.seed-auto-warn { color: #d69e2e; }
-
-/* Stage readout — state, not steps */
-.seed-cmd-stages { display: flex; flex-wrap: wrap; gap: 6px; }
-.seed-stage {
-  font-size: 10px; letter-spacing: .02em; padding: 2px 8px; border-radius: 10px;
-  border: 1px solid var(--border); color: var(--muted); white-space: nowrap; cursor: help;
-}
-.seed-stage b { color: var(--text); font-weight: 700; }
-.seed-stage-ok   { border-color: rgba(72,187,120,.35); }
-.seed-stage-ok b { color: #48bb78; }
-.seed-stage-warn { border-color: rgba(214,158,46,.4); }
-.seed-stage-warn b { color: #d69e2e; }
-.seed-stage-idle { opacity: .75; }
-
-/* Skill <-> Results balance */
-.seed-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
-.seed-seg-btn {
-  background: none; border: none; padding: 5px 11px; font-size: 11px; font-weight: 600;
-  color: var(--muted); cursor: pointer; border-right: 1px solid var(--border);
-}
-.seed-seg-btn:last-child { border-right: none; }
-.seed-seg-btn:hover  { background: rgba(255,255,255,.05); color: var(--text); }
-.seed-seg-btn.active { background: var(--cp-accent); color: #fff; }
-#seed-setup-btn.is-on { background: rgba(255,255,255,.09); color: var(--text); }
-
-/* ── Board row ─────────────────────────────────────────────────────────────
-   Collapsed, a row states the whole seeding decision. The per-player rank editor only exists once
-   the row is opened \u2014 24 teams x 3 always-visible rank inputs is what made this unreadable. */
-.seed-team-head {
-  display: grid; grid-template-columns: 18px 30px minmax(0,1fr) minmax(190px, 300px) 16px;
-  align-items: center; gap: 10px; padding: 9px 12px; cursor: pointer;
-}
-.seed-team-head:hover { background: rgba(255,255,255,.03); }
-.seed-num { font-size: 15px; font-weight: 700; color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
-.seed-grip { color: var(--muted); opacity: .45; cursor: grab; font-size: 11px; }
-.seed-id { min-width: 0; }
-.seed-team-name { font-size: 13.5px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.seed-roster { font-size: 10.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
-.seed-roster-none { opacity: .6; font-style: italic; }
-.seed-caret { color: var(--muted); font-size: 10px; opacity: .6; }
-
-.seed-metrics { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; min-width: 0; }
-.seed-power { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; cursor: help; }
-.seed-power-none { color: var(--muted); font-weight: 500; }
-.seed-adj { font-size: 10.5px; font-weight: 700; margin-left: 6px; font-variant-numeric: tabular-nums; cursor: help; }
-.seed-adj.up   { color: #48bb78; }
-.seed-adj.down { color: #e07a5f; }
-.seed-bar { display: block; width: 100%; height: 3px; border-radius: 2px; background: rgba(255,255,255,.08); overflow: hidden; }
-.seed-bar-fill { display: block; height: 100%; background: var(--cp-accent); border-radius: 2px; }
-.seed-sub { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; font-size: 10px; }
-.seed-cf { font-weight: 700; font-variant-numeric: tabular-nums; cursor: help; }
-.seed-warn {
-  color: #d69e2e; border: 1px solid rgba(214,158,46,.35); border-radius: 8px;
-  padding: 0 6px; font-weight: 600; cursor: help;
-}
-.seed-note {
-  color: #4299e1; border: 1px solid rgba(66,153,225,.35); border-radius: 8px;
-  padding: 0 6px; font-weight: 600; cursor: help;
-}
-.seed-team.is-open { background: rgba(255,255,255,.025); }
-.seed-team.is-open .seed-team-head { border-bottom: 1px solid var(--border); }
-
-@media (max-width: 860px) {
-  .seed-cmd-row { flex-wrap: wrap; }
-  .seed-cmd-right { width: 100%; justify-content: space-between; }
-  .seed-team-head { grid-template-columns: 18px 26px minmax(0,1fr) 16px; row-gap: 6px; }
-  .seed-metrics { grid-column: 3; align-items: flex-start; }
-  .seed-sub { justify-content: flex-start; }
-}
-
-/* ── Setup drawer ──────────────────────────────────────────────────────────
-   The sidebar was a 200px column wedged permanently beside the board: too narrow for its own
-   labels, so everything wrapped, and it stole width from the only thing that matters. It is now an
-   overlay panel that slides in on demand. Same markup, same wiring, every control still present —
-   it just stops competing with the board for space. */
-#seeding-studio .seed-studio-layout { display: block; }
-#seeding-studio .seed-main-col { width: 100%; min-width: 0; }
-
-#seeding-studio .seed-sidebar,
-#seeding-studio.seed-adv-off .seed-sidebar {
-  display: flex;
-  position: fixed; top: 0; right: 0; bottom: 0;
-  width: min(390px, 94vw); z-index: 60;
-  padding: 14px 16px 48px; gap: 4px;
-  background: var(--surface2); border-left: 1px solid var(--border); border-right: none;
-  box-shadow: -20px 0 52px rgba(0,0,0,.55);
-  overflow-y: auto; overscroll-behavior: contain;
-  transform: translateX(101%); transition: transform .18s ease;
-}
-#seeding-studio:not(.seed-adv-off) .seed-sidebar { transform: none; }
-
-.seed-setup-backdrop {
-  position: fixed; inset: 0; z-index: 59; background: rgba(0,0,0,.45);
-  opacity: 0; pointer-events: none; transition: opacity .18s ease;
-}
-#seeding-studio:not(.seed-adv-off) ~ .seed-setup-backdrop,
-#seeding-studio:not(.seed-adv-off) .seed-setup-backdrop { opacity: 1; pointer-events: auto; }
-
-.seed-setup-hd {
-  display: flex; align-items: center; justify-content: space-between;
-  padding-bottom: 10px; margin-bottom: 6px; border-bottom: 1px solid var(--border);
-  font-size: 13px; font-weight: 700; letter-spacing: .02em;
-}
-/* The step numbers described a six-stage walk that no longer exists — the strip does the work and
-   this is a settings panel. Numbering settings makes them look mandatory. */
-.seed-sidebar .seed-sb-step { display: none; }
-.seed-sidebar .seed-sb-hd {
-  font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
-  color: var(--muted); font-weight: 700; margin-top: 14px;
-}
-.seed-sidebar .seed-sb-sec:first-of-type .seed-sb-hd { margin-top: 4px; }
-.seed-sidebar .seed-sb-lbl { font-size: 10.5px; line-height: 1.5; }
-
-/* ── Board, cleaned ────────────────────────────────────────────────────────
-   Every row was its own grid, so the metrics column sized to that row's own content and the
-   numbers, bars and chips landed at a different x on every line. Fixed track widths line the whole
-   board up. */
-.seed-team-head {
-  grid-template-columns: 16px 26px minmax(0, 1fr) 92px 128px 14px;
-  gap: 12px; padding: 10px 14px; align-items: center;
-}
-.seed-team-name { font-size: 13px; font-weight: 600; }
-.seed-roster { font-size: 10.5px; }
-
-/* Rating: number and bar in one fixed column, right-aligned, so they read as a single scale. */
-.seed-metrics { display: block; text-align: right; }
-.seed-power { font-size: 16px; line-height: 1.1; }
-.seed-adj { font-size: 10px; margin-left: 5px; }
-.seed-bar { margin-top: 5px; height: 3px; }
-
-/* Evidence chips sit in their own fixed column, left-aligned so they stack cleanly down the board
-   instead of ragging off the right edge. */
-.seed-sub {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
-  justify-content: center; font-size: 9.5px;
-}
-.seed-sub-row { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
-
-/* Quieter chips. These are annotations on a number, not buttons. */
-.seed-basis {
-  font-size: 9px; font-weight: 600; letter-spacing: .03em; text-transform: none;
-  padding: 1px 6px; border-radius: 4px; background: none;
-  border: 1px solid var(--border); color: var(--muted);
-}
-.seed-basis-placements { color: #7ea9d8; border-color: rgba(126,169,216,.3); }
-.seed-basis-ranks      { color: #9d8fd0; border-color: rgba(157,143,208,.3); }
-.seed-basis-none       { color: #7a8290; border-color: rgba(122,130,144,.3); }
-.seed-cf   { font-size: 9.5px; font-weight: 600; opacity: .85; }
-.seed-warn, .seed-note { font-size: 9px; font-weight: 500; padding: 0 5px; border-radius: 4px; }
-
-@media (max-width: 980px) {
-  .seed-team-head { grid-template-columns: 16px 24px minmax(0,1fr) 84px 14px; row-gap: 6px; }
-  .seed-sub { grid-column: 3 / span 2; flex-direction: row; flex-wrap: wrap; }
-}
-
-/* ── Board density ─────────────────────────────────────────────────────────
-   The original card treatment (rounded panel, border, margin per team) cost roughly 85px a row, so
-   a 35-team field became five screens of scrolling. A seed board is a list you compare down, not a
-   stack of cards: flat rows, one hairline between them, ~40px each. */
-#seeding-studio .seed-list { display: block; padding: 0; }
-#seeding-studio .seed-team {
-  background: none; border: none; border-radius: 0; margin: 0; padding: 0;
-  border-bottom: 1px solid rgba(255,255,255,.055);
-}
-#seeding-studio .seed-team:hover { background: rgba(255,255,255,.022); }
-#seeding-studio .seed-team.is-open { background: rgba(255,255,255,.04); }
-#seeding-studio .seed-team-head { padding: 7px 14px; }
-#seeding-studio .seed-team.dragging { opacity: .45; }
-#seeding-studio .seed-team.drag-over { box-shadow: inset 0 2px 0 var(--cp-accent); }
-
-/* Top three carry the weight of the bracket — worth being able to find without reading. */
-#seeding-studio .seed-team:nth-child(-n+3) .seed-num { color: var(--cp-accent); }
-
-/* ── Board grid, final ─────────────────────────────────────────────────────
-   Name and rating used to sit at opposite ends of a 600px void. The bar now occupies that space,
-   which both fills it and turns the column into the thing a seed board is actually for: seeing the
-   gaps between teams without reading a single number. */
-#seeding-studio .seed-team-head {
-  grid-template-columns: 14px 26px minmax(120px, 1fr) minmax(90px, 260px) 74px 158px 12px;
-  gap: 10px;
-}
-#seeding-studio .seed-bar {
-  width: 100%; height: 6px; border-radius: 3px; margin: 0;
-  background: rgba(255,255,255,.06);
-}
-#seeding-studio .seed-bar-fill {
-  height: 100%; border-radius: 3px;
-  background: linear-gradient(90deg, rgba(124,58,237,.55), var(--cp-accent));
-}
-#seeding-studio .seed-metrics { text-align: right; white-space: nowrap; }
-#seeding-studio .seed-power { font-size: 14.5px; }
-
-/* Chips on ONE line, always. A wrapping chip made its row taller than its neighbours and broke the
-   scan rhythm that makes a dense list readable. */
-#seeding-studio .seed-sub {
-  flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 5px;
-  overflow: hidden; justify-content: flex-start;
-}
-#seeding-studio .seed-sub > * { flex: 0 0 auto; white-space: nowrap; }
-#seeding-studio .seed-warn,
-#seeding-studio .seed-note { overflow: hidden; text-overflow: ellipsis; max-width: 96px; }
-#seeding-studio .seed-caret { opacity: .35; }
-
-/* Let the BAR absorb the slack, not the name column — the void was inside the name track, so the
-   board still read as two clusters separated by nothing. */
-#seeding-studio .seed-team-head {
-  grid-template-columns: 14px 26px minmax(140px, 300px) minmax(110px, 1fr) 74px 196px 12px;
-}
-
-/* Chips get room for basis + confidence + one warning + one note without ellipsing. */
-#seeding-studio .seed-team-head {
-  grid-template-columns: 14px 26px minmax(140px, 280px) minmax(100px, 1fr) 74px 226px 12px;
-}
-#seeding-studio .seed-warn,
-#seeding-studio .seed-note { max-width: 118px; }
-#seeding-studio .seed-note { max-width: none; }
-#seeding-studio .seed-team-head {
-  grid-template-columns: 14px 26px minmax(140px, 270px) minmax(90px, 1fr) 74px 278px 12px;
 }
 
 /* ─── Match — Lobby (battle-royale games) ────────────────────────────────────
@@ -10154,3 +9855,605 @@ body.perf-noanim *, body.perf-noanim *::before, body.perf-noanim *::after {
 /* the phase hint reads as a footnote to the whole header, not to one cell */
 .gfx-std-head > .field-hint { grid-column: 1 / -1; margin: 0; }
 @media (max-width: 900px) { .gfx-std-head { grid-template-columns: minmax(0, 1fr); } }
+
+/* League editor width (2026-09): .lg-body is a 236px | 1fr grid, and a 1fr track's minimum is its
+   min-content — so the one-line tab strip (12 tabs once Data source was added) widened the whole
+   editor past the page and under the quick rail. The track may shrink; the strip scrolls instead. */
+.lg-main { min-width: 0; }
+.lg2-tabs { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.lg2-tab { white-space: nowrap; flex-shrink: 0; }
+.lg2-tabs::-webkit-scrollbar { height: 3px; }
+.lg2-tabs::-webkit-scrollbar-track { background: transparent; }
+.lg2-tabs::-webkit-scrollbar-thumb { background: rgba(124,58,237,.35); border-radius: 3px; }
+
+/* ════════ Right rail declutter (2026-09-17) ════════
+   Appended last on purpose — earlier .qrail rules are spread across the file and would win otherwise. */
+
+/* Header: was a 44px bar holding only the collapse arrow. Now a slim bar that names the open panel. */
+.qrail-head { min-height: 38px; padding: 6px 10px; gap: 10px; }
+.qrail-paneltitle { display: block; font-size: 11px; letter-spacing: .12em; color: #e8eaf0; }
+.qrail-collapse { width: 26px; height: 24px; font-size: 13px; background: transparent; border-color: var(--border); color: var(--muted); }
+
+/* Body: thinner padding, a thin overlay-style scrollbar instead of a wide dark gutter. */
+.qrail-body { padding: 10px 12px 24px; gap: 14px; scrollbar-width: thin; }
+.qrail-body::-webkit-scrollbar { width: 6px; }
+.qrail-body::-webkit-scrollbar-track { background: transparent; }
+.qrail-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,.1); border-radius: 6px; }
+.qrail-body:hover::-webkit-scrollbar-thumb { background: rgba(255,255,255,.18); }
+
+/* Section labels: one quiet style. The inline links (reorder / clear all / edit) were loud
+   uppercase accent text competing with the labels themselves. */
+.qrail-label { font-size: 10.5px; letter-spacing: .1em; }
+.qrail-sub, .qrail-sub a, .qrail-label a, .qrail-label .js-goto-ros, .qrail-label .js-goto-flows, .qrail-label .js-goto-dashboard {
+  text-transform: none !important; letter-spacing: 0 !important; font-size: 11px !important; font-weight: 600 !important;
+  color: var(--muted) !important; text-decoration: none !important; }
+.qrail-sub a:hover, .qrail-label a:hover { color: #fff !important; }
+.qrail-panel[data-qpanel="notes"] > .qrail-group > .qrail-label:first-child { display: none; }   /* header already says Notes */
+
+/* Rundown controls: one row, no wrapping ("Advance ►►" broke onto two lines). */
+.qros-btns { flex-wrap: nowrap; gap: 5px; }
+.qros-btns .btn { white-space: nowrap; padding: 6px 8px; font-size: 12px; min-width: 0; }
+
+/* Replay: buffer buttons on one line; clip rows collapse from a tall two-row card to one row. */
+.qrail-panel[data-qpanel="replay"] .qt-act .btn { white-space: nowrap; padding: 6px 6px; font-size: 11.5px; min-width: 0; }
+.qr-clip-row { flex-direction: row !important; align-items: center; gap: 8px; padding: 5px 6px !important; }
+.qr-clip-row .qr-clip-info { flex: 1 1 auto; min-width: 0; }
+.qr-clip-row .qr-clip-thumb { width: 40px !important; height: 24px !important; flex: 0 0 40px; }
+.qr-clip-row .qr-clip-name { font-size: 11.5px; font-weight: 600; }
+.qr-clip-row .qr-clip-btns { flex: 0 0 auto; gap: 4px; }
+.qr-clip-row .qr-clip-btns .btn { flex: 0 0 auto; padding: 3px 8px; font-size: 11px; min-height: 0; }
+.qr-tabs { margin-bottom: 2px; }
+
+/* Talent rows: the expand area rendered as an empty second line on every row because
+   .qt-detail's display:flex beat the [hidden] attribute. Link-copy buttons show on hover only,
+   so the name gets the room (listen + mic stay visible — those are the live controls). */
+.qt-detail[hidden] { display: none !important; }
+.qtalent-row .qt-copy { display: none; }
+.qtalent-row:hover .qt-copy, .qtalent-row:focus-within .qt-copy, .qtalent-row[data-expanded="1"] .qt-copy { display: inline-flex; }
+.qtalent-row .qt-grip { display: none; }
+.qtalent-row:hover .qt-grip { display: inline-flex; }
+.qt-bar { gap: 5px; padding: 5px 6px 5px 8px; }
+.qtalent-name { font-weight: 600; }
+
+/* Stream: the four sub-tabs wrapped into a 2x2 box — one even row instead. */
+#tw-subnav { display: grid; grid-template-columns: repeat(4, 1fr); width: 100%; box-sizing: border-box; }
+#tw-subnav .ev-subnav-btn { padding: 7px 4px; font-size: 10.5px; letter-spacing: .04em; text-align: center; }
+/* Chat source chips ran off the edge ("DIS…"): let them wrap above the feature controls. */
+#chat-filter-chips { flex: 1 1 100% !important; }
+
+/* ════════ Right rail — darker theme + NEXT tab cleanup (2026-09-17) ════════ */
+
+/* Darker, more neutral rail. Tokens are re-scoped to the rail so every card inside it drops a step
+   together; purple-tinted borders became neutral hairlines so the accent only marks what matters. */
+.qrail {
+  --surface2: #14141d; --surface3: #1a1a25; --border: rgba(255,255,255,.07);
+  background: #0a0a10; border-left-color: rgba(255,255,255,.06);
+}
+.qrail-tabs { background: #07070b; border-left-color: rgba(255,255,255,.06); }
+.qrail-head { border-bottom-color: rgba(255,255,255,.06); }
+
+/* NEXT tab — one accent, neutral everything else */
+.qnext-sec { gap: 8px; }
+.qnext-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 20px; }
+.qnext-head .qrail-label { margin: 0; }
+.qnext-count { margin-left: 6px; font-size: 10.5px; font-weight: 700; letter-spacing: 0; text-transform: none; color: var(--muted); }
+.qnext-link { background: none; border: 0; padding: 0; cursor: pointer; font: inherit; font-size: 11px; font-weight: 600;
+  color: var(--muted); text-decoration: none; white-space: nowrap; }
+.qnext-link:hover { color: #fff; }
+
+.qros-btns { display: flex; gap: 6px; margin: 0; }
+.qros-btns .btn { flex: 1 1 auto; }
+.qros-btns #qros-stop, .qros-btns #qros-cancel { flex: 0 0 auto; }
+.qnext-primary { background: var(--cp-accent) !important; border: 1px solid var(--cp-accent) !important; color: #fff !important;
+  font-weight: 700; box-shadow: none !important; }
+.qnext-primary:hover { filter: brightness(1.12); }
+.qnext-quiet { background: var(--surface2) !important; border: 1px solid var(--border) !important; color: #d4d6e0 !important;
+  font-weight: 600; box-shadow: none !important; }
+.qnext-quiet:hover { border-color: rgba(255,255,255,.18) !important; color: #fff !important; }
+.qnext-stop:hover { border-color: rgba(239,68,68,.5) !important; color: #fca5a5 !important; }
+
+.qros-status { display: flex; flex-direction: column; gap: 3px; margin: 0; font-size: 12px; min-height: 0; }
+.qros-live { font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--ok-2); }
+.qros-cur-lbl { font-size: 14px; font-weight: 700; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qros-auto { align-self: flex-start; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 999px;
+  color: #fbbf24; background: rgba(251,191,36,.1); }
+.qros-then { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qros-idle { color: var(--muted); }
+.qros-build, .qsgg-goto-dash { align-self: flex-start; margin-top: 6px; }
+
+/* segment list: calmer section headers, accent only on the current row */
+.qros-section-label { color: var(--muted); }
+.qros-section-line { background: rgba(255,255,255,.07); }
+.qros-row { background: transparent; border-color: transparent; }
+.qros-row:hover { background: rgba(255,255,255,.04); border-color: var(--border); }
+.qros-row.qros-cur { background: rgba(124,58,237,.12); border-color: rgba(124,58,237,.5); box-shadow: none; }
+
+/* stream queue */
+.qsgg-event-header { gap: 10px; }
+.qsgg-event-name { font-weight: 600; color: #d4d6e0; }
+.qsgg-poll-status { border-radius: 999px; padding: 2px 8px; }
+.qsgg-poll-status.enabled { background: rgba(34,197,94,.1); color: var(--ok-2); }
+.qsgg-poll-status.preview { background: rgba(255,255,255,.06); color: #d4d6e0; }
+.qsgg-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 8px; text-align: center; line-height: 1.5;
+  border: 1px dashed var(--border); border-radius: 10px; }
+.qsgg-empty .qsgg-goto-dash { align-self: center; }
+.qsgg-empty-link { text-decoration: underline; text-underline-offset: 2px; }
+.qsgg-badge.next { background: rgba(255,255,255,.07); color: var(--muted); }
+.qsgg-flag-btn { color: var(--muted) !important; border-color: var(--border) !important; }
+.qsgg-flag-btn:hover { color: #fbbf24 !important; background: rgba(245,158,11,.1) !important; }
+.qros-list { margin-top: 6px; }
+.qros-list:empty { display: none; }
+
+/* ════════ Up next boxes + rail captions (2026-09-17) ════════
+   Every item in the Rundown tab (run-of-show segments and the match queue) sits on its own slight
+   grey box, the same card the Talent tab uses: neutral fill, hairline border, a 3px left edge that
+   carries the state colour. */
+.qros-row {
+  background: #16161c; border: 1px solid rgba(255,255,255,.06); border-radius: 7px;
+  margin-bottom: 4px; box-shadow: none;
+}
+.qros-row:hover { background: #1b1b22; border-color: rgba(255,255,255,.12); }
+.qros-row.qros-cur { background: rgba(124,58,237,.14); border-color: rgba(124,58,237,.45); border-left: 3px solid var(--cp-accent); }
+.qros-section-hdr { margin-top: 10px; }
+
+.qsgg-row {
+  background: #16161c; border: 1px solid rgba(255,255,255,.06); border-left: 3px solid rgba(255,255,255,.1);
+  border-radius: 7px; padding: 8px 10px; margin: 0 0 4px 0;
+}
+.qsgg-row:last-child { border-bottom: 1px solid rgba(255,255,255,.06); }
+.qsgg-row:hover { background: #1b1b22; }
+.qsgg-row.is-live { border-left: 3px solid var(--ok); padding-left: 10px; margin-left: 0; }
+.qsgg-row.is-ondeck { border-left: 3px solid #fbbf24; padding-left: 10px; margin-left: 0; }
+.qsgg-row.is-done { opacity: .55; }
+
+/* Rail tab captions (On Air, Up Next, Talent, Replay, Chat, Automation, Notes): the strip is a
+   little wider so a two-word name reads on one line; title case reads smaller than all-caps. */
+.qrail-tabs { flex: 0 0 68px; width: 68px; }
+.qrail-tab { width: 60px; min-height: 44px; }
+.qrail-tab-label { font-size: 9px; font-weight: 700; letter-spacing: 0; text-transform: none; }
+
+/* On Air: the Run of Show controller lives on Up Next only (it was duplicated here). Hidden, not
+   removed — its elements are still looked up by id. */
+.qk-cockpit .qk-ros-head, .qk-cockpit .qk-ros-nav, .qk-cockpit .qk-ros-next { display: none !important; }
+/* Stream title + category, moved under the ON STREAM status */
+.qk-stream-info { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+/* collapsed rail = just the tab strip, so it has to match the wider strip */
+.app-shell.qrail-collapsed .qrail { width: 68px; flex-basis: 68px; }
+
+/* ════════ Dashboard ▸ Game Settings (2026-09-17) ════════
+   Hosts blocks that were built for the Match ▸ Teams gear grid (.msp-col / .msp-rl-strip), so reset
+   their grid-strip borders here. */
+.dash-gameset .gs-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.dash-gameset .gs-logo { width: 30px; height: 30px; object-fit: contain; flex: 0 0 auto; }
+.dash-gameset .gs-titles { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
+.dash-gameset .gs-game { font-size: 12px; font-weight: 600; color: var(--muted); }
+.dash-gameset .gs-tabs { margin-bottom: 12px; }
+.dash-gameset .gs-pane[hidden], .dash-gameset .gs-empty[hidden], .dash-gameset [hidden].gs-note { display: none !important; }
+.dash-gameset .gs-pane > .msp-col { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 0; }
+.dash-gameset #msp-playercams, .dash-gameset #msp-smash, .dash-gameset #msp-tokon { padding: 12px 14px; }
+.dash-gameset .gs-pane .msp-rl-section-hd { display: none; }   /* the panel header already names the game */
+.dash-gameset .gs-empty { font-size: 12.5px; color: var(--muted); padding: 14px; border: 1px dashed var(--border); border-radius: 10px; }
+.dash-gameset .gs-note { margin: 0 0 8px; }
+/* Sponsor slots: three cards side by side, stacking on narrow widths */
+.dash-gameset .gs-cards:not([hidden]) { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+.dash-gameset .gs-card { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 12px 14px; min-width: 0; }
+.dash-gameset .gs-card-title { margin: 0 0 6px; font-size: 13px; font-weight: 700; color: var(--text, #e8eaf0); }
+.dash-gameset #gs-tabs[hidden] { display: none !important; }
+
+/* Marketplace (2026-09): Integrations | API | Plugins. The Plugins pill carries a "Coming soon" chip;
+   the API page opens with a short hero + on-page jump links. */
+.mkt-soon-chip { display:inline-block; margin-left:6px; padding:1px 6px; border-radius:999px; font-size:9px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; vertical-align:1px; background:rgba(245,158,11,.16); color:#f5b041; border:1px solid rgba(245,158,11,.4); }
+.ev-subnav-btn.active .mkt-soon-chip { background:rgba(255,255,255,.18); color:#fff; border-color:rgba(255,255,255,.35); }
+.mkt-api-hero { display:flex; align-items:flex-end; justify-content:space-between; gap:14px 24px; flex-wrap:wrap; border:1px solid var(--border); border-radius:16px; padding:22px 24px; margin:2px 0 18px; background:linear-gradient(135deg, rgba(124,58,237,.14), rgba(6,182,212,.06)); }
+.mkt-api-hero > div { max-width:620px; min-width:0; }
+.mkt-api-jump { display:flex; flex-wrap:wrap; gap:6px; }
+.mkt-api-jump a { font-size:12px; font-weight:700; color:var(--label); text-decoration:none; padding:5px 10px; border-radius:999px; border:1px solid var(--border); background:var(--surface2); }
+.mkt-api-jump a:hover { color:var(--text); border-color:var(--cp-accent); }
+#integration-api .section { scroll-margin-top:12px; }
+#integration-api .cmp-code { max-width:100%; }
+
+/* ══ League editor rebuild (2026-09-17) ════════════════════════════════════════════════════════
+   The editor used to sit in a 236px-list | 1fr grid inside a content column already narrowed by the
+   on-air rail, leaving ~520px: tabs, KPI cards and the standings table all scrolled sideways. Now it
+   is one full-width column (league switcher in the header), the tab row WRAPS instead of scrolling,
+   and every panel is built to fit ~720px without horizontal scroll. */
+.lg-topbar { flex-wrap: wrap; }
+.lg-topbar-left { display:flex; align-items:center; gap:10px; min-width:0; flex:1 1 280px; }
+.lg-topbar-left .lg-topbar-title { flex:0 0 auto; margin:0; }
+.lg-switch { flex:1 1 auto; min-width:0; max-width:420px; font-weight:700; }
+.lg-import-row { display:flex; gap:8px; align-items:center; padding:10px 16px; border-bottom:1px solid var(--border); background:var(--surface2); }
+.lg-import-row[hidden] { display:none; }
+.lg-import-row .input-text { flex:1 1 auto; min-width:0; max-width:420px; font-size:12px; }
+.lg-body.lg-body-full { display:block; min-height:0; }
+.lg-body-full .lg-main { padding:16px 18px 20px; min-width:0; }
+
+/* Banner: compact, wraps under the name when narrow */
+.lg2-banner { flex-wrap:wrap; gap:12px 16px; padding-bottom:14px; }
+.lg2-logo-wrap { width:60px; height:60px; flex:0 0 60px; border-radius:12px; }
+.lg2-banner-left { flex:1 1 260px; }
+.lg2-banner-title-row { min-width:0; }
+.lg2-name-input { font-size:19px; }
+.lg2-abbr-input { width:64px; flex:0 0 auto; }
+.lg2-banner-actions { flex-direction:row; align-items:center; flex-wrap:wrap; gap:8px; }
+.lg2-banner-actions .lg2-status-sel { width:auto; min-width:120px; }
+
+/* Tabs wrap — never a horizontal scroller */
+.lg2-tabs { flex-wrap:wrap; overflow:visible; row-gap:0; padding-top:8px; margin-bottom:14px; align-items:flex-end; }
+.lg2-tab { padding:8px 11px; letter-spacing:.03em; }
+.lg2-tab[hidden] { display:none; }
+.lg2-tabs-sep { flex:1 1 auto; min-width:8px; }
+.lg2-tab-quiet { color:var(--muted); font-weight:600; }
+
+/* Shared toolbar: left group + right group, both wrap */
+.lg2-toolbar { display:flex; align-items:center; justify-content:space-between; gap:8px 12px; flex-wrap:wrap; margin-bottom:10px; }
+.lg2-toolbar-sub { padding:8px 10px; border:1px solid var(--border); border-radius:10px; background:var(--surface2); margin-bottom:12px; }
+.lg2-toolbar-l, .lg2-toolbar-r { display:flex; align-items:center; gap:8px; flex-wrap:wrap; min-width:0; }
+.lg2-toolbar-r { margin-left:auto; justify-content:flex-end; }
+.lg2-toolbar .lgov-mini-opt { white-space:nowrap; }
+.lg2-toolbar .lgov-mini-opt .input-select { width:auto; max-width:180px; }
+.lg2-grow { flex:1 1 200px; min-width:0; max-width:280px; font-size:12px; }
+.lg2-filter { width:auto; min-width:0; max-width:190px; font-size:12px; }
+.lg2-check { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--label); cursor:pointer; white-space:nowrap; }
+.lg2-check input { margin:0; accent-color:var(--cp-accent); }
+.lg2-view-seg .seg-btn { font-weight:700; }
+.lg2-src-bar { padding:0 2px; }
+.lg2-src-note { flex:1 1 240px; min-width:0; }
+
+/* ── Standings table ── */
+.lg2-st-scroll { overflow-x:auto; border:1px solid var(--border); border-radius:10px; background:var(--surface2); }
+.lg2-st-table { font-variant-numeric:tabular-nums; }
+.lg2-st-table th { background:var(--surface2); padding:9px 8px 8px; border-bottom:1px solid var(--border); white-space:nowrap; }
+.lg2-st-table th:first-child, .lg2-st-table td:first-child { text-align:left; }
+.lg2-st-table td { padding:6px 8px; white-space:nowrap; }
+#lg-standings .lg2-st-table th:nth-child(2), #lg-standings .lg2-st-table td:nth-child(2) { text-align:right; }
+.lg2-st-table td.lg2-st-team { position:sticky; left:0; z-index:1; background:var(--surface2); min-width:170px; max-width:260px; }
+.lg2-st-table th.lg2-st-team-th { position:sticky; left:0; z-index:2; }
+.lg2-st-team > * { vertical-align:middle; }
+.lg2-st-team .lg2-drag-handle { margin-right:4px; cursor:grab; opacity:.35; }
+.lg2-st-row:hover .lg2-drag-handle { opacity:.8; }
+.lg2-st-team .lg2-pos { display:inline-block; min-width:18px; margin-right:8px; text-align:right; font-size:12px; }
+.lg2-st-team .lg2-pos.in-playoffs { color:var(--ok-2, #4ade80); }
+.lg2-st-rank-h { display:inline-block; min-width:18px; margin:0 8px 0 18px; text-align:right; }
+.lg2-st-logo { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; margin-right:8px; border-radius:5px; object-fit:contain; background:var(--surface3, rgba(255,255,255,.05)); font-size:8.5px; font-weight:900; color:var(--muted); }
+.lg2-st-name { display:inline-block; max-width:170px; overflow:hidden; text-overflow:ellipsis; font-weight:700; color:var(--text); }
+.lg2-st-num { color:var(--label); }
+.lg2-st-pts-val { font-weight:800; color:var(--text) !important; }
+.lg2-st-diff.pos { color:var(--ok-2, #4ade80); }
+.lg2-st-diff.neg { color:var(--danger-2, #f87171); }
+.lg2-st-row.lg2-st-playoff td { background:rgba(72,187,120,.05); }
+.lg2-st-row.lg2-st-playoff td.lg2-st-team { background:#16221d; box-shadow:inset 3px 0 0 rgba(72,187,120,.6); }
+.lg2-st-table td .input-text { width:48px; }
+.lg2-st-table.is-manual td .input-text.lg2-st-pts { width:56px; }
+.lg2-form-cell, .lg2-st-form-th { text-align:left !important; }
+.lg2-st-legend { display:flex; align-items:center; gap:6px; margin-top:8px; font-size:11px; color:var(--muted); }
+.lg2-st-legend-dot { width:10px; height:10px; border-radius:2px; background:rgba(72,187,120,.35); box-shadow:inset 3px 0 0 rgba(72,187,120,.8); }
+.lg2-div-group { margin-bottom:14px; }
+.lg2-st-compact .lg2-st-table td { padding:3px 8px; }
+.lg2-st-compact .lg2-st-logo { width:18px; height:18px; }
+
+/* ── Schedule ── */
+.lg2-add-match { display:flex; flex-direction:column; align-items:stretch; gap:10px; padding:12px; }
+.lg2-add-match[hidden] { display:none; }
+.lg2-am-teams { display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); gap:8px; align-items:center; }
+.lg2-am-teams .input-select { width:100%; min-width:0; }
+.lg2-am-meta { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.lg2-am-meta .input-select { width:auto; }
+.lg2-am-week { width:56px !important; }
+.lg2-am-date { width:150px; }
+.lg2-am-time { width:120px; }
+.lg2-am-meta #lg-add-match { margin-left:auto; }
+.lg2-am-gen { display:flex; flex-wrap:wrap; gap:6px; align-items:center; padding-top:8px; border-top:1px solid var(--border); }
+.lg2-schedule-week { margin-bottom:18px; }
+.lg2-week-label { display:flex; align-items:baseline; justify-content:space-between; gap:10px; font-size:11.5px; margin-bottom:8px; padding:0 2px 6px; border-bottom:1px solid var(--border); }
+.lg2-week-label > span:first-child { color:var(--text); }
+.lg2-week-count { font-weight:600; text-transform:none; letter-spacing:0; color:var(--muted); }
+.lg2-mc { background:var(--surface2); border:1px solid var(--border); border-radius:10px; margin-bottom:8px; overflow:hidden; position:relative; }
+.lg2-mc::before { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; background:transparent; }
+.lg2-mc.is-live::before, .lg2-mc.is-recording::before { background:#ef4444; }
+.lg2-mc.is-final::before { background:rgba(148,163,184,.45); }
+.lg2-mc.is-postponed::before { background:#f59e0b; }
+.lg2-mc.is-cancelled { opacity:.6; }
+.lg2-mc-row { display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); align-items:center; gap:10px; padding:10px 12px 6px 14px; }
+.lg2-mc-side { display:flex; align-items:center; gap:9px; min-width:0; font-size:14px; font-weight:700; color:var(--text); }
+.lg2-mc-side-b { justify-content:flex-end; text-align:right; }
+.lg2-mc-side.loss { color:var(--muted); font-weight:600; }
+.lg2-mc-side.win .lg2-mc-name { font-weight:900; }
+.lg2-mc-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+.lg2-mc-logo { flex:0 0 28px; width:28px; height:28px; border-radius:6px; object-fit:contain; background:var(--surface3, rgba(255,255,255,.05)); display:inline-flex; align-items:center; justify-content:center; font-size:10px; font-weight:900; color:var(--muted); }
+.lg2-mc-side .lg2-unmatched-sel { min-width:0; max-width:100%; font-size:12px; border-color:var(--warn, #c98a1f); color:var(--warn, #c98a1f); }
+.lg2-mc-score { display:flex; align-items:center; gap:6px; font-size:18px; font-weight:900; font-variant-numeric:tabular-nums; }
+.lg2-mc-score i { font-style:normal; color:var(--muted); font-weight:700; }
+.lg2-mc-score .input-text { width:46px; padding:4px 2px; text-align:center; font-size:16px; font-weight:800; }
+.lg2-mc-derived { display:inline-flex; gap:6px; }
+.lg2-mc-derived i { font-style:normal; color:var(--muted); }
+.lg2-mc-foot { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px 10px; padding:4px 12px 9px 14px; }
+.lg2-mc-meta { display:flex; align-items:center; flex-wrap:wrap; gap:4px 10px; font-size:11.5px; color:var(--muted); min-width:0; }
+.lg2-mc-status { font-size:10px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; padding:2px 7px; border-radius:999px; background:var(--surface3, rgba(255,255,255,.06)); color:var(--label); }
+.lg2-mc.is-live .lg2-mc-status, .lg2-mc.is-recording .lg2-mc-status { background:rgba(239,68,68,.16); color:#f87171; }
+.lg2-mc.is-final .lg2-mc-status { background:rgba(148,163,184,.14); color:var(--text); }
+.lg2-mc.is-postponed .lg2-mc-status { background:rgba(245,158,11,.14); color:#fbbf24; }
+.lg2-mc-meta .lg2-ot-chk { display:inline-flex; align-items:center; gap:3px; }
+.lg2-mc-vod { color:var(--cp-accent-2, #a78bfa); font-weight:700; text-decoration:none; }
+.lg2-mc-actions { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-left:auto; }
+.lg2-mc-actions .lg2-match-more { width:auto; padding:2px 6px; font-size:11px; height:auto; }
+.lg2-match-games-toggle.active { color:var(--text) !important; background:var(--surface3, rgba(255,255,255,.06)); }
+.lg2-mc-details { border-top:1px solid var(--border); padding:10px 14px 12px; display:flex; flex-direction:column; gap:10px; background:rgba(0,0,0,.12); }
+.lg2-mc-sub { font-size:11px; font-weight:800; color:var(--label); margin-bottom:6px; }
+.lg2-mc-sub span { font-weight:500; color:var(--muted); margin-left:6px; }
+.lg2-mc-games { display:flex; flex-direction:column; gap:5px; align-items:flex-start; }
+.lg2-game-row { display:flex; align-items:center; gap:6px; }
+.lg2-game-row i { font-style:normal; color:var(--muted); }
+.lg2-game-n { font-size:11px; color:var(--muted); min-width:24px; }
+.lg2-game-row .input-text { width:60px; text-align:center; }
+.lg2-mc-details .lg2-match-extra { padding:0; flex-wrap:wrap; }
+.lg2-mc-details .lg2-match-notes-inp { flex:2 1 200px; min-width:0; }
+.lg2-mc-details .lg2-match-vod-inp { flex:1 1 160px; min-width:0; }
+
+/* ── Overview: cards reflow instead of bleeding ── */
+.lgov-kpis { grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); }
+.lgov-kpis .lg2-stat { min-width:0; }
+.lgov-kpis .lgov-health { grid-column:1 / -1; }
+.lgov-leader-val { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.lgov-grid { grid-template-columns:repeat(auto-fit, minmax(330px, 1fr)); }
+.lgov-card { min-width:0; }
+.lgov-toolbar { flex-wrap:wrap; row-gap:8px; }
+.lgov-matchup { flex-wrap:wrap; }
+.lgov-matchup .input-select { flex:1 1 130px; min-width:0; }
+
+/* Stats + rankings tables share the standings scroller: keep the team column pinned */
+#lg2-panel-stats .lg2-st-table td:first-child, #lg2-panel-rankings .lg2-st-table td:first-child { position:sticky; left:0; z-index:1; background:var(--surface2); }
+
+/* League editor rebuild — second pass: tab row fits on one line beside the rail; snapshot cells never wrap */
+.lg2-tab { padding:8px 9px; font-size:11.5px; letter-spacing:.02em; }
+.lg2-tabs-sep { flex:0 0 1px; min-width:1px; height:16px; margin:0 6px 10px; background:var(--border); }
+.lgov-snap-table th, .lgov-snap-rec, .lgov-snap-pts { white-space:nowrap; }
+.lg2-toolbar-sub .lg2-toolbar-l { flex:1 1 auto; }
+.lg2-grow { flex:1 1 160px; max-width:320px; }
+#lg2-stats .lg2-st-table td .input-text { width:48px; padding:3px 4px; }
+#lg2-panel-rankings .lg2-st-table th, #lg2-panel-rankings .lg2-st-table td { padding-left:6px; padding-right:6px; }
+.lg2-tab { padding:8px 8px; }
+.lg2-tabs-sep { margin:0 3px 10px; }
+
+/* ════════ Games hub — shared picker + header card (games-hub.js, 2026-09-17) ════════
+   Used by Settings ▸ Games and Dashboard ▸ Game Settings so both navigate games the same way. */
+.gh-picker { position: relative; margin: 0 0 14px; }
+.gh-picker .gp-row { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+.gh-picker .gp-row::-webkit-scrollbar { height: 4px; }
+.gh-picker .gp-row::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 4px; }
+.gp-chip, .gp-more {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 11px;
+  border-radius: 9px; border: 1px solid var(--border); background: var(--surface2); color: #c9ccd8;
+  font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap;
+  transition: border-color .12s, background .12s, color .12s;
+}
+.gp-chip:hover, .gp-more:hover { border-color: rgba(255,255,255,.2); color: #fff; }
+.gp-chip.is-sel { border-color: var(--cp-accent); background: rgba(124,58,237,.16); color: #fff; }
+.gp-logo { width: 16px; height: 16px; object-fit: contain; filter: brightness(0) invert(1); opacity: .85; flex: 0 0 auto; }
+.gp-dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,.22); flex: 0 0 auto; }
+.gp-dot[data-st="on"] { background: var(--ok-2); box-shadow: 0 0 6px rgba(74,222,128,.55); }
+.gp-live { font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; padding: 2px 6px;
+  border-radius: 999px; color: var(--ok-2); background: rgba(74,222,128,.12); }
+.gp-more { color: var(--muted); }
+.gp-more span { font-weight: 600; opacity: .8; }
+.gp-pop { position: absolute; z-index: 50; top: 42px; right: 0; width: 320px; max-height: 420px; display: flex; flex-direction: column;
+  background: #12121c; border: 1px solid rgba(255,255,255,.1); border-radius: 12px; box-shadow: 0 16px 40px rgba(0,0,0,.5); padding: 8px; }
+.gp-pop[hidden] { display: none; }
+.gp-search { margin-bottom: 6px; }
+.gp-list { overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+.gp-group { font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); padding: 8px 8px 4px; }
+.gp-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 8px; border: 0; border-radius: 8px;
+  background: transparent; color: #e6e8f0; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.gp-item:hover { background: rgba(255,255,255,.06); }
+.gp-item .gp-logo { width: 18px; height: 18px; }
+.gp-item-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gp-item-st { font-size: 11px; color: var(--muted); }
+.gp-item-st[data-st="on"] { color: var(--ok-2); }
+.gp-empty { padding: 12px 8px; font-size: 12px; color: var(--muted); }
+
+/* status chip + active badge (both surfaces) */
+.gh-status { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 999px; white-space: nowrap;
+  color: var(--muted); background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08); }
+.gh-status::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: rgba(255,255,255,.25); }
+.gh-status[data-st="on"] { color: var(--ok-2); background: rgba(74,222,128,.08); border-color: rgba(74,222,128,.3); }
+.gh-status[data-st="on"]::before { background: var(--ok-2); }
+.gh-status[data-st="none"]::before { display: none; }
+.gh-active-badge { font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; padding: 4px 9px;
+  border-radius: 999px; color: #fff; background: var(--cp-accent); white-space: nowrap; }
+.gh-active-badge[hidden], #gh-make-active[hidden], #gs-make-active[hidden] { display: none !important; }
+
+/* ── Settings ▸ Games ── */
+#set-sec-gamesetup .gh-card { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); overflow: visible; }
+.gh-head { display: flex; align-items: center; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.gh-logo { width: 40px; height: 40px; object-fit: contain; filter: brightness(0) invert(1); flex: 0 0 auto; }
+.gh-logo[hidden] { display: none; }
+.gh-titles { flex: 1 1 180px; min-width: 0; }
+.gh-name { font-size: 18px; font-weight: 800; color: #fff; line-height: 1.2; }
+.gh-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+#set-sec-gamesetup .gh-tabs { margin: 14px 18px 0; }
+.gh-body { padding: 16px 18px 18px; }
+.gh-pane[hidden], .gh-shared[hidden], #gh-sources-group[hidden], #gh-layout-slot[hidden], .gh-hint[hidden] { display: none !important; }
+.gh-pane, .gh-shared { display: flex; flex-direction: column; gap: 14px; }
+.gh-shared:not([hidden]) + .game-section .gh-pane:not([hidden]) { margin-top: 14px; }
+.gh-lead { margin: 0; font-size: 13.5px; line-height: 1.55; color: #d9dbe6; max-width: 720px; }
+.gh-hint { margin: 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.gh-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gh-group { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; background: rgba(255,255,255,.015); }
+.gh-group-title { font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: #aeb2c6; }
+.gh-group .field-row { margin-bottom: 0; }
+.gh-legacy-chip { display: none !important; }   /* the header status chip replaces the per-game chips */
+/* setup guides: long instructions fold away */
+.gh-guide { border: 1px solid var(--border); border-radius: 10px; background: rgba(255,255,255,.02); }
+.gh-guide > summary { cursor: pointer; list-style: none; padding: 10px 14px; font-size: 12.5px; font-weight: 700; color: #cfd2de; }
+.gh-guide > summary::-webkit-details-marker { display: none; }
+.gh-guide > summary::before { content: "+"; display: inline-block; width: 16px; color: var(--muted); font-weight: 800; }
+.gh-guide[open] > summary::before { content: "\2212"; }
+.gh-guide[open] > summary { border-bottom: 1px solid var(--border); }
+.gh-guide-body { padding: 12px 14px; font-size: 12px; line-height: 1.7; color: var(--muted); }
+.gh-guide-body > div[style*="background"] { background: transparent !important; border: 0 !important; padding: 0 !important; }
+/* toggle rows */
+.gh-toggle { display: flex; align-items: center; gap: 14px; justify-content: space-between; cursor: pointer; padding: 4px 0; }
+.gh-toggle + .gh-toggle { border-top: 1px solid var(--border); padding-top: 12px; }
+.gh-toggle-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.gh-toggle-txt b { font-size: 13px; color: #e6e8f0; }
+.gh-toggle-txt small { font-size: 12px; color: var(--muted); }
+/* browser sources */
+.gh-sources { display: flex; flex-direction: column; gap: 6px; }
+.gh-src { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; background: rgba(255,255,255,.03); border: 1px solid var(--border); }
+.gh-src-name { flex: 0 0 170px; font-size: 12.5px; font-weight: 700; color: #e6e8f0; }
+.gh-src-url { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--muted); background: none; }
+@media (max-width: 720px) { .gh-src { flex-wrap: wrap; } .gh-src-name { flex-basis: 100%; } }
+/* moved-in blocks: drop their old section chrome */
+#gh-rl-automation > .section, #gh-content-slot > .section { background: transparent; border: 0; padding: 0; margin: 0; box-shadow: none; }
+#gh-content-slot .set-fold-sum { display: none; }
+#game-overlay-note { margin-top: 8px !important; }
+
+/* ── Dashboard ▸ Game Settings on the shared pieces ── */
+.dash-gameset .gs-top { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.dash-gameset .gs-top-hint { font-size: 12px; color: var(--muted); }
+.dash-gameset .gs-head { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; flex-wrap: wrap; }
+.dash-gameset .gs-logo { width: 26px; height: 26px; object-fit: contain; filter: brightness(0) invert(1); }
+.dash-gameset .gs-logo[hidden] { display: none; }
+.dash-gameset .gs-titles { flex: 1 1 auto; }
+.dash-gameset .gs-game { font-size: 16px; font-weight: 800; color: #fff; }
+.dash-gameset .gs-notice { margin: -4px 0 12px; padding: 9px 12px; border-radius: 9px; font-size: 12.5px; color: #fcd34d;
+  background: rgba(251,191,36,.08); border: 1px solid rgba(251,191,36,.25); }
+.dash-gameset .gs-notice[hidden] { display: none; }
+/* a viewed game that isn't on air still shows its controls (apply* hides them for the live game only) */
+.dash-gameset .gs-pane > #msp-rl-scenes, .dash-gameset .gs-pane > #msp-smash, .dash-gameset .gs-pane > #msp-tokon { display: block !important; }
+.dash-gameset.gs-not-active #msp-rl-scenes .msp-rl-cell:first-child { display: none; }   /* HUD style follows the active game */
+#integration-games .game-tab-row[hidden] { display: none !important; }
+
+/* games hub fixes: "All games" stays pinned beside the scrolling chips; per-game chips hidden by id
+   (app code rewrites their className); settings .field-row is a column by default, so the inline
+   "row" layouts in moved blocks need their direction restored. */
+.gh-picker .gp-bar { display: flex; align-items: flex-start; gap: 6px; }
+.gh-picker .gp-bar .gp-row { flex: 1 1 auto; min-width: 0; }
+#csgo-conn, #val-conn, #lol-conn, #apex-conn, #rl-stats-conn { display: none !important; }
+#gh-rl-automation .section-title { display: none; }
+.gh-body .field-row[style*="flex-wrap"] { flex-direction: row; justify-content: flex-start; }
+.gh-body .field-row[style*="flex-wrap"] > div { display: flex; flex-direction: column; gap: 4px; }
+.gh-body .field-row[style*="align-items:center"] { flex-direction: row; }
+
+/* Game Settings ▸ Players — facecam switches (moved from the Match — Teams gear panel) */
+.dash-gameset .gs-camtoggles { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; margin-bottom: 10px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface2); }
+.dash-gameset .gs-camtoggles .gh-toggle { padding: 6px 0; }
+.dash-gameset:not([data-game="rocket-league"]) .gs-rl-only { display: none; }
+
+/* Game Settings ▸ setup tabs: the Settings ▸ Games body (.gh-body) is moved into #gs-setup-slot */
+.dash-gameset .gs-tab-sep { align-self: center; padding: 0 8px 0 12px; margin-left: 4px; border-left: 1px solid var(--border);
+  font-size: 9.5px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.dash-gameset #gs-setup-slot .gh-body { padding: 0; }
+
+/* ════════ Graphics hub — connected-event bar + Full Board popup (2026-09-17) ════════ */
+/* One bar under the top rail, on every scene: which event the graphics follow, how fresh it is. */
+.gfx-eventbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 9px 14px; border-bottom: 1px solid var(--border); background: rgba(255,255,255,.02); }
+.gfx-ev-plat { font-size: 9.5px; font-weight: 900; letter-spacing: .1em; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 5px; color: #cdd2e4; background: var(--surface3); border: 1px solid var(--border); }
+.gfx-ev-plat[data-plat="startgg"] { color: #8be9a5; background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.3); }
+.gfx-ev-plat[data-plat="challonge"] { color: #f7a072; background: rgba(249,115,22,.12); border-color: rgba(249,115,22,.3); }
+.gfx-ev-plat[data-plat="manual"] { color: #c4b5fd; background: rgba(167,139,250,.14); border-color: rgba(167,139,250,.35); }
+.gfx-ev-plat[hidden], .gfx-ev-link[hidden], #gfx-ev-sync[hidden], #gfx-ev-connect[hidden] { display: none !important; }
+.gfx-ev-name { font-size: 13px; font-weight: 800; color: #fff; max-width: 42ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gfx-eventbar.is-empty .gfx-ev-name { color: var(--muted); font-weight: 600; }
+.gfx-ev-badges { display: inline-flex; gap: 6px; }
+.gfx-ev-badge { font-size: 9.5px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 5px; color: var(--muted); background: var(--white-a05); border: 1px solid var(--border); }
+.gfx-ev-meta { font-size: 11.5px; color: var(--muted); }
+.gfx-ev-sep { opacity: .5; margin: 0 2px; }
+.gfx-ev-actions { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+.gfx-ev-link { font-size: 11.5px; font-weight: 700; color: var(--cp-accent-2); text-decoration: none; }
+.gfx-ev-link:hover { text-decoration: underline; }
+
+/* Full Board — a popup over the hub (it used to dock full-width below it, which pushed the scene
+   you were editing off screen and made the manual bracket builder feel like a second page). */
+.gfx-fullboard { position: fixed; inset: 0; z-index: 2400; margin: 0; padding: 24px;
+  align-items: center; justify-content: center; background: rgba(0,0,0,.62); backdrop-filter: blur(2px); }
+.gfx-fullboard .gfx-popout-box { width: min(1180px, 94vw); height: auto; max-height: 88vh;
+  box-shadow: 0 24px 70px rgba(0,0,0,.6); border-radius: 14px; background: var(--surface); }
+.gfx-fullboard .gfx-popout-body { overflow-y: auto; max-height: calc(88vh - 108px); }
+body.gfx-board-open { overflow: hidden; }
+
+/* One card language across the scene panels: bracket folds, standings/schedule groups and the
+   status block all share the same surface, border, radius and label type. */
+.gfx-front-panel .bkp-status,
+.gfx-front-panel .bkp-fold,
+.gfx-front-panel .gfx-std-head { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; }
+.gfx-front-panel .bkp-status { padding: 11px 14px; }
+.gfx-front-panel .gfx-std-head { padding: 12px 14px; display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
+.gfx-front-panel .bkp-lbl, .gfx-front-panel .field-label, .gfx-front-panel .gfx-fp-lbl {
+  font-size: 10px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); }
+/* One control-row rhythm across the scene panels: label left in a fixed column, control fills the
+   rest. Standings/Schedule used a 2-col grid whose labels ended up centred, Bracket used 62px
+   left labels — scene to scene they read as different screens. */
+.gfx-front-panel .gfx-ctrl-row { flex-wrap: nowrap; align-items: center; }
+.gfx-front-panel .gfx-ctrl-row > [data-gfx="fix"],
+.gfx-front-panel .bkp-lbl { flex: 0 0 96px; text-align: left; }
+.gfx-front-panel .gfx-ctrl-row > [data-gfx="grow"] { flex: 1 1 auto; min-width: 0; }
+.gfx-front-panel .gfx-std-head > .gfx-ctrl-row + .gfx-ctrl-row { margin-top: 2px; }
+.gfx-front-panel .bkp-status[hidden] { display: none !important; }
+.gfx-ev-plat[data-plat="league"] { color: #93c5fd; background: rgba(59,130,246,.12); border-color: rgba(59,130,246,.3); }
+.gfx-ev-plat[data-plat="named"] { display: none; }
+.is-obs-off { color: #fbbf24 !important; background: rgba(251,191,36,.12) !important; border-color: rgba(251,191,36,.35) !important; }
+
+/* Smash ▸ Format: the first row of the Smash controls - Singles / Doubles / Crew battle. */
+.smash-format-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 8px 10px; margin-bottom: 10px; border-radius: 8px;
+  background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.07); }
+.smash-format-row .seg-btn { min-width: 92px; }
+
+/* ── Smash game panel (Game Settings ▸ Smash) ──────────────────────────────────────────────────
+   Format row, one row of match-wide settings, then the match as two side cards - P1 red / P2 blue,
+   Smash's own player colours, the same the scoreboard uses. Every player row is the SAME grid
+   (face | name | fighter | stocks), so the fighter fields and stock controls line up down the card
+   whatever length the names are. */
+.sm-opts { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; margin: 0 0 12px; }
+.sm-opt { display: flex; flex-direction: column; gap: 4px; font-size: 11px; font-weight: 700;
+  letter-spacing: .06em; text-transform: uppercase; color: var(--muted, #8b8fa3); }
+.sm-opt .input-text { height: 32px; min-width: 70px; }
+.sm-opt input[type="text"] { width: 170px; }
+.sm-opt--check { flex-direction: row; align-items: center; gap: 8px; height: 32px; text-transform: none;
+  letter-spacing: 0; font-size: 13px; font-weight: 600; color: var(--text, #e6e8f0); }
+.sm-board { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; }
+.sm-side { --sc: #e0383e; position: relative; border-radius: 10px; overflow: hidden;
+  background: rgba(255,255,255,.025); border: 1px solid rgba(255,255,255,.07); }
+.sm-side--p2 { --sc: #2a7fff; }
+.sm-side::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--sc); }
+.sm-side-hd { display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 15px;
+  background: linear-gradient(90deg, rgba(0,0,0,0), rgba(0,0,0,0)), rgba(255,255,255,.03);
+  border-bottom: 1px solid rgba(255,255,255,.06); }
+.sm-tag { flex: 0 0 auto; font-size: 11px; font-weight: 800; letter-spacing: .08em; color: #fff;
+  background: var(--sc); border-radius: 4px; padding: 3px 6px; }
+.sm-side-name { flex: 1 1 auto; min-width: 0; font-weight: 800; font-size: 14px; letter-spacing: .02em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sm-games { display: flex; gap: 4px; }
+.sm-game { width: 16px; height: 8px; padding: 0; border: 1px solid rgba(255,255,255,.25); border-radius: 2px;
+  background: transparent; cursor: pointer; transform: skewX(-18deg); }
+.sm-game.on { background: var(--sc); border-color: var(--sc); box-shadow: 0 0 6px var(--sc); }
+.sm-score { display: flex; align-items: center; gap: 6px; }
+.sm-score-n { min-width: 22px; text-align: center; font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.sm-step { width: 26px; height: 26px; padding: 0; border-radius: 6px; cursor: pointer; line-height: 1;
+  font-size: 16px; font-weight: 700; color: var(--text, #e6e8f0);
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); }
+.sm-step:hover { background: rgba(255,255,255,.1); }
+.sm-rows { display: flex; flex-direction: column; padding: 6px 12px 8px 15px; }
+.sm-row { display: grid; grid-template-columns: 32px minmax(70px, 130px) minmax(0, 1fr) auto;
+  align-items: center; gap: 10px; padding: 6px 0; }
+.sm-row + .sm-row { border-top: 1px solid rgba(255,255,255,.05); }
+.sm-rows--solo .sm-row { grid-template-columns: 32px minmax(0, 1fr) auto; }
+.sm-row.is-out .sm-face, .sm-row.is-out .sm-pname { opacity: .4; }
+.sm-face { width: 32px; height: 32px; border-radius: 6px; object-fit: contain; background: rgba(255,255,255,.05); }
+.sm-pname { font-weight: 700; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sm-pname.is-empty { color: var(--muted, #8b8fa3); font-style: italic; font-weight: 600; }
+.sm-fighter-in { height: 32px; min-width: 0; width: 100%; cursor: pointer; }
+.sm-stocks { display: flex; align-items: center; gap: 6px; }
+.sm-pips { display: flex; gap: 4px; }
+.sm-stock { width: 14px; height: 14px; padding: 0; border-radius: 50%; cursor: pointer;
+  background: transparent; border: 2px solid rgba(255,255,255,.22); }
+.sm-stock.on { background: var(--sc); border-color: var(--sc); }
+.sm-side-ft { padding: 8px 12px 10px 15px; font-size: 12px; color: var(--muted, #8b8fa3);
+  border-top: 1px solid rgba(255,255,255,.06); }
+.sm-side-ft b { color: var(--text, #e6e8f0); font-size: 15px; }
+.sm-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; flex-wrap: wrap; }
+.sm-opt select.input-text { padding-top: 0; padding-bottom: 0; line-height: 30px; }

@@ -150,24 +150,45 @@
     /* ── Crew strip: one chip per PLAYER — their fighter, and their own stocks counting down
        from the starting number to zero. The team's shared pool is the `n / pool` tile beside the
        score; this is the per-player breakdown of it, so a caster can see who is still in. */
-    .crew { display: flex; align-items: center; gap: 12px; min-width: 0; max-width: 100%; overflow: hidden; height: 27px; }
+    /* Each player is a TILE in Smash's own notation: their fighter's stock icon and "x2" - the
+       stocks they have left as a number, the way the game's HUD and every Smash broadcast write it.
+       The player who is IN (crews play in order: the first with stocks left) gets a lit tile;
+       anyone eliminated fades to grey at x0. */
+    .crew { display: flex; align-items: stretch; gap: 5px; min-width: 0; max-width: 100%; height: 26px; width: 100%; }
     .p--b .crew { flex-direction: row-reverse; }
-    .crew-p { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; transition: opacity .3s ease; }
-    .crew-icon { width: 25px; height: 25px; object-fit: contain; filter: drop-shadow(0 1px 4px rgba(0,0,0,.75)); }
+    .crew-p {
+      flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 4px; padding: 0 8px 0 3px;
+      border-radius: 4px; background: rgba(0,0,0,.30);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.08);
+      transition: opacity .3s ease, background .3s ease, box-shadow .3s ease;
+    }
+    /* side B mirrors the ORDER of the tiles, never the inside of one: it is always icon then x2 */
+    .crew-p.now { background: rgba(255,255,255,.2); box-shadow: inset 0 0 0 1px rgba(255,255,255,.55), 0 0 10px rgba(255,255,255,.18); }
+    .crew-icon { width: 22px; height: 22px; object-fit: contain; flex: 0 0 auto; filter: drop-shadow(0 1px 3px rgba(0,0,0,.7)); }
     .crew-slot {
-      width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      width: 20px; height: 20px; border-radius: 4px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
       background: rgba(0,0,0,.35); color: rgba(255,255,255,.85); font-size: 12px; font-weight: 800;
     }
-    /* the player's own stocks, as pips so it reads as a countdown rather than a bare number */
-    .crew-pips { display: flex; align-items: center; gap: 3px; }
-    .crew-pip {
-      width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto;
-      background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.4);
-      transition: background .3s ease, opacity .3s ease, transform .3s ease;
-    }
-    .crew-pip.spent { background: rgba(0,0,0,.45); opacity: .5; transform: scale(.78); }
-    .crew-p.out { opacity: .34; }
-    .crew-p.out .crew-icon { filter: grayscale(1) brightness(.55); }
+    .crew-n { font-size: 17px; font-weight: 800; line-height: 1; color: #fff; font-variant-numeric: tabular-nums;
+      text-shadow: 0 1px 4px rgba(0,0,0,.7); }
+    .crew-n small { font-size: 12px; font-weight: 700; opacity: .75; margin-right: 1px; }
+    .crew-p.out { opacity: .38; background: rgba(0,0,0,.18); box-shadow: none; }
+    .crew-p.out .crew-icon { filter: grayscale(1) brightness(.6); }
+    /* The per-player breakdown is OFF by default: the board carries the one number a crew battle is
+       called on - the team's combined stocks, in the score cap - and the plate is just the team
+       name, sized like the singles board's. ?crew=1 brings the per-player tiles back. */
+    body:not(.show-crew) .crew { display: none; }
+    body:not(.show-crew) .name { font-size: 27px; }
+    /* The team's countries, straight after the name: one flag per country on the roster (a crew
+       from one country shows one), at most three so a mixed crew never crowds the plate. */
+    .name-row { display: flex; align-items: center; gap: 12px; min-width: 0; max-width: 100%; }
+    .p--b .name-row { flex-direction: row-reverse; }
+    .name-row .name { flex: 0 1 auto; min-width: 0; }
+    .flags { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; }
+    .p--b .flags { flex-direction: row-reverse; }
+    .flags.is-hidden { display: none; }
+    .flags img { width: 31px; height: 23px; object-fit: cover; border-radius: 3px;
+      box-shadow: 0 1px 5px rgba(0,0,0,.6); background: rgba(255,255,255,.06); }
 
 
     /* score cap at the inner edge */
@@ -191,8 +212,21 @@
 
     /* In a crew battle the big number is the STOCK POOL counting down to zero — that IS the score
        a caster calls. The set score (games won) lives in the pips beneath it. */
-    .pscore-n { line-height: 1; }
-    .pscore-sub { font-size: 11px; font-weight: 700; color: rgba(255,255,255,.55); line-height: 1; }
+    .pscore-n { line-height: 1; font-size: 40px; }
+    /* How much of the pool is left, as a thin bar under the number - reads at a glance where a
+       small "/ 12" never did. */
+    /* The cap holds the number and nothing else. What the number IS - in a crew battle the big
+       figure is stocks, not games - is said on the plate right beside it, so it reads "STOCKS 8". */
+    .stk-lbl { position: relative; z-index: 1; flex: 0 0 auto; align-self: center; padding: 0 12px;
+      font-size: 12px; font-weight: 800; letter-spacing: .2em; line-height: 1;
+      color: var(--pc-ink, #fff); opacity: .72; text-shadow: var(--pc-shadow, 0 1px 3px rgba(0,0,0,.55)); }
+    body:not(.flat) .stk-lbl { transform: skewX(var(--usk)); }
+    .pscore-meter { display: none; }
+    .pscore-meter { width: 44px; height: 4px; border-radius: 2px; background: rgba(0,0,0,.45);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.15); overflow: hidden; margin-top: 3px; }
+    .pscore-meter > i { display: block; height: 100%; width: 100%; background: #fff;
+      box-shadow: 0 0 5px rgba(255,255,255,.7); transition: width .35s ease; }
+    .p--b .pscore-meter > i { margin-left: auto; }
     .pscore-pips { display: flex; align-items: center; gap: 3px; height: 6px; }
     .pscore-pips.is-hidden { display: none; }
     /* Side B fills from its OUTER edge inward, mirroring side A. Both score caps sit against the
@@ -293,6 +327,31 @@
     .sub--a { grid-column: 1; --sc: var(--a-lite); }
     .sub--b { grid-column: 3; --sc: var(--b-lite); }
     .sub.is-hidden { display: none; }
+    /* Games won: ROUND MARKERS in their own block under the score cap (same x-range, so it reads
+       as the cap carried down), exactly as on the singles board - not squeezed into the cap under
+       the stock count. The info bar ends one seam before it. */
+    .tally {
+      grid-row: 2; align-self: start; position: relative; z-index: 2;
+      display: flex; align-items: center; padding: 0 10px;
+      margin-top: var(--sub-gap); height: var(--sub-h); width: 72px;
+      background: linear-gradient(180deg, #14161f, #06070c);
+      border-radius: 0 0 4px 4px;
+    }
+    .tally.is-hidden { display: none; }
+    .tally--a { grid-column: 1; justify-self: end; --tc: var(--score-a);
+      box-shadow: inset 0 2px 0 var(--score-a), inset 0 0 0 1px rgba(0,0,0,.55); }
+    .tally--b { grid-column: 3; justify-self: start; --tc: var(--score-b);
+      box-shadow: inset 0 2px 0 var(--score-b), inset 0 0 0 1px rgba(0,0,0,.55); }
+    .sb:not(.show) .tally { opacity: 0; }
+    .sb.show .tally { animation: wipe-mid .45s cubic-bezier(.2, .8, .3, 1) .46s both; }
+    .tally .pscore-pips { flex: 1 1 auto; height: 10px; gap: 4px; margin-top: 2px; }
+    .tally .pscore-pip { flex: 1 1 0; width: auto; height: 10px; border-radius: 1px;
+      background: rgba(255,255,255,.07); box-shadow: inset 0 0 0 1px rgba(255,255,255,.22); }
+    .tally .pscore-pip.won { background: linear-gradient(180deg, #fff 0%, #fff 55%, var(--tc) 100%);
+      box-shadow: 0 0 9px var(--tc), 0 0 2px rgba(255,255,255,.9); }
+    .sb.has-tally .sub { width: calc(100% - 76px); }
+    .sb.has-tally .sub--a { justify-self: start; }
+    .sb.has-tally .sub--b { justify-self: end; }
     .sub-frame {
       position: absolute; top: 0; left: 0; right: 0; bottom: 0;
       display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 14px;
@@ -303,6 +362,46 @@
     .sub-frame.on { opacity: 1; }
     .sub-frame .muted { color: rgba(255,255,255,.5); letter-spacing: .18em; font-size: 11px; }
 
+
+    /* ── Slant ────────────────────────────────────────────────────────────
+       The same fighting-game lean as the singles board (smash.html): each side is SKEWED - A leans
+       "/", B mirrors it "\" - so the plates open into a V round the brand mark, and every edge,
+       cap, sub-bar and round-marker block shares the one angle. Content is skewed back upright.
+       Everything skews about ONE line, the middle of bar 1, so a plate's edge and the bar under it
+       read as one continuous cut: for the row-2 pieces that line is (gap + bar-h/2) = 40px above
+       their top, written as a literal because calc() through var() is zero on Electron 18.
+       ?shape=flat restores the square board. */
+    :root { --lean: -18deg; --unlean: 18deg; --sub-origin: -40px; }
+    body:not(.flat) .p--a, body:not(.flat) .sub--a, body:not(.flat) .tally--a { --sk: var(--lean); --usk: var(--unlean); }
+    body:not(.flat) .p--b, body:not(.flat) .sub--b, body:not(.flat) .tally--b { --sk: var(--unlean); --usk: var(--lean); }
+    body:not(.flat) .p { transform: skewX(var(--sk)); clip-path: none; }
+    body:not(.flat) .sub, body:not(.flat) .tally { transform: skewX(var(--sk)); transform-origin: 50% var(--sub-origin); border-radius: 0; }
+    body:not(.flat) .pbody, body:not(.flat) .pscore > *, body:not(.flat) .logo,
+    body:not(.flat) .sub-frame { transform: skewX(var(--usk)); }
+    /* speed slashes at the outer end - after the logo tile when there is one */
+    body:not(.flat) .p::before {
+      content: ''; position: absolute; top: 0; bottom: 0; width: 20px; z-index: 2; pointer-events: none;
+      background: linear-gradient(90deg, var(--pc-ink, #fff) 0 5px, transparent 5px 11px,
+                                         var(--pc-ink, #fff) 11px 14px, transparent 14px);
+      opacity: .8;
+    }
+    body:not(.flat) .p--a::before { left: 9px; }
+    body:not(.flat) .p--b::before { right: 9px; transform: scaleX(-1); }
+    body:not(.flat) .p--a.has-logo::before { left: 76px; }
+    body:not(.flat) .p--b.has-logo::before { right: 76px; }
+    body:not(.flat) .p--a .pbody { padding-left: 34px; }
+    body:not(.flat) .p--b .pbody { padding-right: 34px; }
+    /* score cap: a bright slash seam where it meets the plate */
+    body:not(.flat) .pscore {
+      box-shadow: inset 3px 0 0 rgba(255,255,255,.92), inset 5px 0 0 rgba(0,0,0,.45),
+                  inset 0 2px 0 rgba(0,0,0,.5), inset 0 -2px 0 rgba(0,0,0,.5); }
+    body:not(.flat) .p--b .pscore {
+      box-shadow: inset -3px 0 0 rgba(255,255,255,.92), inset -5px 0 0 rgba(0,0,0,.45),
+                  inset 0 2px 0 rgba(0,0,0,.5), inset 0 -2px 0 rgba(0,0,0,.5); }
+    /* sub-bars carry P1 red / P2 blue along the top, like the singles board */
+    body:not(.flat) .sub--a { box-shadow: inset 0 2px 0 var(--score-a), inset 0 0 0 1px rgba(0,0,0,.55); }
+    body:not(.flat) .sub--b { box-shadow: inset 0 2px 0 var(--score-b), inset 0 0 0 1px rgba(0,0,0,.55); }
+    body:not(.flat) .sb.has-tally .sub-frame { letter-spacing: .1em; padding: 0 10px; }
   </style>
 </head>
 <body>
@@ -310,12 +409,13 @@
     <div class="p p--a">
       <div class="logo-tile is-hidden" id="tileA"><img class="logo" id="logoA" alt=""></div>
       <div class="pbody">
-        <div class="name" id="nameA">TEAM 1</div>
+        <div class="name-row"><div class="name" id="nameA">TEAM 1</div><span class="flags is-hidden" id="flagsA"></span></div>
         <div class="crew" id="crewA"></div>
       </div>
+      <span class="stk-lbl">Stocks</span>
       <div class="pscore">
         <span class="pscore-n" id="stockA">0</span>
-        <span class="pscore-sub" id="poolA"></span>
+        <span class="pscore-meter"><i id="meterA"></i></span>
         <span class="pscore-pips is-hidden" id="pipsA"></span>
       </div>
     </div>
@@ -331,17 +431,20 @@
     <div class="p p--b">
       <div class="logo-tile is-hidden" id="tileB"><img class="logo" id="logoB" alt=""></div>
       <div class="pbody">
-        <div class="name" id="nameB">TEAM 2</div>
+        <div class="name-row"><div class="name" id="nameB">TEAM 2</div><span class="flags is-hidden" id="flagsB"></span></div>
         <div class="crew" id="crewB"></div>
       </div>
+      <span class="stk-lbl">Stocks</span>
       <div class="pscore">
         <span class="pscore-n" id="stockB">0</span>
-        <span class="pscore-sub" id="poolB"></span>
+        <span class="pscore-meter"><i id="meterB"></i></span>
         <span class="pscore-pips is-hidden" id="pipsB"></span>
       </div>
     </div>
 
     <div class="sub sub--a is-hidden" id="subA"></div>
+    <div class="tally tally--a is-hidden" id="tallyA"></div>
+    <div class="tally tally--b is-hidden" id="tallyB"></div>
     <div class="sub sub--b is-hidden" id="subB"></div>
   </div>
 
@@ -418,14 +521,16 @@
           const face = slugs[i]
             ? `<img class="crew-icon" src="${SmashFighters.stockUrl(slugs[i])}" alt="">`
             : `<span class="crew-slot">${i + 1}</span>`;
-          const pips = Array.from({ length: per }, () => '<span class="crew-pip"></span>').join('');
-          return `<span class="crew-p">${face}<span class="crew-pips">${pips}</span></span>`;
+          return `<span class="crew-p">${face}<span class="crew-n"><small>&times;</small><b>${per}</b></span></span>`;
         }).join('');
       }
+      // Crews play in order, so the player IN is the first one who still has stocks.
+      const now = players.findIndex((n) => (Number(n) || 0) > 0);
       [].forEach.call(wrap.children, (chip, i) => {
         const left = Math.max(0, Math.min(per, Number(players[i]) || 0));
-        [].forEach.call(chip.querySelectorAll('.crew-pip'), (pip, j) => pip.classList.toggle('spent', j >= left));
+        const n = chip.querySelector('.crew-n b'); if (n) n.textContent = String(left);
         chip.classList.toggle('out', left <= 0);
+        chip.classList.toggle('now', i === now);
       });
       const pool = stockPool(smashSide, startStocks);
       return { left: Math.max(0, Math.min(pool, teamStocks(smashSide))), pool };
@@ -491,24 +596,70 @@
     }
 
 
+    // Flag files are named by ISO-2 code. start.gg puts the country NAME on `country` and the code on
+    // `countryCode`, so only a 2-letter value is ever used (same rule as the singles board).
+    const FLAG_BASE = '/fgc/static/flags/flags/1x1/';
+    function ccOf(p) {
+      for (const c of [p && p.countryCode, p && p.country]) {
+        const v = str(c).toLowerCase();
+        if (/^[a-z]{2}$/.test(v)) return v;
+      }
+      return '';
+    }
+    // One flag per distinct country on the roster, in roster order, capped at three.
+    function renderFlags(wrap, team) {
+      if (!wrap) return;
+      const seen = [];
+      (Array.isArray(team.players) ? team.players : []).forEach((p) => {
+        const cc = ccOf(p);
+        if (cc && seen.indexOf(cc) === -1) seen.push(cc);
+      });
+      const list = seen.slice(0, 3);
+      const sig = list.join(',');
+      if (wrap.dataset.sig !== sig) {
+        wrap.dataset.sig = sig;
+        wrap.innerHTML = list.map((cc) => `<img src="${FLAG_BASE}${cc}.svg" alt="">`).join('');
+      }
+      wrap.classList.toggle('is-hidden', !list.length);
+    }
+
     function renderSide(suffix, team, smashSide, seriesScore, record, startStocks) {
       team = team || {};
       el('name' + suffix).textContent = str(team.name) || ('TEAM ' + (suffix === 'A' ? '1' : '2'));
+      renderFlags(el('flags' + suffix), team);
       const pool = renderCrew(el('crew' + suffix), smashSide, startStocks);
       // The cap is the stock countdown; the pool size sits under it so "6" reads as "6 of 12 left".
       el('stock' + suffix).textContent = String(pool.left);
-      const pe = el('pool' + suffix);
-      if (pe) { pe.textContent = pool.pool ? ('/ ' + pool.pool) : ''; }
+      const meter = el('meter' + suffix);
+      if (meter) meter.style.width = (pool.pool ? Math.round(100 * pool.left / pool.pool) : 0) + '%';
       const logo = str(team.logo);
       const tile = el('tile' + suffix);
       const img = el('logo' + suffix);
       if (logo) { if (img.getAttribute('src') !== logo) img.src = logo; tile.classList.remove('is-hidden'); }
       else tile.classList.add('is-hidden');
+      tile.parentElement.classList.toggle('has-logo', !!logo);   // the speed slashes sit after the tile
       return smashSide;   // frames are built in render(), which owns the context strings
     }
 
+    // ?follow=0 pins this source to the crew board whatever format Game Settings ▸ Smash is on.
+    const FOLLOW = QP.get('follow') !== '0';
+    // ?shape=flat - the old square board, for sources framed around it.
+    if (QP.get('shape') === 'flat') document.body.classList.add('flat');
+    const FLAT = document.body.classList.contains('flat');
+    if (QP.get('crew') === '1') document.body.classList.add('show-crew');
+    // Games-won pips live in the round-marker blocks under the caps (see .tally).
+    ['A', 'B'].forEach((k) => el('tally' + k).appendChild(el('pips' + k)));
+
     function render(data) {
       data = data || {};
+      // Singles and doubles are laid out on smash.html - follow the format picker back there,
+      // carrying the URL params (smash.html sends Crew here), so one browser source covers all three.
+      const smashMode = ((data.smash || {}).mode) || '';
+      if (FOLLOW && (smashMode === 'singles' || smashMode === 'doubles')
+          && !(typeof SceneBase !== 'undefined' && SceneBase.preview)) {
+        location.replace('/smash.html' + location.search);
+        return;
+      }
       const teams = data.teams || {};
       const series = data.series || {};
       const smash = data.smash || { blue: {}, orange: {}, startStocks: 3 };
@@ -585,7 +736,9 @@
         }
         [].forEach.call(row.children, (pip, i) => pip.classList.toggle('won', i < won));
         row.classList.toggle('is-hidden', need < 2);
+        el('tally' + sfx).classList.toggle('is-hidden', need < 2);
       });
+      el('sb').classList.toggle('has-tally', need >= 2);
 
       /* Centre the brand mark on the WHOLE stack, not on bar 1. Measured rather than assumed, so
          it stays true if a bar's height changes — and when the sub-bars are hidden (nothing to
@@ -606,7 +759,14 @@
     // with the scoreboard's left edge so it tracks ?w= and ?top=.
     if (typeof CasterRail !== 'undefined') CasterRail.mount({
       variant: 'chip', bottom: 30, anchor: '#sb', vAnchor: '.brandmark',
-      posFrom: function (d) { return ((d || {}).smash || {}).railPos; }
+      // beside the board it docks as a third plate: bar-1-high sponsor row, seam, sub-bar-high talent row
+      dock: { a: 72, b: 28, gap: 4, lean: !FLAT },
+      gap: FLAT ? 22 : 36,   // the slanted plate's sub-bar leans out past the board's box at its foot
+      // 'auto' = beside player 1 on the crew board (the per-player HUD owns the bottom of frame)
+      posFrom: function (d) {
+        const rp = ((d || {}).smash || {}).railPos;
+        return rp === 'bottom' ? 'bottom' : 'topleft';
+      }
     });
 
     if (typeof SceneBase !== 'undefined') {

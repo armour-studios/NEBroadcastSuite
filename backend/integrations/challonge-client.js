@@ -1,11 +1,12 @@
 const axios = require('axios');
 
 const CHALLONGE_API_BASE = 'https://api.challonge.com/v1';
+const CHALLONGE_API_V2_BASE = 'https://api.challonge.com/v2.1';
 
 function createChallongeClient(apiKey) {
   if (!apiKey) {
     const stub = async () => { throw new Error('Challonge API key not configured'); };
-    return { get: stub, put: stub, post: stub, del: stub };
+    return { get: stub, getV2: stub, put: stub, post: stub, del: stub };
   }
 
   const baseHeaders = { 'User-Agent': 'NE-Broadcast-Suite/1.0', 'Accept': 'application/json' };
@@ -86,7 +87,20 @@ function createChallongeClient(apiKey) {
     return handleResponse(res, path);
   }
 
-  return { get, post, put, del };
+  // APIv2.1 read with the same v1 key (Authorization-Type: v1). Only used where v2.1 exposes
+  // something v1 can't — e.g. affiliates' community tournaments (include_community_tournaments=1).
+  async function getV2(path, params = {}) {
+    const res = await withRetry(() => axios.get(`${CHALLONGE_API_V2_BASE}${path}`, {
+      params,
+      headers: { ...baseHeaders, 'Authorization-Type': 'v1', 'Authorization': apiKey, 'Content-Type': 'application/vnd.api+json' },
+      timeout: 30000,
+      validateStatus: () => true
+    }), `GET v2.1 ${path}`);
+    if (res.status !== 200) return handleResponse(res, path);
+    return res.data;
+  }
+
+  return { get, getV2, post, put, del };
 }
 
 module.exports = { createChallongeClient };

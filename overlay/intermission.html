@@ -11,6 +11,8 @@
     eventName                 — event title line
     brand.logo / brand.color  — logo image + accent colour
 
+    compFeed.next            — UP NEXT strip (live competition; off via competition.feeds.brb or ?next=0)
+
   URL params:
     ?label=NEXT MAP IN  override label
     ?title=off          hide event title
@@ -230,6 +232,31 @@
       0%   { background-position: 220% 0; }
       100% { background-position: -220% 0; }
     }
+
+    /* UP NEXT — the live competition's next fixture, under the panel. Only drawn when a league is
+       live and the producer left "BRB shows the next match" on (competition.feeds.brb). */
+    .im-next {
+      margin: 18px auto 0; width: 86%;
+      display: flex; align-items: center; gap: 22px; padding: 16px 30px;
+      background: rgba(9, 11, 19, .92); border: 1px solid rgba(255,255,255,.09); border-radius: 16px;
+      box-shadow: 0 18px 50px rgba(0,0,0,.55);
+    }
+    .im-next.hidden { display: none; }
+    .im-next-tag {
+      flex-shrink: 0; font-size: 13px; font-weight: 800; letter-spacing: .3em; color: var(--accent);
+      padding-right: 22px; border-right: 1px solid rgba(255,255,255,.12); line-height: 1.2;
+    }
+    .im-next-tag.live { color: #22e06a; }
+    .im-next-match { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 16px; }
+    .im-next-team { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1; }
+    /* Both names hug the VS: A is reversed (logo outermost), so its main-start is the RIGHT edge. */
+    .im-next-team.a { flex-direction: row-reverse; justify-content: flex-start; }
+    .im-next-team.b { justify-content: flex-start; }
+    .im-next-name { font-size: 26px; font-weight: 800; color: #fff; text-transform: uppercase; letter-spacing: .03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .im-next-logo { width: 40px; height: 40px; object-fit: contain; flex-shrink: 0; }
+    .im-next-vs { font-size: 16px; font-weight: 800; color: rgba(255,255,255,.4); letter-spacing: .2em; flex-shrink: 0; }
+    .im-next-when { flex-shrink: 0; font-size: 17px; font-weight: 700; color: rgba(255,255,255,.62); letter-spacing: .12em; text-transform: uppercase; padding-left: 22px; border-left: 1px solid rgba(255,255,255,.12); }
+    .im-next-when:empty { display: none; }
   </style>
 </head>
 <body>
@@ -260,6 +287,15 @@
           <div class="im-event hidden" id="event-title"></div>
         </div>
       </div>
+    </div>
+    <div class="im-next hidden" id="next">
+      <div class="im-next-tag" id="next-tag">UP NEXT</div>
+      <div class="im-next-match">
+        <div class="im-next-team a"><span class="im-next-name" id="next-a"></span><img class="im-next-logo" id="next-a-logo" alt=""></div>
+        <span class="im-next-vs">VS</span>
+        <div class="im-next-team b"><img class="im-next-logo" id="next-b-logo" alt=""><span class="im-next-name" id="next-b"></span></div>
+      </div>
+      <div class="im-next-when" id="next-when"></div>
     </div>
   </div>
 
@@ -348,6 +384,8 @@
         pbWrap.classList.add('is-empty');
       }
 
+      renderNext(data);
+
       let titleText = '';
       if (QTITLE != null) { titleText = /^(off|none|hide|0)$/i.test(QTITLE.trim()) ? '' : QTITLE.trim(); }
       else { titleText = (data.eventName || '').toString().trim(); }
@@ -387,10 +425,45 @@
       }
     }
 
+    // "7:30 PM" today, "SAT 9/20 · 7:30 PM" otherwise.
+    function fmtWhen(m, data) {
+      if (!m || (!m.date && !m.time)) return '';
+      if (m.postponed) return 'POSTPONED';
+      const t24 = !!data.clock24h, intl = data.dateFormat === 'intl';
+      const d = new Date((m.date || new Date().toISOString().slice(0, 10)) + 'T' + (m.time && /^\d{1,2}:\d{2}/.test(m.time) ? (m.time.length === 4 ? '0' + m.time : m.time) : '12:00'));
+      if (isNaN(d.getTime())) return [m.date, m.time].filter(Boolean).join(' ');
+      const h = d.getHours(), mi = String(d.getMinutes()).padStart(2, '0');
+      const time = m.time ? (t24 ? String(h).padStart(2, '0') + ':' + mi : ((h % 12) || 12) + ':' + mi + (h < 12 ? ' AM' : ' PM')) : '';
+      if (!m.date || d.toDateString() === new Date().toDateString()) return time;
+      const day = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][d.getDay()];
+      return day + ' ' + (intl ? d.getDate() + '/' + (d.getMonth() + 1) : (d.getMonth() + 1) + '/' + d.getDate()) + (time ? ' · ' + time : '');
+    }
+    function renderNext(data) {
+      const box = el('next');
+      const on = !(data.competition && data.competition.feeds && data.competition.feeds.brb === false);
+      const f = data.compFeed;
+      const m = f && f.next && f.next.id ? f.next : null;
+      if (!on || !m || QP.get('next') === '0') { box.classList.add('hidden'); return; }
+      box.classList.remove('hidden');
+      el('next-tag').textContent = m.status === 'live' ? 'LIVE NOW' : 'UP NEXT';
+      el('next-tag').classList.toggle('live', m.status === 'live');
+      el('next-a').textContent = m.teamA || 'TBD';
+      el('next-b').textContent = m.teamB || 'TBD';
+      const saved = {};
+      (data.savedTeams || []).forEach((t) => { if (t && t.name && t.logo) saved[t.name.toLowerCase()] = t.logo; });
+      const logo = (name) => (f.logos && f.logos[name]) || saved[(name || '').toLowerCase()] || '';
+      [['next-a-logo', m.teamA], ['next-b-logo', m.teamB]].forEach(([id, name]) => {
+        const img = el(id), src = logo(name);
+        if (src) { img.src = src; img.style.display = ''; } else { img.removeAttribute('src'); img.style.display = 'none'; }
+      });
+      el('next-when').textContent = m.status === 'live' ? '' : fmtWhen(m, data);
+    }
+
     if (location.protocol === 'file:') {
       render({
         breakScreen: { visible: true, title: 'NEXT MAP IN', endsAt: Date.now() + 4 * 60 * 1000 + 22 * 1000 },
         eventName: 'Summer Showdown 2024',
+        compFeed: { next: { id: 'm1', status: 'upcoming', teamA: 'Riverside', teamB: 'Lakeside North', date: '', time: '19:30' }, logos: {} },
         brand: { color: '#e83a8b', accent: '#8b5cf6', logo: '' },
         scoreboardAd: { label: 'PRESENTED BY', logo: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="40"><rect width="160" height="40" rx="4" fill="#1a1d24"/><text x="80" y="27" font-size="18" fill="#e8eaf0" text-anchor="middle" font-family="Arial" font-weight="bold">SPONSOR</text></svg>') }
       });

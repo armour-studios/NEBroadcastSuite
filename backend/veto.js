@@ -10,14 +10,27 @@
 // CS2 ships with radar PNGs we already host; other games carry names (drop images
 // into /assets/<game>/maps/ later and fill the `image` field to light them up).
 const MAP_POOLS = {
+  // Every CS2 map we have radar art for. `tier` works exactly like Smash's (see below): a default
+  // ruleset hint that seeds the guided veto's "Ban from" picker — the veto bans from the 7-map
+  // Active Duty pool unless the producer picks Reserve or all maps. The Map Pool / Series editors
+  // always list the whole set, so an event running Cache or Overpass can still put it on the board.
   csgo: [
-    { id: 'mirage',   name: 'Mirage',   image: '/assets/csgo/maps/de_mirage.png' },
-    { id: 'inferno',  name: 'Inferno',  image: '/assets/csgo/maps/de_inferno.png' },
-    { id: 'nuke',     name: 'Nuke',     image: '/assets/csgo/maps/de_nuke.png' },
-    { id: 'ancient',  name: 'Ancient',  image: '/assets/csgo/maps/de_ancient.png' },
-    { id: 'anubis',   name: 'Anubis',   image: '/assets/csgo/maps/de_anubis.png' },
-    { id: 'dust2',    name: 'Dust II',  image: '/assets/csgo/maps/de_dust2.png' },
-    { id: 'train',    name: 'Train',    image: '/assets/csgo/maps/de_train.png' }
+    { id: 'mirage',   name: 'Mirage',   tier: 'Active Duty', image: '/assets/csgo/maps/de_mirage.png' },
+    { id: 'inferno',  name: 'Inferno',  tier: 'Active Duty', image: '/assets/csgo/maps/de_inferno.png' },
+    { id: 'nuke',     name: 'Nuke',     tier: 'Active Duty', image: '/assets/csgo/maps/de_nuke.png' },
+    { id: 'ancient',  name: 'Ancient',  tier: 'Active Duty', image: '/assets/csgo/maps/de_ancient.png' },
+    { id: 'anubis',   name: 'Anubis',   tier: 'Active Duty', image: '/assets/csgo/maps/de_anubis.png' },
+    { id: 'dust2',    name: 'Dust II',  tier: 'Active Duty', image: '/assets/csgo/maps/de_dust2.png' },
+    { id: 'train',    name: 'Train',    tier: 'Active Duty', image: '/assets/csgo/maps/de_train.png' },
+    { id: 'overpass', name: 'Overpass', tier: 'Reserve',     image: '/assets/csgo/maps/de_overpass.png' },
+    { id: 'vertigo',  name: 'Vertigo',  tier: 'Reserve',     image: '/assets/csgo/maps/de_vertigo.png' },
+    { id: 'cache',    name: 'Cache',    tier: 'Reserve',     image: '/assets/csgo/maps/de_cache.png' },
+    { id: 'office',   name: 'Office',   tier: 'Reserve',     image: '/assets/csgo/maps/cs_office.png' },
+    { id: 'italy',    name: 'Italy',    tier: 'Reserve',     image: '/assets/csgo/maps/cs_italy.png' },
+    { id: 'basalt',   name: 'Basalt',   tier: 'Reserve',     image: '/assets/csgo/maps/de_basalt.png' },
+    { id: 'edin',     name: 'Edin',     tier: 'Reserve',     image: '/assets/csgo/maps/de_edin.png' },
+    { id: 'palais',   name: 'Palais',   tier: 'Reserve',     image: '/assets/csgo/maps/de_palais.png' },
+    { id: 'whistle',  name: 'Whistle',  tier: 'Reserve',     image: '/assets/csgo/maps/de_whistle.png' }
   ],
   valorant: [
     { id: 'ascent', name: 'Ascent', image: '' }, { id: 'bind', name: 'Bind', image: '' },
@@ -143,7 +156,7 @@ const MODE_OPTIONS = {
 
 // Per-game terminology so the UI/board read correctly per selection type.
 const VETO_META = {
-  csgo:            { kind: 'map',   banWord: 'Ban',    unit: 'map' },
+  csgo:            { kind: 'map',   banWord: 'Ban',    unit: 'map', strikeFrom: 'Active Duty' },
   valorant:        { kind: 'map',   banWord: 'Ban',    unit: 'map' },
   rainbow6:        { kind: 'map',   banWord: 'Ban',    unit: 'map' },
   overwatch:       { kind: 'map',   banWord: 'Ban',    unit: 'map', hasBans: true, modes: MODE_OPTIONS.overwatch },
@@ -235,7 +248,16 @@ function buildSequence(game, bestOf, poolSize) {
   // Smash strikes down to one stage for game 1 regardless of how many starters the pool holds.
   if (game === 'smash') return smashStrikeOrder(poolSize).map(s => ({ action: s[0], teamIdx: s[1] }));
   const fmt = VETO_FORMATS[game] && VETO_FORMATS[game][bo];
-  if (fmt) return fmt.map(s => ({ action: s[0], teamIdx: s[1] }));
+  if (fmt) {
+    const steps = fmt.map(s => ({ action: s[0], teamIdx: s[1] }));
+    // STD7 is authored for a 7-map pool (its steps + 1 decider). A bigger pool — CS2 vetoing from
+    // "All maps" — would leave every extra map standing as a decider, so open with alternating
+    // bans until 7 remain, flipping the authored order when needed so turns stay alternating.
+    const extra = VETO_FORMATS[game] === STD7 ? Math.max(0, (Number(poolSize) || 0) - (fmt.length + 1)) : 0;
+    if (!extra) return steps;
+    const lead = Array.from({ length: extra }, (_, i) => ({ action: 'ban', teamIdx: i % 2 }));
+    return lead.concat(steps.map(s => ({ action: s.action, teamIdx: extra % 2 ? 1 - s.teamIdx : s.teamIdx })));
+  }
   // Generic fallback for games without an authored format: alternate bans until
   // `bo` maps remain (the remainder become deciders).
   const bans = Math.max(0, poolSize - bo);

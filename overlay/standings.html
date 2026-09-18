@@ -80,8 +80,15 @@ html, body {
   font-family: var(--disp);
   font-size: 58px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
   color: #fff; line-height: 0.98; text-shadow: 0 8px 40px rgba(0,0,0,0.7);
-  /* Whole event name, never truncated — wraps to two lines; fit() rescales if it grows */
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  /* ONE line. A long event name used to wrap into a two-deck block that ate a line of height and
+     read as two headlines; fitTitle() steps the size down until the whole name fits instead. */
+  white-space: nowrap; overflow: hidden;
+}
+/* Safety net for a name too long to fit even at the floor size — back to the old two-line clamp,
+   because the event name is never truncated. */
+.st-title.is-wrapped {
+  white-space: normal;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
 }
 .st-subtitle { font-size: 21px; font-weight: 600; letter-spacing: 1px; color: rgba(255,255,255,.85); }
 .st-subtitle:empty { display: none; }
@@ -275,6 +282,12 @@ html, body {
 }
 .st-pl-hero .st-pl-name { font-size: 54px; }
 .st-pl-row-b .st-pl-name { font-size: 21px; }
+/* Player flag, inline before the name (start.gg country / profile registry). */
+.st-pl-flag { display: inline-block; vertical-align: middle; width: 34px; height: 24px; margin: -4px 10px 0 0;
+  object-fit: cover; border-radius: 3px; box-shadow: 0 1px 6px rgba(0,0,0,.6); }
+.st-pl-hero .st-pl-flag { width: 58px; height: 40px; margin: -8px 14px 0 0; }
+.st-pl-row-b .st-pl-flag { width: 26px; height: 18px; margin-right: 8px; }
+.st-pl-chip .st-pl-flag { width: 22px; height: 15px; margin: 0; }
 /* Squad list for a team / doubles entrant, under the team name. */
 .st-pl-roster {
   margin-top: 4px; font-size: 15px; font-weight: 600; line-height: 1.15; color: rgba(255,255,255,.92);
@@ -452,6 +465,7 @@ html, body {
     if (hasPoints)  cols += ' 104px';
     return cols;
   }
+  let stProfiles = {};          // playerProfiles, refreshed per render — flag fallback for Top 8 cards
   let stGamesLabel = 'Games';   // "Games" (RL/MOBA) or "Maps" (CS2/Valorant) — set per push from gamesLabel
   function buildHead(showRecord, hasGames, hasPoints) {
     const row = document.createElement('div');
@@ -526,6 +540,34 @@ html, body {
       ? '0 2px 6px rgba(0,0,0,.45)' : '0 1px 0 rgba(255,255,255,.45)');
   }
 
+  // start.gg carries the sponsor inline in the ENTRANT name ("Agency | Morris"), while an unsponsored
+  // player is just their tag. Printed raw, a top 8 reads as three "Org | Tag" cards among five bare
+  // tags. The wall is a card per finisher, so print the tag they are known by and drop the org.
+  // Only an exact two-part "ORG | TAG" is split - a doubles entrant ("Org | A / Org | B") or any
+  // other shape is left exactly as the bracket spells it.
+  function entrantTag(name) {
+    const raw = String(name == null ? '' : name).trim();
+    const parts = raw.split(/\s*[|\uFF5C]\s*/).map((x) => x.trim()).filter(Boolean);
+    return parts.length === 2 ? parts[1] : raw;
+  }
+
+  // Country flag for a finisher: start.gg's own countryCode on the row (fetchEventPlacements), else
+  // the player-profile registry by the tag the card prints. ISO-2 only — a country NAME is not a file.
+  const FLAG_BASE = '/fgc/static/flags/flags/1x1/';
+  function flagFor(entry) {
+    const iso = (v) => { const s = String(v == null ? '' : v).trim().toLowerCase(); return /^[a-z]{2}$/.test(s) ? s : ''; };
+    let cc = iso(entry && entry.countryCode);
+    if (!cc && entry) {
+      const solo = Array.isArray(entry.players) && entry.players.length === 1 ? entry.players : [];
+      const keys = [entrantTag(entry.name), entry.name].concat(solo);
+      for (const k of keys) {
+        const pr = stProfiles[String(k || '').trim().toLowerCase()];
+        if (pr && (cc = iso(pr.countryCode))) break;
+      }
+    }
+    return cc ? `<img class="st-pl-flag" src="${FLAG_BASE}${cc}.svg" alt="" onerror="this.remove()">` : '';
+  }
+
   function characterArt(entry) {
     if (!entry || !entry.character || !window.SmashFighters) return null;
     const f = SmashFighters.resolve(entry.character);
@@ -557,7 +599,7 @@ html, body {
       </div>
       <div class="st-pl-rank">${rank}</div>
       <div class="st-pl-foot">
-        <div class="st-pl-name">${esc(entry.name || 'TBD')}</div>
+        <div class="st-pl-name">${flagFor(entry)}${esc(entrantTag(entry.name) || 'TBD')}</div>
         ${showRoster ? `<div class="st-pl-roster">${esc(roster.join(' · '))}</div>` : ''}
         <div class="st-pl-meta">${esc(bits.join(' · '))}</div>
       </div>`;
@@ -597,7 +639,7 @@ html, body {
       const art = characterArt(entry);
       const chip = document.createElement('div');
       chip.className = 'st-pl-chip';
-      chip.innerHTML = `${art ? `<img src="${art.icon}" alt="">` : ''}<b>${Number(entry.placement) || (9 + i)}</b><span>${esc(entry.name || 'TBD')}</span>`;
+      chip.innerHTML = `${art ? `<img src="${art.icon}" alt="">` : ''}<b>${Number(entry.placement) || (9 + i)}</b>${flagFor(entry)}<span>${esc(entrantTag(entry.name) || 'TBD')}</span>`;
       restEl.appendChild(chip);
     });
     restEl.style.display = rest.length ? '' : 'none';
@@ -656,6 +698,23 @@ html, body {
   }
 
   // Scale the natural-size layout to fill the 16:9 canvas (matches bracket.html's fit()).
+  // The event name is one headline, so it is sized to the width the header actually has rather
+  // than allowed to wrap. Steps down from the design size; if even the floor will not fit, the
+  // name wraps again (is-wrapped) instead of being cut off.
+  const TITLE_MAX = 58, TITLE_MIN = 30;
+  function fitTitle() {
+    const t = el('st-title');
+    if (!t) return;
+    t.classList.remove('is-wrapped');
+    let px = TITLE_MAX;
+    t.style.fontSize = px + 'px';
+    while (px > TITLE_MIN && t.scrollWidth > t.clientWidth + 1) {
+      px -= 2;
+      t.style.fontSize = px + 'px';
+    }
+    if (t.scrollWidth > t.clientWidth + 1) t.classList.add('is-wrapped');
+  }
+
   function fit() {
     const scale = el('st-scale');
     if (!scale) return;
@@ -704,6 +763,7 @@ html, body {
                : (src.indexOf('startgg') === 0 && live.length && frozen.length && !overlap) ? live
                : (frozen.length ? frozen : live);
     const maps = teamMaps(data);
+    stProfiles = data.playerProfiles || {};
 
     const showRecord = stState.showRecord !== false && rows.some(r => r.wins != null || r.losses != null);
     const hasPoints = rows.some(r => r.points != null);
@@ -723,15 +783,18 @@ html, body {
     // the board down + replayed every slide-in. Project to displayed fields so it only rebuilds when
     // something visible actually changes. (`lm` still catches logos that backfill from a later fetch.)
     const rowSig = rows.map((r) => [r.division, r.qualified,
-      r.name, r.placement, r.wins, r.losses, r.points, r.gameWins, r.gameLosses, r.color, r.played, r.character,
+      r.name, r.placement, r.wins, r.losses, r.points, r.gameWins, r.gameLosses, r.color, r.played, r.character, r.countryCode,
       (Array.isArray(r.players) ? r.players.join('~') : ''), (r.logo ? 1 : 0)
     ].join('')).join('');
     // The placement wall is the SMASH board — it only ever draws for a game with the 'stocks'
     // feature. Gating here and not just on stState.layout matters: the layout is persisted, so a
     // board pushed during a Smash event would otherwise still draw as character cards after the
     // producer switched the active game. Within Smash, 'podium' opts back into the normal board.
+    // Widened from Smash to every fighting game ('fgc'): Marvel Tokon, Tekken etc. get the same
+    // top-8 wall. Their cards fall back to the entrant logo (fighter art is Smash-only) and carry
+    // the player's flag.
     const gameDef = (data.games || {})[data.activeGame] || {};
-    const smashGame = (gameDef.features || []).indexOf('stocks') >= 0;
+    const smashGame = (gameDef.features || []).some((f) => f === 'stocks' || f === 'fgc');
     // Divisions win over the podium whenever the rows actually carry more than one: a podium
     // built across two conferences ranks teams against opponents they never played, which
     // states a standing that does not exist. An explicit 'podium' still forces the old board.
@@ -748,6 +811,11 @@ html, body {
     document.documentElement.style.setProperty('--accent-2', accent2);
     if (data.fontFamily) document.documentElement.style.setProperty('--main-font', `'${data.fontFamily}', 'Bourgeois', 'Inter', sans-serif`);
     el('st-title').textContent = title;
+    fitTitle();
+    // Measure again once the display webfont is in. The first pass runs against the fallback face,
+    // which is narrower - the name "fit" at full size and then overflowed the moment Bourgeois
+    // swapped in. fonts.ready settles after any face this render just asked for.
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { fitTitle(); fit(); });
     el('st-subtitle').textContent = subtitle;
     el('st-credit').textContent = (stState.attribution || '').toString();
 

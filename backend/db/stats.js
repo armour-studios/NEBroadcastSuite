@@ -532,7 +532,7 @@ function hasEventResults(eventSlug) { return DB.event_results.some((e) => e.even
 // `aliasMap` (optional): normalizedTeamName -> canonical key. Supply it and every name a squad has
 // competed under collapses into ONE bucket, which is what stops a rebrand deleting a team's record.
 // Without it the function behaves exactly as before, keyed on the normalized name — the caller owns
-// team identity (backend/player-identity.js resolves it by roster overlap); this file just counts.
+// team identity (the removed identity layer used to resolve it by roster overlap); this file just counts.
 //
 // Results are emitted under BOTH the canonical key and every alias that fed it, so a lookup by any
 // of the team's names finds the merged score without the caller needing to know the canonical id.

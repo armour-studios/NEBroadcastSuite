@@ -91,7 +91,7 @@ img{display:block;}
 .event-line:empty,.event-line.hidden{display:none;}
 
 /* ── BOTTOM-RIGHT: the big player card (covers the in-game corner) ─────────────── */
-.pcard{position:absolute;right:40px;bottom:40px;width:470px;
+.pcard{position:absolute;right:40px;bottom:40px;width:470px;z-index:2;
   background:linear-gradient(180deg,var(--glass),var(--glass-2));
   /* React HUD polygonal silhouette (angled left edge) + team-colour edge glow. clip-path clips a
      box-shadow, so the depth + glow use filter:drop-shadow, which follows the shape. Stays opaque. */
@@ -104,6 +104,23 @@ img{display:block;}
   background:var(--me);box-shadow:0 0 12px color-mix(in srgb,var(--me) 90%,transparent);}
 .pcard.gone{opacity:0;transform:translateY(14px);transition:opacity .3s,transform .3s;pointer-events:none;}
 @keyframes rise{from{opacity:0;transform:translateY(24px);}}
+
+/* ── OCCASIONAL SPONSOR ROLL-OUT (RLCS-style) — a title-sponsor tab that rolls out horizontally
+   from BEHIND the player card's left edge every so often, holds, then rolls back under it. Sits at
+   a LOWER z-index than the opaque card, so retracted it is completely hidden beneath it. */
+.spon-roll{position:absolute;right:96px;bottom:52px;z-index:1;
+  display:flex;align-items:center;gap:12px;height:48px;max-width:340px;padding:0 18px 0 16px;border-radius:9px 0 0 9px;
+  background:linear-gradient(180deg,#ffffff,#e9edf5);box-shadow:0 10px 26px rgba(0,0,0,.5);
+  /* team-colour top edge — the only accent, kept on the visible (non-tucked) part */
+  border-top:3px solid var(--me);
+  transform:translateX(0);   /* retracted: fully tucked under the opaque card */
+  transition:transform .62s cubic-bezier(.22,.9,.24,1);
+  pointer-events:none;white-space:nowrap;}
+/* rolled out: the whole tab clears the card's left edge, its right edge staying seamed under it */
+.spon-roll.out{transform:translateX(-420px);}
+.spon-roll.empty{display:none;}
+.spon-roll .sr-lbl{font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#5a6474;}
+.spon-roll img{max-height:32px;max-width:140px;object-fit:contain;display:block;}
 
 /* ME row — big boost ring + name + stats */
 .me{display:flex;align-items:center;gap:22px;padding:22px 22px 16px 32px;}   /* extra left pad clears the angled edge */
@@ -237,6 +254,13 @@ img{display:block;}
 
 <!-- EVENT title, hangs under the scorebar (only when one is set in the app) -->
 <div id="event-line" class="event-line hidden"></div>
+
+<!-- OCCASIONAL SPONSOR ROLL-OUT — tucked BEHIND the card (earlier in DOM + lower z-index), rolls out
+     from the card's left edge every so often. -->
+<div id="spon-roll" class="spon-roll empty" aria-hidden="true">
+  <span class="sr-lbl">Presented by</span>
+  <img id="spon-roll-logo" alt="">
+</div>
 
 <!-- BIG BOTTOM-RIGHT PLAYER CARD -->
 <div id="pcard" class="pcard gone">
@@ -377,6 +401,39 @@ function render(data){
     row.appendChild(nm); row.appendChild(mini); row.appendChild(bst);
     wrap.appendChild(row);
   });
+
+  // keep the sponsor roll-out's logo current (the title-tagged brand-kit sponsor)
+  updateSponsorRoll();
+}
+
+/* ── OCCASIONAL SPONSOR ROLL-OUT (RLCS-style) ──────────────────────────────────────
+   The title sponsor tab rolls out from behind the card every SPON_EVERY_MS for SPON_HOLD_MS, then
+   rolls back. Only fires when a title sponsor is set and the card is on screen, and never over a
+   goal replay. */
+const SPON_EVERY_MS = 32000, SPON_HOLD_MS = 5200;
+let sponCycleTimer = null, sponHideTimer = null;
+function sponsorLogo(){ const b = currentState.brand || {}; return (b.spots && b.spots.title) || ''; }
+function updateSponsorRoll(){
+  const roll = el('spon-roll'); if(!roll) return;
+  if(!currentState.rlSponsorRoll){ roll.classList.add('empty'); roll.classList.remove('out'); return; }   // producer toggle off
+  const logo = sponsorLogo(), img = el('spon-roll-logo');
+  if(logo){ if(img.getAttribute('src')!==logo) img.src = logo; roll.classList.remove('empty'); }
+  else { roll.classList.add('empty'); roll.classList.remove('out'); }
+}
+function rollSponsorOut(){
+  const roll = el('spon-roll'); if(!roll) return;
+  if(!currentState.rlSponsorRoll) return;                 // producer disabled the sponsor roll-out
+  if(!sponsorLogo()) return;                              // nothing to show
+  if(goalCycleActive) return;                             // don't clash with a replay
+  if(el('pcard').classList.contains('gone')) return;      // card not on screen
+  roll.classList.add('out');
+  clearTimeout(sponHideTimer);
+  sponHideTimer = setTimeout(() => roll.classList.remove('out'), SPON_HOLD_MS);
+}
+function startSponsorCycle(){
+  clearInterval(sponCycleTimer);
+  setTimeout(rollSponsorOut, 6500);                        // first pass shortly after load
+  sponCycleTimer = setInterval(rollSponsorOut, SPON_EVERY_MS);
 }
 
 /* ── REPLAY TRANSITION (shutter slam, ported from the React HUD) ───────────────────
@@ -409,6 +466,8 @@ function scheduleOutroAfterWillEnd(){ if(!goalCycleActive || outroPlayed) return
 function goalEvent(side){
   if(goalCycleActive) return;
   goalCycleActive=true; outroPlayed=false; introPlayed=false;
+  // pull the sponsor tab back under the card so it never sits out during a replay
+  const roll=el('spon-roll'); if(roll){ roll.classList.remove('out'); clearTimeout(sponHideTimer); }
   applyReplayColor(side);
   clearTimeout(goalCycleTimer); goalCycleTimer=setTimeout(endGoalCycle, 20000);   // hard backstop
   fireIntroSwipe();          // the replay is starting → play the REPLAY slam now
@@ -454,6 +513,8 @@ async function connect(){
 
 /* ── dev preview: ?dev with sample data, no server needed ─────────────────────── */
 const DEV = {
+  brand:{ spots:{ title:'/assets/rl.png' } },   // title sponsor, for the roll-out preview
+  rlSponsorRoll:true,                            // preview the roll-out in ?dev
   teams:{ blue:{name:'MY TEAM',logo:'/assets/rl.png',color:'#2f8dff'}, orange:{name:'OPPONENT',logo:'/assets/rl.png',color:'#ff7a33'} },
   game:{ blueScore:2, orangeScore:1, isOT:false, time:134 }, series:{ blue:1, orange:0 }, bestOf:5,
   spectatedPlayer:'YOU',
@@ -469,6 +530,7 @@ const DEV = {
 };
 if(/[?&]dev\b/.test(location.search)){ currentState=DEV; render(DEV); }
 else { drawBoost(0, BLUE); connect(); }
+startSponsorCycle();
 </script>
 </body>
 </html>

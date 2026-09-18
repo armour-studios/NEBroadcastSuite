@@ -84,7 +84,7 @@ async function evLoadChallongeTournaments() {
     }));
     evSetMode('Challonge — my tournaments');
     applyEventsView();
-    evStatus(_evTournaments.length ? '' : 'No Challonge tournaments found — confirm your API key in Settings → Integrations.');
+    evStatus(_evTournaments.length ? '' : 'No Challonge tournaments found — confirm your API key in Marketplace → Integrations.');
   } catch (e) {
     evStatus(e.message || 'Failed to load. Check your Challonge API key in Settings.', 'err');
   } finally { if (btn) btn.disabled = false; }
@@ -103,7 +103,7 @@ async function evLoadNxgenTournaments() {
     }));
     evSetMode('NXGEN — events');
     applyEventsView();
-    evStatus(_evTournaments.length ? '' : 'No NXGEN events found — confirm your API key in Settings → Integrations.');
+    evStatus(_evTournaments.length ? '' : 'No NXGEN events found — confirm your API key in Marketplace → Integrations.');
   } catch (e) {
     evStatus(e.message || 'Failed to load. Check your NXGEN API key in Settings.', 'err');
   } finally { if (btn) btn.disabled = false; }
@@ -127,7 +127,7 @@ async function evLoadFaceitCompetitions() {
     applyEventsView();
     evStatus(_evTournaments.length ? ''
       : (data.needsOrganizer
-        ? 'Add your FACEIT organiser name in Settings → Integrations → FACEIT to list your competitions here (or paste a championship link on the Dashboard).'
+        ? 'Add your FACEIT organiser name in Marketplace → Integrations → FACEIT to list your competitions here (or paste a championship link on the Dashboard).'
         : 'No FACEIT competitions found for this organiser.'));
   } catch (e) {
     evStatus(e.message || 'Failed to load. Check your FACEIT API key in Settings.', 'err');
@@ -285,7 +285,7 @@ function renderEventDetail(d) {
   (d.events || []).forEach((e) => {
     const row = document.createElement('div'); row.className = 'ev-event-row'; row.dataset.slug = e.slug;
     row.innerHTML = '<div class="ev-event-info"><div class="ev-event-name"></div><div class="ev-event-sub"></div></div>'
-      + '<div class="ev-event-acts"><button class="btn btn-secondary btn-sm ev-add-my" title="Save this event to My Events (live sync + seeding)">+ My Events</button>'
+      + '<div class="ev-event-acts"><button class="btn btn-secondary btn-sm ev-add-my" title="Save this event to My Events (live sync)">+ My Events</button>'
       + '<button class="btn btn-primary btn-sm ev-activate" title="Import all teams + load the bracket and make this the live broadcast event">Set live</button></div>';
     row.querySelector('.ev-event-name').textContent = e.name;
     row.querySelector('.ev-event-sub').textContent = [e.game, (e.numEntrants || 0) + ' teams', e.state].filter(Boolean).join(' · ');
@@ -446,19 +446,18 @@ el('btn-teams-use-current-event')?.addEventListener('click', () => {
 
 // ── Events sub-nav (start.gg | Leagues) ───────────────────────────────────
 function evShowSubtab(t) {
-  // Not a panel — a deep-link out to Production ▸ Graphics ▸ Bracket. Leave the current panel and
-  // the saved sub-tab untouched so coming back to ESPORTS lands where the producer actually was.
+  // Not a panel — a deep-link out to Dashboard ▸ Graphics ▸ Bracket. Leave the current panel and
+  // the saved sub-tab untouched so coming back to Events lands where the producer actually was.
   if (t === 'buildbracket') { if (typeof openBracketBuilder === 'function') openBracketBuilder(); return; }
   document.querySelectorAll('#ev-subnav .ev-subnav-btn').forEach((x) => x.classList.toggle('active', x.dataset.evtab === t));
-  const sg = el('ev-startgg-panel'), lg = el('ev-leagues-panel'), me = el('ev-myevents-panel'), sd = el('ev-seeding-panel');
+  const sg = el('ev-startgg-panel'), lg = el('ev-leagues-panel'), me = el('ev-myevents-panel'), cp = el('ev-comp-panel');
+  if (cp) cp.style.display = t === 'competitions' ? '' : 'none';
+  if (t === 'competitions' && typeof cmpRender === 'function') cmpRender(true);
   if (sg) sg.style.display = t === 'startgg' ? '' : 'none';
   if (lg) lg.style.display = t === 'leagues' ? '' : 'none';
   if (me) me.style.display = t === 'myevents' ? '' : 'none';
-  if (sd) sd.style.display = t === 'seeding' ? '' : 'none';
   if (t === 'leagues') lgRender();
   if (t === 'myevents') { renderMyEvents(); evRefreshAllOnOpen(); }
-  // Land on the event picker; openSeedingStudio() re-shows the studio right after when seeding a specific event.
-  if (t === 'seeding') { seedShowStudio(false); renderSeedPicker(); evRefreshAllOnOpen(); }
   try { localStorage.setItem('ev_active_subtab', t); } catch (_) {}
 }
 document.querySelectorAll('#ev-subnav .ev-subnav-btn').forEach((b) => b.addEventListener('click', function () { evShowSubtab(this.dataset.evtab); }));
@@ -475,13 +474,13 @@ function evSyncPlatformTab() {
   const any = !!(s.startgg?.hasToken || s.challonge?.hasKey || s.nxgen?.hasKey || s.faceit?.hasKey);
   btn.hidden = !any;
   // If the producer was parked on Tournaments and the credential went away, don't strand them.
-  if (!any && btn.classList.contains('active')) evShowSubtab('leagues');
+  if (!any && btn.classList.contains('active')) evShowSubtab('competitions');
 }
 window.evSyncPlatformTab = evSyncPlatformTab;
 // Reopen whichever Events sub-tab the producer was last on — survives refresh. Guarded against a
 // saved tab whose button no longer exists (e.g. 'brackets'/'spotlight' get pruned from this nav).
 // Deferred to a macrotask: evShowSubtab() reaches into lgRender()/renderMyEvents()/
-// evRefreshAllOnOpen()/seedShowStudio()/renderSeedPicker() — calling those synchronously here
+// evRefreshAllOnOpen() — calling those synchronously here
 // risks the same TDZ crash documented for switchRole('monitor')/loadScenePreviews if any transitively
 // touch a `let`/`const` declared further down. setTimeout(...,0) waits for the script to finish.
 setTimeout(() => {
@@ -489,8 +488,8 @@ setTimeout(() => {
   let saved; try { saved = localStorage.getItem('ev_active_subtab'); } catch (_) {}
   const usable = saved && document.querySelector(`#ev-subnav .ev-subnav-btn[data-evtab="${saved}"]:not([hidden])`);
   // Always land on SOMETHING: every panel is display:none in the markup, so without this a fresh
-  // install (no saved tab) would render an empty page. 'leagues' is the native-first default.
-  evShowSubtab(usable ? saved : 'leagues');
+  // install (no saved tab) would render an empty page. The Competitions hub is the default.
+  evShowSubtab(usable ? saved : 'competitions');
 }, 0);
 
 // Relative "x ago" for sync timestamps.
@@ -507,7 +506,7 @@ function evSyncBadge(ev) {
   if (ev.lastSync) return `<span class="me-sync" title="Auto-syncs from start.gg every ~3 min">● synced ${evAgo(ev.lastSync)}</span>`;
   return `<span class="me-sync me-sync-wait">● awaiting sync…</span>`;
 }
-// Event logo (start.gg image) shown left of My Events / seeding cards; letter fallback otherwise.
+// Event logo (start.gg image) shown left of My Events cards; letter fallback otherwise.
 function evCardLogo(ev) {
   const esc = (s) => (s || '').toString().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
   return ev.image
@@ -556,7 +555,6 @@ function renderMyEvents() {
         else send('activate_startgg_event', { eventSlug: ev.eventSlug, tournamentSlug: ev.tournamentSlug });
       }, 'Make this the broadcast event — imports teams + bracket + queue'));
     }
-    acts.appendChild(mk('btn btn-secondary btn-sm', 'Seeding', () => openSeedingStudio(ev), 'Open the seeding studio for this event — add teams by hand here'));
     // Replaces the removed ESPORTS-level "Bracket Builder" tab: build the bracket from the event
     // it belongs to. Manual entries need this most — they have no platform bracket to import.
     acts.appendChild(mk('btn btn-secondary btn-sm', 'Bracket', () => { if (typeof window.openBracketBuilder === 'function') window.openBracketBuilder(); },
@@ -577,7 +575,7 @@ function renderMyEvents() {
       acts.appendChild(mk('btn btn-ghost btn-sm', 'View event ↗', () => window.open(ev.url, '_blank', 'noopener'), 'Open the link you saved for this event'));
     }
     // NXGEN has no standalone "import by slug" or confirmed public tournament URL yet — Set
-    // live/Seeding above still work; those two extra actions are start.gg/Challonge-only for now.
+    // live above still works; those two extra actions are start.gg/Challonge-only for now.
 
     // Platform-linking sub-row (push a start.gg event to a Challonge mirror for live score sync) —
     // only meaningful for a start.gg-sourced event; doesn't apply to an already-Challonge/NXGEN one.
@@ -625,7 +623,7 @@ function renderMyEvents() {
 }
 // Manual "+ Add Event" — a My Event with no platform behind it (a LAN, a one-off, anything not on
 // start.gg/Challonge/NXGEN). No "Set live"/pre-load/auto-sync since there's no API to pull from;
-// it's a plain reference you seed and manage by hand (Seeding tab already supports manual entry).
+// it's a plain reference you manage by hand.
 let _meAddLogo = '';
 function meAddResetForm() {
   ['me-add-name', 'me-add-tournament', 'me-add-date', 'me-add-entrants', 'me-add-url'].forEach((id) => { const e = el(id); if (e) e.value = ''; });
@@ -704,7 +702,7 @@ function openEvSyncModal(ev) {
   _evSyncChalTournaments = null; // force fresh tournament list on open
   _evSyncLinkedSlug = (ev.challongeSync && ev.challongeSync.slug) || '';
 
-  // Resolve participants from seeding studio data or roster
+  // Resolve participants from saved seed data (older events) or roster
   _evSyncParticipants = resolveEvSyncParticipants(ev);
 
   // Pre-fill fields from event data
@@ -769,7 +767,7 @@ function openEvSyncModal(ev) {
 }
 
 function resolveEvSyncParticipants(ev) {
-  // Try seeding studio data first (has seedNum)
+  // Seed data saved by the old seeding studio, if any (has seedNum)
   const seedEntrants = ev.seeding && Array.isArray(ev.seeding.entrants) ? ev.seeding.entrants : [];
   if (seedEntrants.length > 0) {
     return seedEntrants
@@ -812,7 +810,7 @@ function evSyncRenderPreview() {
   const list = _evSyncParticipants;
   if (label) label.textContent = `Participants (${list.length})`;
   if (!list.length) {
-    container.innerHTML = '<div style="font-size:12px; color:var(--muted); padding:6px;">No participants found — open Seeding or Pre-load Teams first to populate the list.</div>';
+    container.innerHTML = '<div style="font-size:12px; color:var(--muted); padding:6px;">No participants found — use Pre-load Teams first to populate the list.</div>';
     return;
   }
   container.innerHTML = list.map((p, i) => {
@@ -859,7 +857,7 @@ async function evSyncPush() {
   const startBracket = !!el('ev-sync-start-bracket')?.checked;
 
   if (!_evSyncParticipants.length) { setLog('No participants to push.', false); return; }
-  if (!currentState.challonge?.hasKey) { setLog('Add your Challonge API key in Settings → Integrations first.', false); return; }
+  if (!currentState.challonge?.hasKey) { setLog('Add your Challonge API key in Marketplace → Integrations first.', false); return; }
 
   if (pushBtn) { pushBtn.disabled = true; pushBtn.textContent = 'Pushing…'; }
 

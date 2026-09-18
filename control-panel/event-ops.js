@@ -9,7 +9,7 @@
 // Data lives in state.eventOps (full headers+rows+roleMap, library tier) AND is
 // mirrored to localStorage so the table works even if the app server predates
 // the feature. Depends on globals: el(), send(), currentState, showToast(),
-// csvParse() (seeding-spotlight.js).
+// csvParse() (spotlight.js).
 
 (function () {
   'use strict';

@@ -42,6 +42,10 @@
   .tk-live .tk-stat-dot { width: 8px; height: 8px; border-radius: 50%; background: #04130a; animation: tk-pulse2 1.2s ease-out infinite; }
   @keyframes tk-pulse2 { 0% { box-shadow: 0 0 0 0 rgba(4,19,10,.5); } 70% { box-shadow: 0 0 0 6px rgba(4,19,10,0); } 100% { box-shadow: 0 0 0 0 rgba(4,19,10,0); } }
   .tk-final { color: #9aa3b0; border: 1px solid rgba(255,255,255,.22); }
+  /* Upcoming fixture (live competition): NEXT + when it starts, in the brand colour */
+  .tk-next { color: #fff; background: var(--brand); }
+  .tk-when { color: #9aa3b0; letter-spacing: .06em; font-weight: 600; }
+  .tk-comp { color: #fff; letter-spacing: .12em; opacity: .9; }
   .tk-logo { height: 28px; width: 28px; object-fit: contain; }
   .tk-team { color: #fff; text-transform: uppercase; letter-spacing: .02em; }
   .tk-score { color: var(--brand); text-transform: uppercase; padding: 0 4px; font-variant-numeric: tabular-nums; }
@@ -59,6 +63,7 @@
   .tk-embed .tk-team, .tk-embed .tk-score { font-size: 60px; }
   .tk-embed .tk-sep { font-size: 54px; padding: 0 58px; }
   .tk-embed .ticker-segment { font-size: 60px; }
+  .tk-embed .tk-when, .tk-embed .tk-comp { font-size: 44px; }
   .tk-embed .ticker-track { padding-left: 56px; }
 </style>
 </head>
@@ -96,8 +101,27 @@
     }
     return (a || 0) + ' - ' + (b || 0);
   }
+  // "7:30 PM" today, "SAT 9/20 · 7:30 PM" on another day — for upcoming fixtures.
+  var _dateFmt = 'us', _clock24 = false;
+  function fmtWhen(m) {
+    if (m.postponed) return 'POSTPONED';
+    if (!m.date) return m.time || '';
+    var d = new Date(m.date + 'T' + (m.time && /^\d{1,2}:\d{2}/.test(m.time) ? (m.time.length === 4 ? '0' + m.time : m.time) : '12:00'));
+    if (isNaN(d.getTime())) return [m.date, m.time].filter(Boolean).join(' ');
+    var t = '';
+    if (m.time) {
+      var h = d.getHours(), mi = ('0' + d.getMinutes()).slice(-2);
+      t = _clock24 ? (('0' + h).slice(-2) + ':' + mi) : (((h % 12) || 12) + ':' + mi + (h < 12 ? ' AM' : ' PM'));
+    }
+    var now = new Date();
+    if (d.toDateString() === now.toDateString()) return t || 'TODAY';
+    var day = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][d.getDay()];
+    var dm = _dateFmt === 'intl' ? (d.getDate() + '/' + (d.getMonth() + 1)) : ((d.getMonth() + 1) + '/' + d.getDate());
+    return day + ' ' + dm + (t ? ' · ' + t : '');
+  }
   function statusTag(m) {
     var s = document.createElement('span');
+    if (m.status === 'upcoming') { s.className = 'tk-stat tk-next'; s.textContent = 'NEXT'; return s; }
     if (m.status === 'live') {
       s.className = 'tk-stat tk-live';
       var d = document.createElement('span'); d.className = 'tk-stat-dot'; s.appendChild(d);
@@ -112,9 +136,10 @@
     seg.appendChild(statusTag(m));
     if (m.logoA) { var la = document.createElement('img'); la.className = 'tk-logo'; la.src = m.logoA; la.onerror = function () { this.remove(); }; seg.appendChild(la); }
     var ta = document.createElement('span'); ta.className = 'tk-team'; ta.textContent = m.teamA; seg.appendChild(ta);
-    var sc = document.createElement('span'); sc.className = 'tk-score'; sc.textContent = fmtScore(m); seg.appendChild(sc);
+    var sc = document.createElement('span'); sc.className = 'tk-score'; sc.textContent = m.status === 'upcoming' ? 'vs' : fmtScore(m); seg.appendChild(sc);
     var tb = document.createElement('span'); tb.className = 'tk-team'; tb.textContent = m.teamB; seg.appendChild(tb);
     if (m.logoB) { var lb = document.createElement('img'); lb.className = 'tk-logo'; lb.src = m.logoB; lb.onerror = function () { this.remove(); }; seg.appendChild(lb); }
+    if (m.status === 'upcoming') { var w = fmtWhen(m); if (w) { var wh = document.createElement('span'); wh.className = 'tk-when'; wh.textContent = w; seg.appendChild(wh); } }
     return seg;
   }
 
@@ -126,13 +151,40 @@
     // NXGEN publishes its ticker feed in the SAME item shape start.gg does (server:
     // buildNxgenMatchFeed), so both platforms render through this one match-card path.
     var isNxgen = t.source === 'nxgen';
-    var isMatches = isStartgg || isNxgen;
+    // Live competition (a league — typed in, a Google Sheet, a JSON feed…): the server derives
+    // data.compFeed from it. Live first, then what's next with its start time, then finals.
+    var isComp = t.source === 'competition';
+    var isMatches = isStartgg || isNxgen || isComp;
+    _dateFmt = data && data.dateFormat === 'intl' ? 'intl' : 'us';
+    _clock24 = !!(data && data.clock24h);
     var feed = (isNxgen ? (data && data.nxgen && data.nxgen.matchFeed) : (data && data.startgg && data.startgg.matchFeed)) || [];
     var matches = isMatches ? feed.filter(function (m) { return m && (m.status === 'live' || m.status === 'done'); }) : [];
+    var compTitle = '';
+    if (isComp) {
+      var cf = (data && data.compFeed) || null;
+      var opt = (data && data.competition && data.competition.ticker) || {};
+      var logos = (cf && cf.logos) || {};
+      var saved = {};
+      ((data && data.savedTeams) || []).forEach(function (st) { if (st && st.name && st.logo) saved[st.name.toLowerCase()] = st.logo; });
+      var withLogos = function (m) {
+        return Object.assign({}, m, {
+          logoA: logos[m.teamA] || saved[(m.teamA || '').toLowerCase()] || '',
+          logoB: logos[m.teamB] || saved[(m.teamB || '').toLowerCase()] || ''
+        });
+      };
+      matches = cf ? [].concat(
+        opt.live === false ? [] : cf.live,
+        opt.upcoming === false ? [] : cf.upcoming.slice(0, 4),
+        opt.results === false ? [] : cf.results.slice(0, 5)
+      ).slice(0, opt.max || 12).map(withLogos) : [];
+      compTitle = cf ? (cf.name || '').toUpperCase() : '';
+    }
     // Manual promo lines are shown in BOTH modes: they're the whole ticker in manual mode, and they
     // interleave between the live scores in start.gg mode so a short match feed (which otherwise
     // loops the same few teams over and over) reads with more variety.
     var messages = (t.messages || []).filter(Boolean);
+    // Battle-royale standings ("1. TEAM  42 PTS") — built server-side into ticker.feed.
+    if (t.source === 'br' && Array.isArray(t.feed) && t.feed.length) messages = t.feed.concat(messages);
     if (SceneBase.preview || EMBED) {
       if (isMatches && !matches.length) matches = DEMO_MATCHES;
       if (!messages.length) messages = DEMO_MSGS;
@@ -140,13 +192,15 @@
     var sponsor = (data && data.brand && data.brand.spots && data.brand.spots.ticker) || t.sponsor || '';
     var count = isMatches ? matches.length : messages.length;
     bar.classList.remove('hidden');
-    bar.classList.toggle('startgg', isMatches);   // class name is the LAYOUT (match cards), not the platform
+    // class name is the LAYOUT (match cards), not the platform. The pinned LIVE badge only makes
+    // sense when something is actually live — a league ticker between match days is all NEXT/FINAL.
+    bar.classList.toggle('startgg', isMatches && (!isComp || matches.some(function (m) { return m.status === 'live'; })));
     bar.classList.toggle('has-sponsor', !!sponsor);
     document.documentElement.style.setProperty('--brand', SceneBase.brandAccent(data));
     var sp = el('ticker-sponsor'); if (sp && sponsor) sp.src = sponsor;
 
     var speed = (t.speed > 0) ? t.speed : 40;
-    var sig = JSON.stringify({ s: isMatches, m: matches, x: messages, sp: sponsor, speed: speed });
+    var sig = JSON.stringify({ s: isMatches, m: matches, x: messages, sp: sponsor, speed: speed, c: compTitle, f: _dateFmt, h: _clock24 });
     if (sig === _sig) return;
     _sig = sig;
     // Structure sig EXCLUDES the live score digits: the slide-in reveal fires when the set of
@@ -160,6 +214,7 @@
     track.innerHTML = '';
     for (var copy = 0; copy < 2; copy++) {
       if (isMatches) {
+        if (compTitle && matches.length) { var ct = document.createElement('span'); ct.className = 'tk-comp'; ct.textContent = compTitle; track.appendChild(ct); addSep(); }
         matches.forEach(function (m) { track.appendChild(buildMatch(m)); addSep(); });
         messages.forEach(addMsg);   // promo lines interleaved after the scores
       } else {
