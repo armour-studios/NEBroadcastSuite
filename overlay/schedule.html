@@ -28,7 +28,7 @@ body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
 /* ── Header ── */
 .sch-head { display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .sch-brand-logo { height: 80px; width: auto; max-width: 280px; object-fit: contain; filter: drop-shadow(0 2px 8px rgba(0,0,0,.6)); }
-.sch-eyebrow { font-family: var(--disp); font-weight: 700; font-size: 20px; letter-spacing: .44em; text-transform: uppercase; color: var(--accent); }
+.sch-eyebrow { font-family: var(--disp); font-weight: 700; font-size: 20px; letter-spacing: .44em; text-transform: uppercase; color: var(--accent-ink, var(--accent)); }
 .sch-title { font-family: var(--disp); font-weight: 700; font-size: 72px; line-height: .96; letter-spacing: .02em; text-transform: uppercase; color: #fff; text-shadow: 0 0 28px color-mix(in srgb, var(--accent) 35%, transparent); }
 .sch-rule { width: 240px; height: 3px; border-radius: 2px; margin-top: 4px; background: linear-gradient(90deg, transparent, var(--accent), var(--accent-2), transparent); }
 
@@ -146,7 +146,13 @@ body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
   var LAYOUT_QP = new URLSearchParams(location.search).get('layout');
   var _lastSig = null;
 
-  function svgFallback(letter) {
+  // First CHARACTER of a name, as a whole code point. `name[0]` returns HALF of an emoji (a lone surrogate) for
+  // a name like "🔥⚡🔥 | 1", and encodeURIComponent() throws URIError "URI malformed" on that — which aborted the
+  // whole render (a live start.gg event with one emoji-leading entrant kept the top 8 from ever drawing).
+  function firstGlyph(name) { const c = Array.from(String(name == null ? '' : name).trim())[0]; return c ? c.toUpperCase() : '?'; }
+  function xmlText(s) { return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+  function svgFallback(name) {
+    const letter = xmlText(firstGlyph(name));
     return 'data:image/svg+xml;utf8,' + encodeURIComponent(
       '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120"><rect width="120" height="120" rx="22" fill="#39415a"/><text x="60" y="84" font-size="68" fill="#fff" text-anchor="middle" font-family="Arial,sans-serif" font-weight="bold">' + letter + '</text></svg>');
   }
@@ -217,7 +223,7 @@ body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
 
     // Side A
     var sideA = document.createElement('div'); sideA.className = 'sch-side a';
-    var srcA = logoFor(m.teamA, m.logoA, maps) || svgFallback((m.teamA || '?')[0].toUpperCase());
+    var srcA = logoFor(m.teamA, m.logoA, maps) || svgFallback(m.teamA);
     var imgA = document.createElement('img'); imgA.className = 'sch-logo'; imgA.src = srcA; imgA.alt = '';
     if (SceneBase.isDefaultGameLogo(srcA)) imgA.classList.add('logo-on-dark');
     imgA.onerror = function () { this.style.visibility = 'hidden'; };
@@ -239,7 +245,7 @@ body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
     // Side B
     var sideB = document.createElement('div'); sideB.className = 'sch-side b';
     var nameB = document.createElement('span'); nameB.className = 'sch-name'; nameB.textContent = m.teamB || 'TBD';
-    var srcB = logoFor(m.teamB, m.logoB, maps) || svgFallback((m.teamB || '?')[0].toUpperCase());
+    var srcB = logoFor(m.teamB, m.logoB, maps) || svgFallback(m.teamB);
     var imgB = document.createElement('img'); imgB.className = 'sch-logo'; imgB.src = srcB; imgB.alt = '';
     if (SceneBase.isDefaultGameLogo(srcB)) imgB.classList.add('logo-on-dark');
     imgB.onerror = function () { this.style.visibility = 'hidden'; };

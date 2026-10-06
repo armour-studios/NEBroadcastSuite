@@ -8,7 +8,7 @@
    app.js (shared alias used by app.js + spotlight.js). */
 
 // ══════════════ Camera Feeds tab — Players / Casters / Gameplay / Settings ══════════════
-const CF_OVERLAY_BASE = 'http://127.0.0.1:3000';
+const CF_OVERLAY_BASE = 'http://localhost:3000';
 function cfShowSubtab(cf) {
   // Players sub-tab retired — player cam assignment lives in Match — Teams (gear) and the
   // Talent Monitor's Players tab. Old saved subtab values / deep links land on Talent Rooms.
@@ -202,11 +202,16 @@ function renderVdoRooms() {
       showToast('Room linked — join links now point at your room', '#22c55e');
       setTimeout(() => { renderVdoRooms(); if (typeof cfLoadTalent === 'function') cfLoadTalent(); }, 450);
     } else if (e.target.closest('.cf-room-gen')) {
-      if (ctx.kind === 'team') send('generate_team_vdo', { side: ctx.key, regenerate: true });
-      else if (ctx.kind === 'group') send('regenerate_group_room', { group: ctx.key });
-      else send('generate_caster_room_vdo', { id: ctx.key, regenerate: true });
-      showToast('Generating room… old links stop working', '#8b5cf6');
-      setTimeout(() => { renderVdoRooms(); if (typeof cfLoadTalent === 'function') cfLoadTalent(); }, 500);
+      (async () => {
+        // A new room invalidates every join/view link already handed out — on a live show that
+        // drops talent off air until they get the new link, so it needs a yes.
+        if (!await customConfirm('New room', 'Generate a new room? Every link already sent for this room stops working, and talent will need the new one.', 'Generate new room')) return;
+        if (ctx.kind === 'team') send('generate_team_vdo', { side: ctx.key, regenerate: true });
+        else if (ctx.kind === 'group') send('regenerate_group_room', { group: ctx.key });
+        else send('generate_caster_room_vdo', { id: ctx.key, regenerate: true });
+        showToast('Generating room… old links stop working', '#8b5cf6');
+        setTimeout(() => { renderVdoRooms(); if (typeof cfLoadTalent === 'function') cfLoadTalent(); }, 500);
+      })();
     } else if (e.target.closest('.cf-room-desk')) {
       send('set_desk_room', { roomId: ctx.key });
       setTimeout(renderVdoRooms, 400);
@@ -230,7 +235,7 @@ function renderVdoRooms() {
   // LISTEN IN → one-click OBS browser source (created on the current program scene).
   const listenObs = el('cf-listen-obs');
   if (listenObs) listenObs.addEventListener('click', () => {
-    send('obs_ensure_browser_source', { sourceName: '[NE] Listen-In', url: 'http://127.0.0.1:3000/listen-in.html' });
+    send('obs_ensure_browser_source', { sourceName: '[NE] Listen-In', url: 'http://localhost:3000/listen-in.html' });
     showToast('Adding Listen-In to OBS…', '#8b5cf6');
   });
 })();

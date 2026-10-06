@@ -20,6 +20,7 @@
   if (!Native) return;
 
   var cache = Object.create(null);   // contentHash -> full "data:image…" string
+  var missed = false;                 // an "@img:" ref arrived that this cache can't resolve
 
   // djb2 + length — MUST match server _imgHash() exactly so refs resolve.
   function imgHash(s) {
@@ -33,7 +34,7 @@
     var t = typeof n;
     if (t === 'string') {
       if (n.length >= 1024 && n.lastIndexOf('data:image', 0) === 0) { cache[imgHash(n)] = n; return n; }
-      if (n.lastIndexOf('@img:', 0) === 0) { var v = cache[n.slice(5)]; return v === undefined ? n : v; }
+      if (n.lastIndexOf('@img:', 0) === 0) { var v = cache[n.slice(5)]; if (v === undefined) { missed = true; return n; } return v; }
       return n;
     }
     if (t !== 'object') return n;
@@ -44,7 +45,16 @@
 
   // Return a message event whose .data has images restored. If nothing needs restoring we cache any
   // real images (to seed for later refs) and hand back the ORIGINAL event (no wasteful re-stringify).
-  function fix(ev) {
+  // Ask the server to resend everything in full when a ref couldn't be resolved (a broken logo
+  // otherwise stays broken until the next time that image changes). At most once per 5 s.
+  var lastMissReq = 0;
+  function requestResync(ws) {
+    var now = Date.now();
+    if (now - lastMissReq < 5000) return;
+    lastMissReq = now;
+    try { ws.send(JSON.stringify({ type: 'imgvault_miss' })); } catch (e) {}
+  }
+  function fix(ev, ws) {
     var d = ev && ev.data;
     if (typeof d !== 'string') return ev;
     var hasRef = d.indexOf('@img:') >= 0;
@@ -52,7 +62,9 @@
     if (!hasRef && !hasReal) return ev;
     try {
       var m = JSON.parse(d);
+      missed = false;
       walk(m);
+      if (missed && ws) requestResync(ws);
       if (!hasRef) return ev;                 // only real images present → cache seeded, pass original
       var s = JSON.stringify(m);
       return { data: s, origin: ev.origin, lastEventId: ev.lastEventId, source: ev.source,
@@ -75,7 +87,7 @@
     var nativeRemove = Native.prototype.removeEventListener.bind(ws);
 
     // Drive `ws.onmessage = fn` through one native listener that restores images first.
-    nativeAdd('message', function (ev) { if (userOn) userOn.call(ws, fix(ev)); });
+    nativeAdd('message', function (ev) { if (userOn) userOn.call(ws, fix(ev, ws)); });
     try {
       Object.defineProperty(ws, 'onmessage', {
         configurable: true, enumerable: true,
@@ -87,7 +99,7 @@
     // Wrap addEventListener('message', …) so listener-style overlays are restored too.
     ws.addEventListener = function (type, listener, opts) {
       if (type === 'message' && typeof listener === 'function') {
-        var wrapped = function (ev) { return listener.call(ws, fix(ev)); };
+        var wrapped = function (ev) { return listener.call(ws, fix(ev, ws)); };
         listener.__slWrapped = wrapped;
         return nativeAdd('message', wrapped, opts);
       }

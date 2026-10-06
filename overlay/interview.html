@@ -24,7 +24,7 @@
     .iv-bg { position: absolute; inset: 0; z-index: -1; background: transparent; }
 
     .iv-header { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 16px; margin-bottom: 22px; }
-    .iv-eyebrow { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 18px; letter-spacing: .4em; text-transform: uppercase; color: var(--duo-accent); }
+    .iv-eyebrow { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 18px; letter-spacing: .4em; text-transform: uppercase; color: var(--duo-accent-ink, var(--duo-accent)); }
     .iv-title { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 40px; letter-spacing: .02em; text-transform: uppercase; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 1400px; }
     .iv-title.is-empty, .iv-eyebrow.is-empty { display: none; }
 
@@ -41,7 +41,7 @@
     .iv-scorebar .match-name { flex: 1 1 0; min-width: 0; font-size: 24px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; line-height: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #fff; }
     .iv-scorebar .match-team--b .match-name { text-align: right; }
     .iv-scorebar .match-score { flex: 0 0 auto; font-size: 44px; font-weight: 900; font-variant-numeric: tabular-nums; min-width: 24px; text-align: center; }
-    .iv-scorebar .match-team--a .match-score { color: var(--team-a); } .iv-scorebar .match-team--b .match-score { color: var(--team-b); }
+    .iv-scorebar .match-team--a .match-score { color: var(--team-a-ink, var(--team-a)); } .iv-scorebar .match-team--b .match-score { color: var(--team-b-ink, var(--team-b)); }
     .iv-scorebar .match-center { flex: 0 0 104px; display: flex; align-items: center; justify-content: center; background: rgba(6,8,12,.97); border-left: 1px solid rgba(255,255,255,.1); border-right: 1px solid rgba(255,255,255,.1); font-family: 'Rajdhani','Inter',sans-serif; font-weight: 900; font-size: 32px; color: #fff; }
     :root { --team-a: #055fdb; --team-b: #e97139; }
 
@@ -191,7 +191,7 @@
         ? { label: (data.scoreboardAd || {}).label, logo: (_pbBrand.spots && _pbBrand.spots.title) || '' }
         : (data.scoreboardAd || {});
       const wrap = el('presented-by'), label = el('pb-label'), logo = el('pb-logo');
-      if (slot.logo) { label.textContent = (slot.label || 'PRESENTED BY').toString().trim(); logo.src = slot.logo; logo.style.display = ''; wrap.classList.remove('is-empty'); }
+      if (slot.logo) { label.textContent = (_pbBrand.presentedLabel || slot.label || 'PRESENTED BY').toString().trim(); logo.src = slot.logo; logo.style.display = ''; wrap.classList.remove('is-empty'); }
       else { logo.style.display = 'none'; logo.removeAttribute('src'); wrap.classList.add('is-empty'); }
     }
     function renderDeckStrip(data) {

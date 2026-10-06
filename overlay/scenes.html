@@ -65,7 +65,7 @@
     <div class="conn"><span class="dot" id="conn-dot"></span><span id="conn-text">connecting…</span></div>
     <div class="baseurl">
       <label for="base-input">Base URL</label>
-      <input id="base-input" value="http://127.0.0.1:3000">
+      <input id="base-input" value="http://localhost:3000">
     </div>
   </header>
   <main>
@@ -99,8 +99,9 @@
   <script>
     const CATALOG = [
       { group: 'In-Game HUD', items: [
-        { name: 'Main Overlay (RL)', path: '/', desc: 'Scoreboard, goal replays, post-match stats, sponsor banner, ticker, spotlight.', live: 'always', editPath: '/index.html' },
         { name: 'RL HUD (Modern)', path: '/rl-hud.html', desc: 'Modern Rocket League HUD layout.', live: 'always' },
+        { name: 'RL Player HUD', path: '/rl-player.html', desc: 'For playing on this PC: follows your own car.', live: 'always' },
+        { name: 'RL Worlds HUD', path: '/rl-worlds.html', desc: 'RLCS Worlds-style HUD with stats sidebar and ticker.', live: 'always' },
         { name: 'Live HUD (auto-game)', path: '/live.html', desc: 'Unified HUD that automatically follows whichever game is currently active.', live: 'always' },
         { name: 'CS2 / CS:GO HUD', path: '/csgo.html', desc: 'GSI-driven CS2 overlay - scorebar, players, radar, bomb, economy.', live: 'always' },
         { name: 'Valorant HUD', path: '/valorant.html', desc: 'Round scorebar, agents, spike and economy.', live: 'always' },

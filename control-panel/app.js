@@ -80,8 +80,12 @@ function setSwitchSettingsCat(cat) {
   cat = cat || 'general';
   const rail = el('set-rail'); if (!rail) return;
   rail.querySelectorAll('.set-rail-btn').forEach(b => b.classList.toggle('active', b.dataset.stab === cat));
+  let first = true;
   document.querySelectorAll('#set-content > .section').forEach(s => {
-    s.style.display = (s.dataset.setcat === cat) ? '' : 'none';
+    const on = s.dataset.setcat === cat;
+    s.style.display = on ? '' : 'none';
+    s.classList.toggle('set-first', on && first);   // no divider above the first visible block
+    if (on) first = false;
   });
   const scroll = el('tab-scroll'); if (scroll) scroll.scrollTop = 0;
   if (cat === 'games') _settingsSelectActiveGame();   // per-game browser opens on the active game
@@ -1678,7 +1682,13 @@ function renderDccHostsGrid() {
     if (edit && typeof window._openCrewFormEdit === 'function') { window._openCrewFormEdit(edit.dataset.editLib); return; }
     // Generate room
     const gen = e.target.closest('[data-gen-cfgroup]');
-    if (gen) { send('regenerate_group_room', { group: gen.dataset.genCfgroup }); setTimeout(doRefresh, 700); return; }
+    if (gen) {
+      (async () => {
+        if (!await customConfirm('New room', 'Generate a new room? Every link already sent to talent in this group stops working, and they will need the new one.', 'Generate new room')) return;
+        send('regenerate_group_room', { group: gen.dataset.genCfgroup }); setTimeout(doRefresh, 700);
+      })();
+      return;
+    }
     const regen = e.target.closest('[data-regen-cfgroup]');
     if (regen) {
       // This resets the ONE shared room every member of the group is in — anyone who already
@@ -2096,9 +2106,9 @@ function renderDccHostsGrid() {
           const cols = line.split(',').map((c) => c.trim().replace(/^["']|["']$/g, ''));
           if (!cols[0]) return;
           const name    = cols[0];
-          const color   = /^#[0-9a-f]{3,6}$/i.test(cols[1] || '') ? cols[1] : '#3b82f6';
+          const color   = /^#[0-9a-f]{3,6}$/i.test(cols[1] || '') ? cols[1] : '';
           const players = cols.slice(2).filter(Boolean).map((n) => ({ id: Date.now() + Math.random(), name: n, platform: '', platformId: '', camSlot: '' }));
-          send('save_team', { oldName: '', name, color, logo: '', players });
+          send('save_team', { oldName: '', name, color, logo: '', players, merge: true });
           count++;
         });
         teamsCsv.value = '';
@@ -2480,7 +2490,7 @@ function _borrowGraphicsToDash() {
     matchup:   { name: 'Pre-Match Lineup',      link: 'matchup.html',         hasClear: true,  hasQueue: false, hasPush: true  },
     seriesstats: { name: 'Series Stats',        link: 'rl-series-stats.html', hasClear: true,  hasQueue: false, hasPush: true,  popout: true, rlOnly: true },
     veto:      { name: 'Map Pool',               link: 'mapscreen.html',       hasClear: true,  hasQueue: false, hasPush: true,  clearId: 'btn-hide-veto-gfx', pushId: 'btn-show-veto-gfx', popout: true },
-    draft:     { name: 'Champion Draft',        link: 'draft.html',           hasClear: true,  hasQueue: false, hasPush: true,  popout: true },
+    draft:     { name: 'Pick / Ban',            link: 'draft.html',           hasClear: true,  hasQueue: false, hasPush: true,  popout: true },
     spotlight: { name: 'Spotlight',             link: 'watchlist.html',       hasClear: true,  hasQueue: false, hasPush: true,  popout: true },
     standings: { name: 'Standings',             link: 'standings.html',       hasClear: true,  hasQueue: false, hasPush: true,  hasApply: true,  pushId: 'btn-gfx-standings-push', clearId: 'btn-gfx-standings-clear', popout: true },
     schedule:  { name: 'Schedule',              link: 'schedule.html',        hasClear: true,  hasQueue: false, hasPush: true,  hasApply: true,  pushId: 'btn-gfx-schedule-push', clearId: 'btn-gfx-schedule-clear', popout: true },
@@ -2506,7 +2516,7 @@ function _borrowGraphicsToDash() {
   // Update the top bar + panel footer to reflect the active scene.
   function refreshTopBar(key) {
     const meta = SCENE_META[key] || { name: key, link: '' };
-    const base = window.SCENE_BASE_URL || 'http://127.0.0.1:3000';
+    const base = window.SCENE_BASE_URL || 'http://localhost:3000';
     const nameEl = el('gfx-active-name'), linkEl = el('gfx-active-link');
     if (nameEl) nameEl.textContent = meta.name || key;
     // The ⓘ chip: the ONE OBS browser source URL, surfaced on hover (each scene's own overlay
@@ -2548,7 +2558,7 @@ function _borrowGraphicsToDash() {
       // whenever the scene is live. Standalone scenes (preshow) cut via the switcher instead.
       const liveEdit = !meta.hasApply && !meta.standaloneScene;
       headName.innerHTML = esc(meta.name || key)
-        + (liveEdit ? ' <span class="gfx-liveedit-badge" title="No Apply step — edits in this panel reach the overlay immediately while it is on air">LIVE EDIT</span>' : '');
+        + (liveEdit ? ' <span class="gfx-liveedit-badge" title="No Apply step — edits in this panel reach the overlay immediately while it is on air">Live edit</span>' : '');
       const VIS_PATHS = {
         bracket: 'bracket.visible', veto: 'veto.visible', standings: 'standings.visible',
         schedule: 'upcoming.visible', spotlight: 'watchlist.visible', winner: 'winner.visible',
@@ -2561,7 +2571,7 @@ function _borrowGraphicsToDash() {
       if (headLive) { headLive.classList.toggle('is-off', !onAir); headLive.textContent = onAir ? 'ON AIR' : 'OFF AIR'; }
       const headLink = el('gfx-scene-head-link');
       if (headLink) {
-        if (meta.link) { headLink.style.display = ''; headLink.href = (window.SCENE_BASE_URL || 'http://127.0.0.1:3000') + '/' + meta.link; }
+        if (meta.link) { headLink.style.display = ''; headLink.href = (window.SCENE_BASE_URL || 'http://localhost:3000') + '/' + meta.link; }
         else headLink.style.display = 'none';
       }
     }
@@ -2810,34 +2820,44 @@ function _borrowGraphicsToDash() {
       const d = data.draft || {};
       const started = !!(d.sequence && d.sequence.length);
       // Overwatch bans ARE the whole draft, so they get a real board on the front card instead
-      // of a status readout — everything else keeps the simple summary + Open-full-board link.
+      // of a status readout — everything else keeps the simple summary + Full board link.
       const isOwActive = started && d.game === 'overwatch';
+      const blueTeam = (data.teams?.blue?.name) || 'Blue';
+      const orangeTeam = (data.teams?.orange?.name) || 'Orange';
+      const blueColor = (data.teams?.blue?.color) || '#2f8dff';
+      const orangeColor = (data.teams?.orange?.color) || '#f0444e';
+      // Goes-first toggle: team-named buttons over the hidden #draft-front-start select (the value
+      // the Start handler reads). Only classes/labels change per broadcast, never the elements, so
+      // a click can't be destroyed mid-press by a re-render.
+      const ts = d.teamStart === 'b' ? 'b' : 'a';
+      const firstSel = el('draft-front-start');
+      if (firstSel && document.activeElement !== firstSel) firstSel.value = ts;
+      el('draft-front-first-seg')?.querySelectorAll('button[data-v]').forEach((b) => {
+        const side = b.dataset.v === 'b' ? 'b' : 'a';
+        const nm = side === 'b' ? orangeTeam : blueTeam;
+        if (b.textContent !== nm) b.textContent = nm;
+        b.style.setProperty('--seg-c', side === 'b' ? orangeColor : blueColor);
+        b.classList.toggle('is-on', side === ts);
+      });
+      // Status readout — hidden while the Overwatch board is up (the board IS the status).
       body.style.display = isOwActive ? 'none' : '';
-      if (!started) {
-        // Rebuild ONLY when the relevant inputs actually change (team names) — this card is
-        // re-rendered on every state broadcast, and blindly replacing the <select>'s innerHTML
-        // each time was destroying it out from under an in-progress click, so "Orange first"
-        // could never register. Gating on a signature keeps the live element stable to interact with.
-        const blueTeam = (data.teams?.blue?.name) || 'Blue';
-        const orangeTeam = (data.teams?.orange?.name) || 'Orange';
-        const sig = 'notstarted::' + blueTeam + '::' + orangeTeam;
-        if (body.dataset.sig !== sig) {
-          body.dataset.sig = sig;
-          const prevStart = el('draft-front-start')?.value;
-          body.innerHTML = empty('No draft started yet.')
-            + `<div class="gfx-pos-row"><span class="gfx-pos-label">First</span>
-                <select id="draft-front-start" class="input-select" style="font-size:12px;">
-                  <option value="a">${tlEsc(blueTeam)} first</option>
-                  <option value="b">${tlEsc(orangeTeam)} first</option>
-                </select></div>`
-            + `<button type="button" class="btn btn-primary btn-sm gfx-pos-qa" id="btn-draft-front-start">Start Draft</button>`;
-          const startSel = el('draft-front-start');
-          if (startSel && (prevStart === 'a' || prevStart === 'b')) startSel.value = prevStart;
-        }
-      } else {
-        body.dataset.sig = '';
-        body.innerHTML = row('Game', tlEsc(d.game || '')) + row('Progress', (d.ops || []).length + ' / ' + d.sequence.length) + row('Status', d.complete ? 'Complete' : 'In progress');
+      const sig = isOwActive ? 'ow' : started
+        ? 'run::' + d.game + '::' + (d.ops || []).length + '/' + d.sequence.length + '::' + !!d.complete
+        : 'idle';
+      if (body.dataset.sig !== sig) {
+        body.dataset.sig = sig;
+        body.innerHTML = isOwActive ? '' : started
+          ? row('Game', tlEsc((data.games && data.games[d.game] && data.games[d.game].name) || d.game || ''))
+            + row('Progress', (d.ops || []).length + ' / ' + d.sequence.length)
+            + row('Status', d.complete ? 'Complete' : 'In progress')
+          : empty('Not started. Choose who goes first, then start.');
       }
+      const startBtn = el('btn-draft-front-start');
+      if (startBtn) startBtn.textContent = started ? 'Restart' : 'Start pick / ban';
+      const hasOps = !!(d.ops && d.ops.length);
+      const undoBtn = el('btn-draft-front-undo'); if (undoBtn) undoBtn.disabled = !hasOps;
+      // Reset stays live once started: with no bans it still re-applies Goes first / ban count.
+      const resetBtn = el('btn-draft-front-reset'); if (resetBtn) resetBtn.disabled = !started;
       const owWrap = el('gfx-front-draft-ow');
       if (owWrap) {
         owWrap.style.display = isOwActive ? '' : 'none';
@@ -2851,14 +2871,34 @@ function _borrowGraphicsToDash() {
   // delegated listener on the whole front-panel container below.
   el('gfx-popout-summary')?.addEventListener('click', (e) => {
     if (e.target.closest('#btn-draft-front-start')) {
-      send('draft_start', { game: currentState?.activeGame || '', teamStart: el('draft-front-start')?.value || 'a', visible: true,
-        title: el('draft-front-title')?.value || '', subtitle: el('draft-front-subtitle')?.value || '',
-        owBanCount: Number(el('draft-front-owbans')?.value) || 4 });
-      // Same as the popup's Start Draft: gfx.html only shows what gfxActive points at, so the
-      // board has to be pushed live here too or bans made from the front card go nowhere visible.
-      doPush('draft');
+      const go = () => {
+        const game = currentState?.activeGame || '';
+        // Overwatch bans already show on the scoreboard bar, so starting them must NOT throw the
+        // full-screen ban scene on air — the producer pushes it with Push Live when they want it.
+        // Other games keep the old behaviour: the board is the only place their picks show.
+        const isOw = game === 'overwatch';
+        const payload = { game, teamStart: el('draft-front-start')?.value || 'a',
+          title: el('draft-front-title')?.value || '', subtitle: el('draft-front-subtitle')?.value || '',
+          owBanCount: Number(el('draft-front-owbans')?.value) || 2 };
+        if (!isOw) payload.visible = true;
+        send('draft_start', payload);
+        if (!isOw) doPush('draft');
+      };
+      // Restarting over real picks/bans wipes them — confirm first.
+      if ((currentState?.draft?.ops || []).length) {
+        appConfirm('Restart pick / ban? Every pick and ban made so far will be cleared.', 'Restart', true).then((ok) => { if (ok) go(); });
+      } else go();
     }
   });
+  // Segmented toggles proxy their hidden selects, so the existing change wiring stays the one path.
+  const _segPick = (segId, selId) => el(segId)?.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-v]'); const sel = el(selId); if (!b || !sel) return;
+    el(segId).querySelectorAll('button[data-v]').forEach((x) => x.classList.toggle('is-on', x === b));
+    if (sel.value === b.dataset.v) return;
+    sel.value = b.dataset.v; sel.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  _segPick('draft-front-first-seg', 'draft-front-start');
+  _segPick('draft-front-owbans-seg', 'draft-front-owbans');
   // Persist the front-card "which side starts" pick so it survives re-renders and the full board mirrors it.
   el('gfx-popout-summary')?.addEventListener('change', (e) => {
     const s = e.target.closest('#draft-front-start');
@@ -2963,7 +3003,7 @@ function _borrowGraphicsToDash() {
   // panel's GFX mode (a separate iframe, not the same DOM node as the inline preview above).
   window._gfxCurrentPreviewUrl = () => {
     if (!currentKey || !SCENE_META[currentKey] || !SCENE_META[currentKey].link) return '';
-    const base = window.SCENE_BASE_URL || 'http://127.0.0.1:3000';
+    const base = window.SCENE_BASE_URL || 'http://localhost:3000';
     return base + '/' + SCENE_META[currentKey].link + '?preview=1';
   };
 
@@ -3200,7 +3240,7 @@ function _borrowGraphicsToDash() {
   function syncSpotlightPreview(mode) {
     const pv = document.getElementById('gfx-pv-spotlight');
     if (!pv) return;
-    const base = window.SCENE_BASE_URL || 'http://127.0.0.1:3000';
+    const base = window.SCENE_BASE_URL || 'http://localhost:3000';
     pv.src = base + (mode === 'solo' ? '/team-spotlight.html' : '/watchlist.html') + '?preview=1';
   }
 
@@ -3296,9 +3336,109 @@ function _borrowGraphicsToDash() {
         || null;
   }
   const MP_CUSTOM = 'custom:';   // <option> value for a name with no pool match (kept, not dropped)
+  // Type-to-search front for a row's map <select>. The native select stays in the row (hidden) as
+  // the value store, so mpBuildMapsPayload and the change listeners are untouched — picking from
+  // the list just sets sel.value and fires 'change'. List is alphabetical; the query matches the
+  // map name (accent-insensitive, so "paraiso" finds Paraíso) or its mode ("escort").
+  // Icon dropdown for a row's Mode <select> — a native <option> can't show an image, and the mode
+  // logo is what the overlay badges the map card with. The select stays (hidden) as the value
+  // store; picking sets it and fires 'change', so the existing wiring is untouched.
+  function mpModePick(modeSel) {
+    const box = document.createElement('div'); box.className = 'mp-ipick';
+    const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'input-select mp-ipick-btn';
+    btn.title = modeSel.title || '';
+    const dd = document.createElement('div'); dd.className = 'team-dd mp-ipick-dd'; dd.setAttribute('role', 'listbox');
+    modeSel.style.display = 'none';
+    box.appendChild(btn); box.appendChild(dd); box.appendChild(modeSel);
+    const icon = (v) => { const src = v ? mpModeIcon(v) : ''; return src ? `<img src="${dEsc(src)}" alt="" onerror="this.style.visibility='hidden'">` : '<span class="mp-ipick-ph"></span>'; };
+    const paint = () => {
+      const o = modeSel.options[modeSel.selectedIndex];
+      const v = o ? o.value : '';
+      btn.classList.toggle('is-empty', !v);
+      btn.innerHTML = icon(v) + `<span class="mp-ipick-txt">${v ? dEsc(o.textContent) : 'Mode'}</span>`;
+    };
+    const close = () => dd.classList.remove('show');
+    const open = () => {
+      dd.innerHTML = [...modeSel.options].map((o, i) =>
+        `<div class="team-dd-item${o.value === modeSel.value ? ' active' : ''}" data-i="${i}">${icon(o.value)}<span class="team-dd-name">${o.value ? dEsc(o.textContent) : 'No mode'}</span></div>`).join('');
+      const r = btn.getBoundingClientRect();
+      dd.style.left = r.left + 'px'; dd.style.top = (r.bottom + 4) + 'px'; dd.style.width = Math.max(r.width, 170) + 'px';
+      dd.classList.add('show');
+    };
+    btn.addEventListener('click', () => (dd.classList.contains('show') ? close() : open()));
+    btn.addEventListener('blur', () => setTimeout(close, 120));
+    dd.addEventListener('mousedown', (e) => {
+      const it = e.target.closest('.team-dd-item'); if (!it) return;
+      e.preventDefault();
+      const o = modeSel.options[Number(it.dataset.i)];
+      if (o && modeSel.value !== o.value) { modeSel.value = o.value; modeSel.dispatchEvent(new Event('change', { bubbles: true })); }
+      paint(); close();
+    });
+    window.addEventListener('scroll', () => { if (dd.classList.contains('show')) close(); }, { capture: true, passive: true });
+    paint();
+    return { box, paint };
+  }
+  function mpMapCombo(sel, pool) {
+    const fold = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    const sorted = pool.slice().sort((a, b) => fold(a.name).localeCompare(fold(b.name)));
+    // Same base as vmAsset(), inlined — that const is declared further down the file (TDZ on early render).
+    const img = (p) => (p && p.startsWith('/') && location.protocol === 'file:' ? 'http://127.0.0.1:3000' + p : p || '');
+    const box = document.createElement('div'); box.className = 'team-typeahead mp-map-combo';
+    const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'input-text mp-map-search';
+    inp.placeholder = 'Search maps…'; inp.autocomplete = 'off'; inp.spellcheck = false;
+    const dd = document.createElement('div'); dd.className = 'team-dd'; dd.setAttribute('role', 'listbox');
+    sel.style.display = 'none';
+    box.appendChild(inp); box.appendChild(dd); box.appendChild(sel);
+    const label = () => { const o = sel.options[sel.selectedIndex]; return o && o.value ? o.textContent : ''; };
+    inp.value = label();
+    let hits = [], active = 0;
+    const draw = () => {
+      const q = fold(inp.value.trim());
+      // Opening on the current pick shows the whole list, not just that one map.
+      hits = (!q || inp.value === label()) ? sorted : sorted.filter((p) => fold(p.name).includes(q) || fold(p.type).includes(q));
+      active = Math.max(0, Math.min(active, hits.length - 1));
+      dd.innerHTML = hits.length ? hits.map((p, i) =>
+        `<div class="team-dd-item${i === active ? ' active' : ''}${p.id === sel.value ? ' is-current' : ''}" data-i="${i}">`
+        + (p.image ? `<img class="team-dd-logo mp-map-thumb" src="${dEsc(img(p.image))}" alt="" onerror="this.style.visibility='hidden'">` : '')
+        + `<span class="team-dd-name">${dEsc(p.name)}</span>`
+        + (p.type ? `<span class="team-dd-tag">${dEsc(p.type)}</span>` : '') + '</div>').join('')
+        : '<div class="team-dd-empty">No map matches</div>';
+      const r = inp.getBoundingClientRect();
+      dd.style.left = r.left + 'px'; dd.style.top = (r.bottom + 4) + 'px'; dd.style.width = Math.max(r.width, 240) + 'px';
+      dd.classList.add('show');
+      const a = dd.querySelector('.team-dd-item.active'); if (a) a.scrollIntoView({ block: 'nearest' });
+    };
+    const close = () => { dd.classList.remove('show'); inp.value = label(); };
+    const choose = (p) => {
+      if (!p) return;
+      if (sel.value !== p.id) { sel.value = p.id; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+      inp.value = label(); dd.classList.remove('show'); inp.blur();
+    };
+    inp.addEventListener('focus', () => { active = Math.max(0, sorted.findIndex((p) => p.id === sel.value)); inp.select(); draw(); });
+    inp.addEventListener('input', () => { active = 0; draw(); });
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(active + 1, hits.length - 1); draw(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(active - 1, 0); draw(); }
+      else if (e.key === 'Enter') { e.preventDefault(); choose(hits[active]); }
+      else if (e.key === 'Escape') { close(); inp.blur(); }
+    });
+    // mousedown (not click) so the pick lands before the input's blur closes the list.
+    dd.addEventListener('mousedown', (e) => {
+      const it = e.target.closest('.team-dd-item'); if (!it) return;
+      e.preventDefault(); choose(hits[Number(it.dataset.i)]);
+    });
+    inp.addEventListener('blur', () => setTimeout(close, 0));
+    // The list is position:fixed — drop it if the panel scrolls out from under it.
+    window.addEventListener('scroll', () => { if (dd.classList.contains('show')) close(); }, { capture: true, passive: true });
+    return box;
+  }
   function mpMinSlots(bo) { return Math.max(1, Math.ceil((Number(bo) || 5) / 2)); }   // maps needed to CLINCH
   function mpMaxSlots(bo) { return Math.max(1, Number(bo) || 5); }                    // can't exceed the format
   // count omitted → max(existing picks, the format's minimum). Pass it explicitly for Add/Remove/BO-change.
+  // Inline icons, NOT svgIcon(): this IIFE renders at startup, before app.js reaches its ICON_SVG
+  // table further down, and touching that const here throws a TDZ error that halts the whole panel.
+  const MP_ICON_RESET = '<svg class="svg-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>';
+  const MP_ICON_REMOVE = '<svg class="svg-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
   function mpRenderSlots(prefill, count) {
     const wrap = el('mp-slots'); if (!wrap) return;
     const bo = parseInt(el('mp-bestof')?.value, 10) || 5;
@@ -3312,8 +3452,14 @@ function _borrowGraphicsToDash() {
     const _tB = (_tms.orange && _tms.orange.name) || 'Orange';
     const _cA = (_tms.blue && _tms.blue.color) || '#3b82f6';
     const _cB = (_tms.orange && _tms.orange.color) || '#e97139';
-    const keyEl = el('mp-team-key');
-    if (keyEl) keyEl.innerHTML = 'Scores: <b style="color:' + _cA + ';">' + dEsc(_tA) + '</b> left · <b style="color:' + _cB + ';">' + dEsc(_tB) + '</b> right';
+    // Column header on the same grid as the rows; each score column is keyed by its team's tag in
+    // the team colour (replaces the old "Scores: X left · Y right" sentence).
+    const tagA = ((_tms.blue && _tms.blue.abbr) || _tA).toUpperCase();   // full name ellipsizes in CSS (hover = title)
+    const tagB = ((_tms.orange && _tms.orange.abbr) || _tB).toUpperCase();
+    const headEl = el('mp-head');
+    if (headEl) headEl.innerHTML = '<span></span><span>Map</span><span>Mode</span><span>Picked by</span>'
+      + '<span class="mp-head-team" style="color:' + _cA + ';" title="' + dEsc(_tA) + '">' + dEsc(tagA) + '</span><span></span>'
+      + '<span class="mp-head-team" style="color:' + _cB + ';" title="' + dEsc(_tB) + '">' + dEsc(tagB) + '</span><span></span><span></span>';
     const modeOpts = mpModeOptions();
     const auto = mpAutoOn();
     wrap.classList.toggle('is-auto', auto);
@@ -3336,22 +3482,17 @@ function _borrowGraphicsToDash() {
       // (RL picks the mode per game; some games' maps rotate modes across a season/patch).
       const modeSel = document.createElement('select'); modeSel.className = 'input-select mp-mode-select';
       modeSel.title = 'Game mode for this map';
-      modeSel.style.cssText = 'flex:0 0 auto; max-width:118px; font-size:11px;';
+      modeSel.style.cssText = 'font-size:11px;';
       const modeVal = m.mode || (curPool && curPool.type) || '';
       modeSel.innerHTML = '<option value="">Mode: —</option>' +
         modeOpts.map((md) => `<option value="${md}"${md === modeVal ? ' selected' : ''}>${md}</option>`).join('');
       if (!modeSel.value && modeVal) { const o = document.createElement('option'); o.value = modeVal; o.textContent = modeVal; o.selected = true; modeSel.appendChild(o); }
+      // The mode's own logo in the picker and its list, so Control/Escort or Dropshot/Hoops read at a
+      // glance and the producer sees exactly what the overlay will badge the card with.
+      const modePick = mpModePick(modeSel);
       // No modes for this game and nothing already set → don't show a dead dropdown.
-      if (!modeOpts.length && !modeVal) modeSel.style.display = 'none';
-      // The mode's own logo, so Dropshot/Hoops/Rumble read at a glance and the producer can see
-      // exactly what the overlay will badge the card with.
-      const modeIcon = document.createElement('img'); modeIcon.className = 'mp-mode-icon'; modeIcon.alt = '';
-      const syncModeIcon = () => {
-        const src = mpModeIcon(modeSel.value);
-        if (src) { modeIcon.src = src; modeIcon.title = modeSel.value; modeIcon.style.display = ''; }
-        else { modeIcon.removeAttribute('src'); modeIcon.style.display = 'none'; }
-      };
-      modeIcon.onerror = () => { modeIcon.style.display = 'none'; };
+      if (!modeOpts.length && !modeVal) modePick.box.style.visibility = 'hidden';   // keep the grid column
+      const syncModeIcon = () => modePick.paint();
       modeSel.addEventListener('change', syncModeIcon);
       // Picking a map re-defaults its mode (unless the row already has an explicit override).
       sel.addEventListener('change', () => {
@@ -3361,18 +3502,18 @@ function _borrowGraphicsToDash() {
       syncModeIcon();
       const pick = document.createElement('select'); pick.className = 'input-select mp-pick-by';
       pick.title = 'Who picked this map';
-      pick.style.cssText = 'flex:0 0 auto; max-width:120px; font-size:11px;';
-      pick.innerHTML = '<option value="">Pick: —</option>'
+      pick.style.cssText = 'font-size:11px;';
+      pick.innerHTML = '<option value="">—</option>'
         + '<option value="a"' + (m.by === 'a' && m.action !== 'decider' ? ' selected' : '') + '>' + dEsc(_tA.slice(0, 12)) + ' pick</option>'
         + '<option value="b"' + (m.by === 'b' && m.action !== 'decider' ? ' selected' : '') + '>' + dEsc(_tB.slice(0, 12)) + ' pick</option>'
         + '<option value="decider"' + (m.action === 'decider' ? ' selected' : '') + '>Decider</option>';
       const scA = document.createElement('input'); scA.type = 'number'; scA.className = 'input-text mp-score-a';
-      scA.min = '0'; scA.placeholder = _tA.slice(0, 6); scA.title = _tA + ' score';
+      scA.min = '0'; scA.placeholder = '–'; scA.title = _tA + ' score';
       scA.style.borderBottom = '2px solid ' + _cA;
       scA.value = (m.score && m.score.a) || '';
       const sep = document.createElement('span'); sep.className = 'mp-sep'; sep.textContent = '–';
       const scB = document.createElement('input'); scB.type = 'number'; scB.className = 'input-text mp-score-b';
-      scB.min = '0'; scB.placeholder = _tB.slice(0, 6); scB.title = _tB + ' score';
+      scB.min = '0'; scB.placeholder = '–'; scB.title = _tB + ' score';
       scB.style.borderBottom = '2px solid ' + _cB;
       scB.value = (m.score && m.score.b) || '';
       // While Auto is on the series editor owns the numbers — don't let a producer type into a
@@ -3381,7 +3522,7 @@ function _borrowGraphicsToDash() {
       // Clear just this map's score — back to "not played yet" (chip instead of a result on the
       // overlay). With Auto on it clears the series editor's row too, or it would come straight back.
       const clr = document.createElement('button'); clr.type = 'button'; clr.className = 'btn btn-ghost btn-xs mp-score-clr';
-      clr.textContent = '0'; clr.title = 'Clear this map\'s score';
+      clr.innerHTML = MP_ICON_RESET; clr.title = 'Reset this map\'s score';
       clr.disabled = !(scA.value || scB.value);
       clr.addEventListener('click', () => {
         scA.value = ''; scB.value = ''; clr.disabled = true;
@@ -3391,10 +3532,10 @@ function _borrowGraphicsToDash() {
       const refreshClr = () => { clr.disabled = !(scA.value || scB.value); };
       scA.addEventListener('input', refreshClr); scB.addEventListener('input', refreshClr);
       const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'btn btn-ghost btn-xs mp-slot-rm';
-      rm.textContent = '×'; rm.title = 'Remove this map slot'; rm.disabled = n <= 1;
+      rm.innerHTML = MP_ICON_REMOVE; rm.title = 'Remove this map'; rm.disabled = n <= 1;
       rm.addEventListener('click', () => { mpRenderSlots(mpBuildMapsPayload(true), n - 1); mpSendDebounced(); });
       [sel, modeSel, pick, scA, scB].forEach((inp) => { inp.addEventListener('input', mpSendDebounced); inp.addEventListener('change', mpSendDebounced); });
-      row.appendChild(num); row.appendChild(sel); row.appendChild(modeSel); row.appendChild(modeIcon); row.appendChild(pick);
+      row.appendChild(num); row.appendChild(mpMapCombo(sel, pool)); row.appendChild(modePick.box); row.appendChild(pick);
       row.appendChild(scA); row.appendChild(sep); row.appendChild(scB); row.appendChild(clr); row.appendChild(rm);
       wrap.appendChild(row);
     }
@@ -3557,6 +3698,19 @@ function _borrowGraphicsToDash() {
     if (mpAutoOn()) mpClearSeriesScores(null);
     mpSendDebounced();
     showToast('Cleared every map score', '#22c55e');
+  });
+
+  // Clear the whole map list in one go (maps, picks, scores). With Auto from Series on, the series
+  // editor's maps go too, or the merge would put every name straight back.
+  el('mp-clear-maps')?.addEventListener('click', async () => {
+    const n = mpBuildMapsPayload().length;
+    if (!n) { showToast('No maps to clear', '#fbbf24'); return; }
+    if (!await customConfirm('Clear maps', `Remove all ${n} map${n === 1 ? '' : 's'} from the series, with their picks and scores?`, 'Clear maps')) return;
+    if (mpAutoOn()) send('set_match', { maps: [] });
+    send('set_veto', { title: (el('mp-title')?.value || '').trim(), maps: [] });
+    const bo = parseInt(el('mp-bestof')?.value, 10) || 5;
+    mpRenderSlots([], mpMinSlots(bo));
+    showToast('Cleared the map list', '#22c55e');
   });
 
   function mpSyncFromState(data) {
@@ -3990,14 +4144,47 @@ function _borrowGraphicsToDash() {
     return f.indexOf('stocks') >= 0 || f.indexOf('fgc') >= 0;
   }
   function stdIsPlacement() {
-    return stdGameHasTop8() && stdLayoutChoice() !== 'podium';
+    // Explicitly choosing the placement wall works for ANY game — the cards fall back to the
+    // entrant's logo, so a Rocket League top 8 is a real graphic. 'auto' is the fighting-game rule.
+    const choice = stdLayoutChoice();
+    if (choice === 'placement') return true;
+    return stdGameHasTop8() && choice !== 'podium';
   }
   // Real finish order from start.gg for the linked event, or null. This is the ONLY source with
   // true placements: an elimination bracket's standings are ordered by set wins, so they have no
   // 5/5 or 7/7 ties and can rank a losers-run runner-up above the champion.
   function stdStartggPlacements() {
-    const pl = (currentState || {}).startggPlacements || {};
-    return Array.isArray(pl.rows) && pl.rows.length ? pl.rows : null;
+    return stdPlacements().rows;
+  }
+  /*
+    Real finish order from whichever PLATFORM is driving the event, or null.
+
+    Both start.gg and Challonge publish a true placement per entrant, and they are the only sources
+    with one: an elimination bracket's standings are ordered by set wins, so they have no 5/5 or
+    7/7 ties and can rank a losers-run runner-up above the champion. The rows come back in the same
+    shape from either, so everything downstream — this builder, the push, the overlay — is
+    platform-agnostic; only `source` differs, and that is what tells the server which one to keep
+    re-mirroring as the bracket resolves.
+
+    The ACTIVE platform wins. A producer who loaded a Challonge bracket after a start.gg one must
+    not get the old event's top 8 just because those rows are still in state.
+  */
+  function stdPlacements() {
+    const st = currentState || {};
+    // One entry per platform that publishes a real finish order. Keep this list in the order we
+    // would fall back through when no platform is active.
+    const SOURCES = [
+      { platform: 'startgg', state: st.startggPlacements, source: 'startgg-placements', label: 'start.gg' },
+      { platform: 'challonge', state: st.challongePlacements, source: 'challonge-placements', label: 'Challonge' },
+      { platform: 'challengermode', state: st.challengermodePlacements, source: 'challengermode-placements', label: 'Challengermode' }
+    ].map((x) => ({ ...x, rows: (x.state && Array.isArray(x.state.rows) && x.state.rows.length) ? x.state.rows : null,
+                    complete: !!(x.state && x.state.complete) }));
+    const active = ((st.activeEvent || {}).platform) || '';
+    // The ACTIVE platform wins. A producer who loaded a Challengermode bracket after a start.gg one
+    // must not get the old event's top 8 just because those rows are still sitting in state.
+    const hit = SOURCES.find((x) => x.platform === active && x.rows) || SOURCES.find((x) => x.rows);
+    if (hit) return { rows: hit.rows, source: hit.source, label: hit.label, complete: hit.complete };
+    return { rows: null, source: 'manual', label: '', complete: false };
   }
   // The rows the selected source WOULD send, falling back to what is already on air so the list
   // still populates for a board pushed in an earlier session.
@@ -4010,8 +4197,17 @@ function _borrowGraphicsToDash() {
       // `players` is the entrant's roster — the Top 8 card lists it under a TEAM/doubles name, so
       // it has to survive this mapping the same way `character` does.
       // `countryCode` is the entrant's start.gg country (ISO-2) — the card's flag.
-      if (pl) return pl.map((r) => ({ placement: r.placement, name: r.name,
+      // `logo` rides along for Challonge, which attaches a participant portrait and has no
+      // character selections at all; `character` rides along for start.gg, which does. Dropping
+      // either here is what makes a whole pull look like it never happened.
+      // `placementText` is Challengermode's tie RANGE ("5-8"); `logo` is Challonge/Challengermode's
+      // entrant portrait; `character` is start.gg's reported fighter. Each platform fills a
+      // different subset, and dropping any of them here is what makes a whole pull look like it
+      // never happened.
+      if (pl) return pl.map((r) => ({ placement: r.placement, placementText: r.placementText || '',
+                                      name: r.name,
                                       character: r.character || '', players: r.players || [],
+                                      logo: r.logo || null,
                                       countryCode: r.countryCode || '' }));
     }
     let rows = [];
@@ -4061,12 +4257,14 @@ function _borrowGraphicsToDash() {
   }
   // Compare a row list to what's pushed, so the chip can say whether the two agree.
   const stdRowSig = (rows) => (rows || []).map((r) =>
-    [r.placement, (r.name || '').trim().toLowerCase(), (r.character || '').trim().toLowerCase()].join('|')).join(';');
+    [r.placement, r.placementText || '', (r.name || '').trim().toLowerCase(), (r.character || '').trim().toLowerCase()].join('|')).join(';');
 
   function stdRenderFighters() {
     const wrap = el('gfx-std-fighters'); if (!wrap) return;
     // Off Smash there is no board choice to make, so the whole selector goes away.
-    const seg = el('gfx-std-layout-row'); if (seg) seg.style.display = stdGameHasTop8() ? '' : 'none';
+    // The board selector stays visible for every game: the placement wall is no longer
+    // Smash-only, so hiding the choice would hide a board the overlay will happily draw.
+    const seg = el('gfx-std-layout-row'); if (seg) seg.style.display = '';
     const block = el('gfx-std-fighters-wrap');
     const show = stdIsPlacement();
     if (block) block.style.display = show ? '' : 'none';
@@ -4115,8 +4313,13 @@ function _borrowGraphicsToDash() {
       // is left guessing whether the pull ran at all.
       const pl = (currentState || {}).startggPlacements || {};
       let label = 'Following the source';
+      const plSrc = stdPlacements();
       if (_stdTop8) label = 'Edited by hand';
-      else if (stdStartggPlacements() && !withFighters) label = 'Following start.gg';
+      // Challonge reports no character selections, so its board never shows a fighter count —
+      // saying "0/8 fighters reported" for a platform that has no such field would read as a fault.
+      else if (plSrc.rows && (!withFighters || plSrc.source !== 'startgg-placements')) {
+        label = 'Following ' + plSrc.label + (plSrc.complete ? '' : ' · bracket still running');
+      }
       else if (stdStartggPlacements()) {
         const filled = rows.filter((r) => (r.character || '').trim()).length;
         label = 'Following start.gg · ' + filled + '/' + rows.length + ' fighters reported';
@@ -4282,7 +4485,10 @@ function _borrowGraphicsToDash() {
     // Tag a top 8 that is still following start.gg so the server re-mirrors it as the bracket
     // resolves (refreshStartggPlacements). Once the producer edits the list it becomes theirs,
     // and a manual tag stops the server overwriting their names.
-    if (placement) payload = { ...payload, source: (!_stdTop8 && stdStartggPlacements()) ? 'startgg-placements' : 'manual' };
+    // A board still MIRRORING a platform keeps following it (the server re-pushes the rows as the
+    // bracket resolves); the moment the producer edits a row it becomes theirs, so it goes as
+    // 'manual' and nothing can reorder it out from under them mid-show.
+    if (placement) payload = { ...payload, source: _stdTop8 ? 'manual' : (stdPlacements().source || 'manual') };
     if (placement && !top8.length) { gfxStdStatus('Add at least one player to the Top 8.', true); return; }
     // Off the Top 8 board the Manual source deliberately sends NO rows (the server keeps the
     // hand-entered ones), so fall back to what's on air rather than wiping them with an empty array.
@@ -4588,7 +4794,7 @@ function _borrowGraphicsToDash() {
       _schInitialized = true;
       const laySel = el('gfx-sch-layout'); if (laySel) laySel.value = lay;
       const pv = el('gfx-pv-schedule');
-      if (pv) { pv.dataset.lay = lay; pv.src = (window.SCENE_BASE_URL || 'http://127.0.0.1:3000') + '/schedule.html?preview=1&layout=' + lay; }
+      if (pv) { pv.dataset.lay = lay; pv.src = (window.SCENE_BASE_URL || 'http://localhost:3000') + '/schedule.html?preview=1&layout=' + lay; }
       // Title hydration handled by renderPopoutSummary('schedule') on every broadcast now
       // (front card owns it) — no separate one-time sync needed here.
       if (Array.isArray(up.matches) && up.matches.length) {
@@ -4646,7 +4852,7 @@ function _borrowGraphicsToDash() {
     const lay = e.target.value;
     send('set_upcoming', { layout: lay });
     const pv = el('gfx-pv-schedule');
-    if (pv) pv.src = (window.SCENE_BASE_URL || 'http://127.0.0.1:3000') + '/schedule.html?preview=1&layout=' + lay;
+    if (pv) pv.src = (window.SCENE_BASE_URL || 'http://localhost:3000') + '/schedule.html?preview=1&layout=' + lay;
   });
   // Keep finished matches on the board (with their final series score)
   el('gfx-sch-showresults')?.addEventListener('change', function () { send('set_upcoming', { showResults: this.checked }); });
@@ -6677,6 +6883,77 @@ function applyLiquipediaState(data) {
   }
 }
 
+// -- Riot Games API ---------------------------------------------------------
+// Producer's own key from developer.riotgames.com. Nothing polls - Riot's per-key limits are
+// small - so Test and Look up are the only things that ever call out.
+// The platform (na1/kr/...) and the routing region (americas/europe/...) are two different Riot
+// routings; the platform picker moves the region with it because a mismatch answers 404.
+const RIOT_PLATFORM_REGION = {
+  na1: 'americas', br1: 'americas', la1: 'americas', la2: 'americas',
+  euw1: 'europe', eun1: 'europe', tr1: 'europe', ru: 'europe', me1: 'europe',
+  kr: 'asia', jp1: 'asia',
+  oc1: 'sea', sg2: 'sea', tw2: 'sea', vn2: 'sea', th2: 'sea', ph2: 'sea'
+};
+function riotSend(extra) {
+  send('set_riot_settings', Object.assign({
+    platform: el('select-riot-platform')?.value || 'na1',
+    region: el('select-riot-region')?.value || 'americas'
+  }, extra || {}));
+}
+el('select-riot-platform')?.addEventListener('change', () => {
+  const reg = RIOT_PLATFORM_REGION[el('select-riot-platform').value];
+  const rSel = el('select-riot-region');
+  if (reg && rSel) rSel.value = reg;
+  riotSend();
+});
+el('select-riot-region')?.addEventListener('change', () => riotSend());
+el('btn-riot-save')?.addEventListener('click', () => {
+  const key = el('input-riot-key')?.value || '';
+  riotSend(key.trim() ? { apiKey: key.trim() } : {});
+  const k = el('input-riot-key'); if (k) k.value = '';   // never keep the secret in the DOM
+});
+el('btn-riot-change-key')?.addEventListener('click', () => {
+  const k = el('input-riot-key'); if (k) { k.value = ''; k.focus(); }
+});
+el('btn-riot-test')?.addEventListener('click', () => {
+  // Save first if something is typed, so Test never checks a key the server hasn't got yet.
+  const key = el('input-riot-key')?.value || '';
+  if (key.trim()) { riotSend({ apiKey: key.trim() }); el('input-riot-key').value = ''; }
+  const r = el('riot-result'); if (r) { r.style.color = 'var(--muted)'; r.textContent = 'Checking with Riot...'; }
+  send('riot_test', {});
+});
+el('btn-riot-lookup')?.addEventListener('click', () => {
+  const r = el('riot-result'); if (r) { r.style.color = 'var(--muted)'; r.textContent = 'Looking up...'; }
+  send('riot_lookup', { riotId: el('input-riot-riotid')?.value || '' });
+});
+el('input-riot-riotid')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') el('btn-riot-lookup')?.click(); });
+
+function applyRiotState(data) {
+  const rt = (data && data.riot) || {};
+  const plat = el('select-riot-platform');
+  if (plat && document.activeElement !== plat && rt.platform) plat.value = rt.platform;
+  const reg = el('select-riot-region');
+  if (reg && document.activeElement !== reg && rt.region) reg.value = rt.region;
+  const keyInp = el('input-riot-key'), changeBtn = el('btn-riot-change-key');
+  if (keyInp && changeBtn) {
+    keyInp.placeholder = rt.hasKey ? 'Key saved - paste a new one to replace it' : 'RGAPI-...';
+    changeBtn.style.display = rt.hasKey ? '' : 'none';
+  }
+  // The chip carries the one fact that explains most failures: a development key is a 24-hour key.
+  const chip = el('riot-key-chip');
+  if (chip) {
+    if (!rt.hasKey) { chip.textContent = 'No key'; chip.dataset.st = 'off'; }
+    else if (rt.lastError) { chip.textContent = 'Key rejected'; chip.dataset.st = 'warn'; }
+    else { chip.textContent = rt.keyKind === 'development' ? 'Dev key (24h)' : 'Key saved'; chip.dataset.st = 'on'; }
+  }
+  const card = document.querySelector('.int-card[data-card="riot"] .int-card-status');
+  if (card) { card.textContent = rt.hasKey ? (rt.lastError ? 'Key rejected' : 'Key saved') : 'No key'; card.dataset.st = rt.hasKey && !rt.lastError ? 'on' : 'off'; }
+  if (rt.lastError) {
+    const r = el('riot-result');
+    if (r && !r.dataset.fresh) { r.textContent = rt.lastError; r.style.color = '#f56565'; }
+  }
+}
+
 // ── Org-seat role UX: talent/analyst run the app VIEW-ONLY (server enforces it —
 // every mutating control message is rejected); this just makes it visible and
 // hides the two pages that are all credentials (Settings / Marketplace). ──
@@ -6718,7 +6995,9 @@ el('check-swap-sides')?.addEventListener('change', function () {
 // ── Bottom-bar customize: pin any scene / overlay / trigger as a quick button ──
 // Pinned model: [{ t:'scene'|'overlay'|'trigger', k }]. Old string arrays migrate to scenes.
 const BB_PINNED_KEY = 'ne_bb_pinned_v2';
-const BB_TRIGGER_LABELS = { breakScreen: 'Countdown', winner: 'Winner', intro: 'Line-up', spotlight: 'Spotlight', veto: 'Map Veto' };
+const BB_TRIGGER_LABELS = { breakScreen: 'Countdown', winner: 'Winner', intro: 'Line-up', watchlist: 'Teams to Watch', spotlight: 'Teams to Watch', veto: 'Map Veto' };
+// The Teams-to-Watch trigger used to be keyed 'spotlight'; saved pins / rundown segments still carry it.
+const trigStateKey = (k) => (k === 'spotlight' ? 'watchlist' : k);
 function bbPinned() {
   try {
     return (JSON.parse(localStorage.getItem(BB_PINNED_KEY) || '[]'))
@@ -6752,7 +7031,7 @@ function bbActionInfo(p) {
     return { label: o.label, live: on, run: () => send(o.msg, { visible: !on }) };
   }
   if (p.t === 'trigger') {
-    const g = (typeof GOLIVE_TRIGGERS !== 'undefined' ? GOLIVE_TRIGGERS : []).find((x) => x.state === p.k); if (!g) return null;
+    const g = (typeof GOLIVE_TRIGGERS !== 'undefined' ? GOLIVE_TRIGGERS : []).find((x) => x.state === trigStateKey(p.k)); if (!g) return null;
     const live = !!(currentState[g.state] && currentState[g.state].visible);
     return { label: BB_TRIGGER_LABELS[p.k] || p.k, live, run: () => send(g.msg, live ? { visible: false } : g.show()) };
   }
@@ -7561,6 +7840,7 @@ function applyState(data) {
   _ap('_gfxRefreshBracketOrgStatus', () => { if (typeof window._gfxRefreshBracketOrgStatus === 'function') window._gfxRefreshBracketOrgStatus(data); });
   _ap('_gfxRefreshScheduleQueue', () => { if (typeof window._gfxRefreshScheduleQueue === 'function') window._gfxRefreshScheduleQueue(data); });
   _ap('_gcRefresh', () => { if (typeof window._gcRefresh === 'function') window._gcRefresh(data); });
+  _ap('_promoRefresh', () => { if (typeof window._promoRefresh === 'function') window._promoRefresh(data); });
   _ap('updateFacecamTeamHeaders', () => { updateFacecamTeamHeaders(teams, data); });
   _ap('applyCommercialState', () => { if (typeof applyCommercialState === 'function') applyCommercialState(data); });
   _ap('lgHydrate', () => { if (typeof lgHydrate === 'function') lgHydrate(data.leagues); });
@@ -7650,17 +7930,23 @@ function applyState(data) {
   const chalQBlock   = el('ev-challonge-queue-block');
   const nxgenQBlock  = el('ev-nxgen-queue-block');
   const faceitQBlock = el('ev-faceit-queue-block');
+  const cmQBlock     = el('ev-cm-queue-block');
   const sggQBlock    = el('ev-queue-block');
   const isChalActive   = ae && ae.platform === 'challonge';
   const isNxgenActive  = ae && ae.platform === 'nxgen';
   const isFaceitActive = ae && ae.platform === 'faceit';
+  const isCmActive     = ae && ae.platform === 'challengermode';
   if (chalQBlock)   chalQBlock.style.display   = isChalActive ? '' : 'none';
   if (nxgenQBlock)  nxgenQBlock.style.display  = isNxgenActive ? '' : 'none';
   if (faceitQBlock) faceitQBlock.style.display = isFaceitActive ? '' : 'none';
-  if (sggQBlock)    sggQBlock.style.display    = (isChalActive || isNxgenActive || isFaceitActive) ? 'none' : '';
+  if (cmQBlock)     cmQBlock.style.display     = isCmActive ? '' : 'none';
+  // The start.gg queue is the DEFAULT block, so every other platform has to be excluded here or
+  // two queues show at once.
+  if (sggQBlock)    sggQBlock.style.display    = (isChalActive || isNxgenActive || isFaceitActive || isCmActive) ? 'none' : '';
   _ap('renderDashChallongeQueue', () => { if (isChalActive)   renderDashChallongeQueue(data.challonge?.queue || [], data.challonge?.queueFetchedAt); });
   _ap('renderDashNxgenQueue', () => { if (isNxgenActive)  renderDashNxgenQueue(data.nxgen?.queue || [], data.nxgen?.queueFetchedAt); });
   _ap('renderDashFaceitQueue', () => { if (isFaceitActive) renderDashFaceitQueue(data.faceit?.queue || [], data.faceit?.queueFetchedAt); });
+  _ap('renderDashChallengermodeQueue', () => { if (isCmActive) renderDashChallengermodeQueue(data.challengermode?.queue || [], data.challengermode?.queueFetchedAt); });
   // Auto-follow toggles
   const chalAF  = el('challonge-autofollow');
   if (chalAF) chalAF.checked = !!data.challonge?.autoFollow;
@@ -7668,6 +7954,8 @@ function applyState(data) {
   if (nxgenAF) nxgenAF.checked = !!data.nxgen?.autoFollow;
   const faceitAF = el('faceit-autofollow');
   if (faceitAF) faceitAF.checked = !!data.faceit?.autoFollow;
+  const cmAF = el('cm-autofollow-queue');
+  if (cmAF && document.activeElement !== cmAF) cmAF.checked = !!data.challengermode?.autoFollow;
   // token badge
   _ap('updateEvTokenBadge', () => { updateEvTokenBadge(); });
 
@@ -7739,7 +8027,7 @@ function applyState(data) {
     const typingCaption = ae && ae.tagName === 'INPUT' && imagesList && imagesList.contains(ae);
     if (imagesList && !typingCaption) {
       imagesList.innerHTML = '';
-      const own = mainBanner.images || [];
+      const own = Array.isArray(mainBanner.images) ? mainBanner.images : [];   // not _ap-wrapped: a throw here blanks every panel below
       own.forEach((src, idx) => {
         const item = document.createElement('div');
         item.style = 'position: relative; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 10px; transition: transform 0.2s, background 0.2s;';
@@ -7767,7 +8055,10 @@ function applyState(data) {
         btn.innerHTML = 'Remove';
         btn.onmouseenter = () => { btn.style.background = '#e53e3e'; };
         btn.onmouseleave = () => { btn.style.background = '#c53030'; };
-        btn.addEventListener('click', () => send('remove_banner_image', { index: idx }));
+        btn.addEventListener('click', async () => {
+          if (!await customConfirm('Remove image', 'Remove this banner image? The uploaded file is deleted.', 'Remove')) return;
+          send('remove_banner_image', { index: idx });
+        });
 
         item.appendChild(img);
         item.appendChild(cap);
@@ -7815,6 +8106,7 @@ function applyState(data) {
   // OBS settings
   _ap('applyObsState', () => { applyObsState(data); });
   _ap('applyLiquipediaState', () => { if (typeof applyLiquipediaState === 'function') applyLiquipediaState(data); });
+  _ap('applyRiotState', () => { if (typeof applyRiotState === 'function') applyRiotState(data); });
   _ap('applyVmixState', () => { if (typeof applyVmixState === 'function') applyVmixState(data); });
 
   // Background overlay
@@ -7916,6 +8208,10 @@ function applyState(data) {
 
   // Challonge settings
   _ap('renderChallongeSettings', () => { if (typeof renderChallongeSettings === 'function') renderChallongeSettings(data); });
+  // Challengermode settings (a different platform from Challonge — see the module header).
+  // Wrapped in _ap like every other renderer: one throw in applyState() silently blanks every
+  // panel below it (see [[applystate-abort-class]]).
+  _ap('renderChallengermodeSettings', () => { if (typeof renderChallengermodeSettings === 'function') renderChallengermodeSettings(data); });
   // NXGEN settings
   _ap('renderNxgenSettings', () => { if (typeof renderNxgenSettings === 'function') renderNxgenSettings(data); });
   _ap('renderFaceitSettings', () => { if (typeof renderFaceitSettings === 'function') renderFaceitSettings(data); });
@@ -8000,6 +8296,10 @@ function syncTeamCard(side, teamData) {
   const logoImg = el(`preview-logo-${side}`);
   const colorEl = el(`input-color-${side}`);
   if (nameEl && document.activeElement !== nameEl) nameEl.value = teamData.name || '';
+  // Abbreviation mirrors the live side too (server resolves blank -> library tag), unless the
+  // producer is mid-edit in the field.
+  const abbrEl = el(`input-abbr-${side}`);
+  if (abbrEl && document.activeElement !== abbrEl) abbrEl.value = teamData.abbr || '';
   if (colorEl && document.activeElement !== colorEl) {
     const displayColor = teamData.ownColor || teamData.color;
     if (displayColor) colorEl.value = displayColor;
@@ -8023,11 +8323,11 @@ function syncTeamCard(side, teamData) {
 // Every team the Match picker can choose: saved library + seeded start.gg event teams,
 // deduped by name (saved wins). Used for the dropdown, the type-to-search datalist, and badges.
 function allMatchTeams() {
-  const saved = (currentState.savedTeams || []).map(t => ({ name: t.name, logo: t.logo, color: t.color || null, players: t.players || [], source: 'saved' }));
+  const saved = (currentState.savedTeams || []).map(t => ({ name: t.name, logo: t.logo, color: t.color || null, abbr: t.abbr || '', players: t.players || [], source: 'saved' }));
   const seen = new Set(saved.map(t => (t.name || '').toLowerCase()));
   const event = ((currentState.startgg && currentState.startgg.eventTeams) || [])
     .filter(t => t && t.name && !seen.has(t.name.toLowerCase()))
-    .map(t => ({ name: t.name, logo: t.logo, color: t.color || null, players: t.players || [], source: 'event' }));
+    .map(t => ({ name: t.name, logo: t.logo, color: t.color || null, abbr: t.abbr || '', players: t.players || [], source: 'event' }));
   return saved.concat(event).sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
 }
 function findTeam(name) {
@@ -8083,6 +8383,19 @@ const ROLES_BY_GAME = {
   cod:             ['Slayer', 'Objective', 'Anchor', 'Flex', 'IGL'],
   'the-finals':    ['Light', 'Medium', 'Heavy', 'Flex']
 };
+// Official role icons (white SVGs in assets/<game>/roles/). Same table as SceneBase.roleIcon in
+// overlay/scene-base.js — keep the two in step. Games/roles without an icon return ''.
+const ROLE_ICONS_BY_GAME = {
+  overwatch: { tank: 'tank', dps: 'damage', damage: 'damage', support: 'support' }
+};
+function roleIconUrl(game, role) {
+  // A producer-uploaded icon (Game Settings > Custom content > Roles) wins over the bundled one.
+  const cfg = ((typeof currentState !== 'undefined' && currentState.gameConfigs) || {})[game];
+  const own = cfg && cfg.roleIcons && cfg.roleIcons[String(role || '').trim().toLowerCase()];
+  if (own) return own;
+  const file = (ROLE_ICONS_BY_GAME[game] || {})[String(role || '').trim().toLowerCase()];
+  return file ? 'http://localhost:3000/assets/' + game + '/roles/' + file + '.svg' : '';
+}
 // Extends (never replaces) the built-in role list with any roles added via an active Game Config
 // for this game (currentState.gameConfigs, keyed by gameId) — dedupe-append, same "extend the
 // built-in baseline" spirit as the server-side map/character merges.
@@ -8105,6 +8418,8 @@ function buildRoleControl(role, presets, onPick) {
     inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
     return inp;
   }
+  // Games with role icons (bundled, or uploaded via Custom content) get an icon picker instead of a bare <select>.
+  if (presets.some((r) => roleIconUrl(currentState.activeGame, r))) return buildRoleIconPicker(role, presets, onPick);
   const wrap = document.createElement('div'); wrap.className = 'tp-role-wrap';
   const sel = document.createElement('select'); sel.className = 'input-select tp-role';
   const isCustom = role && !presets.includes(role);
@@ -8122,6 +8437,27 @@ function buildRoleControl(role, presets, onPick) {
   };
   sel.addEventListener('change', () => { if (sel.value === '__custom__') toCustom(''); else onPick(sel.value); });
   wrap.appendChild(sel);
+  return wrap;
+}
+
+function buildRoleIconPicker(role, presets, onPick) {
+  const game = currentState.activeGame;
+  const wrap = document.createElement('div'); wrap.className = 'tp-role-wrap';
+  const items = presets.map((r) => ({ value: r, label: r, img: roleIconUrl(game, r) }));
+  if (role && !presets.includes(role)) items.push({ value: role, label: role, img: roleIconUrl(game, role) });
+  items.push({ value: '__custom__', label: 'Custom…' });
+  const picker = buildSearchPicker({
+    items, value: role || '', placeholder: 'Role', className: 'tp-role tp-role-icons',
+    onPick: (v) => {
+      if (v !== '__custom__') return onPick(v);
+      const inp = document.createElement('input');
+      inp.className = 'input-text tp-role'; inp.placeholder = 'Custom role';
+      inp.addEventListener('change', () => onPick(inp.value.trim()));
+      inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
+      wrap.replaceChild(inp, picker); inp.focus();
+    }
+  });
+  wrap.appendChild(picker);
   return wrap;
 }
 
@@ -8224,15 +8560,28 @@ function buildCountryControl(code, onPick) {
 }
 
 // Per-game hero list for the active game (from the generated heroes-data.js).
+// Built-in list plus the active Game Config's characters (matched by name: a custom entry with a
+// built-in's name replaces its portrait, anything else is appended). Custom rows carry .src.
 function heroesForActiveGame() {
-  if (typeof HEROES_BY_GAME === 'undefined') return [];
-  return HEROES_BY_GAME[currentState.activeGame] || [];
+  const game = currentState.activeGame;
+  const built = (typeof HEROES_BY_GAME !== 'undefined' && HEROES_BY_GAME[game]) || [];
+  const custom = customCharactersFor(game);
+  if (!custom.length) return built;
+  const byName = {};
+  custom.forEach((c) => { byName[c.name.toLowerCase()] = c; });
+  const out = built.map((h) => { const c = byName[h.n.toLowerCase()]; if (c) delete byName[h.n.toLowerCase()]; return (c && c.image) ? { n: h.n, src: c.image } : h; });
+  Object.keys(byName).forEach((k) => out.push({ n: byName[k].name, src: byName[k].image || '' }));
+  return out.sort((a, b) => a.n.localeCompare(b.n));
+}
+function customCharactersFor(game) {
+  const cfg = (currentState.gameConfigs || {})[game];
+  return ((cfg && Array.isArray(cfg.characters)) ? cfg.characters : []).filter((c) => c && c.name);
 }
 function heroImgSrc(game, imgSlug) { return imgSlug ? `../assets/heroes/${game}/${imgSlug}.png` : ''; }
 // Hero/agent/operator picker — autocompletes from the game's roster, with portraits where we have them.
 function buildHeroControl(hero, onPick) {
   const game = currentState.activeGame;
-  const list = heroesForActiveGame().map((h) => ({ value: h.n, label: h.n, img: heroImgSrc(game, h.img) }));
+  const list = heroesForActiveGame().map((h) => ({ value: h.n, label: h.n, img: h.src || heroImgSrc(game, h.img) }));
   return buildSearchPicker({
     items: list, value: hero || '', placeholder: 'Hero / agent', emptyLabel: '— No hero —',
     className: 'tp-hero-pick', onPick
@@ -8806,7 +9155,7 @@ function mdRender() {
   }));
   grid.querySelectorAll('.md-file').forEach((t) => t.addEventListener('click', (e) => {
     if (e.target.closest('.md-del')) return;
-    navigator.clipboard?.writeText('http://127.0.0.1:3000' + t.dataset.url).then(() => mdSetStatus('Copied URL: ' + t.dataset.url, true), () => {});
+    navigator.clipboard?.writeText('http://localhost:3000' + t.dataset.url).then(() => mdSetStatus('Copied URL: ' + t.dataset.url, true), () => {});
   }));
   grid.querySelectorAll('.md-del').forEach((b) => b.addEventListener('click', async (e) => {
     e.stopPropagation();
@@ -10200,7 +10549,7 @@ el('btn-sort-teams-abc')?.addEventListener('click', () => {
       if (pi >= 0) names = (r[pi] || '').split(DELIM).map((s) => s.trim()).filter(Boolean);
       else names = r.filter((c, idx) => idx !== ti && idx !== li && idx !== ci && (c || '').trim()).map((c) => c.trim());
       const players = names.map((nm) => ({ id: Date.now() + Math.random(), name: nm, role: '', country: '' }));
-      send('save_team', { oldName: '', name, color, logo, players });
+      send('save_team', { oldName: '', name, color, logo, players, merge: true });
       count++;
     });
     const map = el('teams-csv-map'); if (map) map.style.display = 'none';
@@ -10222,7 +10571,7 @@ el('teams-json')?.addEventListener('change', function () {
       const players = (t.players || []).map((p) => (typeof p === 'string'
         ? { id: Date.now() + Math.random(), name: p }
         : { id: p.id || (Date.now() + Math.random()), name: p.name || p.gamerTag || '', role: p.role || '', country: p.country || '', startgg: p.startgg || '', sixmans: p.sixmans || '' })).filter((p) => p.name);
-      send('save_team', { oldName: '', name: t.name, color: t.color || '', logo: t.logo || '', favorite: !!t.favorite, players });
+      send('save_team', { oldName: '', name: t.name, color: t.color || '', logo: t.logo || '', favorite: !!t.favorite, players, merge: true });
       count++;
     });
     this.value = '';
@@ -10742,6 +11091,39 @@ el('input-event')?.addEventListener('input', function() {
   send('set_event_name', { name: this.value });
 });
 
+// ── Ad-slot sponsor pickers — pull logos from the ACTIVE BRAND's sponsor set ──
+// Single source of truth for BOTH the markup and the wiring: sponsor logos are uploaded per client
+// in the Brands tab; each Dashboard ad slot just *picks which* brand sponsor fills it (or "Upload
+// custom"). Every picker is select+preview+custom-upload-block, so instead of hand-duplicating that
+// per card in index.html, each card carries one <div data-ad-picker="<suffix>"></div> placeholder
+// and this table generates + mounts the real markup into it (must run before the input/button
+// listeners below, which look up elements this creates).
+const AD_PICKERS = [
+  { pick: 'pick-ot-logo',      suffix: 'ot-logo',      slot: 'overtime',      field: 'logo',      msg: 'set_overtime',      label: 'Sponsor (from active brand)' },
+  { pick: 'pick-replay-logo',  suffix: 'replay-logo',  slot: 'replay',        field: 'logo',      msg: 'set_replay',        label: 'Sponsor — goal swipe (from active brand)' },
+  { pick: 'pick-replay-outro', suffix: 'replay-outro', slot: 'replay',        field: 'outroLogo', msg: 'set_replay',        label: 'Outro Logo — after replay (from active brand)' },
+  { pick: 'pick-sbad-logo',    suffix: 'sbad-logo',    slot: 'scoreboardAd',  field: 'logo',      msg: 'set_scoreboard_ad', label: 'Sponsor (from active brand)' },
+].map((p) => Object.assign(p, { custom: 'custom-' + p.suffix }));
+(function mountAdPickers() {
+  AD_PICKERS.forEach((p) => {
+    const mount = document.querySelector('[data-ad-picker="' + p.suffix + '"]');
+    if (!mount || mount._mounted) return;
+    mount._mounted = true;
+    mount.innerHTML =
+      '<label class="field-label" for="' + p.pick + '">' + p.label + '</label>' +
+      '<div style="display:flex; gap:8px; align-items:center;">' +
+        '<select id="' + p.pick + '" class="input-select ad-sponsor-pick" style="flex:1; min-width:0;"></select>' +
+        '<img id="preview-' + p.suffix + '" alt="" style="height:30px; max-width:90px; object-fit:contain; display:none;">' +
+      '</div>' +
+      '<div class="ad-custom" id="' + p.custom + '" style="display:none; margin-top:8px;">' +
+        '<div style="display:flex; gap:8px; align-items:center;">' +
+          '<input type="file" id="input-' + p.suffix + '" accept="image/*" class="input-text" style="padding:6px; flex:1;">' +
+          '<button class="btn btn-ghost btn-sm" id="btn-' + p.suffix + '-clear" type="button">Clear</button>' +
+        '</div>' +
+      '</div>';
+  });
+})();
+
 // ── Overtime ad slot (sellable sponsor slot) ──────────────────────────────
 el('input-ot-label')?.addEventListener('input', function() {
   send('set_overtime', { label: this.value });
@@ -10763,15 +11145,6 @@ el('btn-ot-logo-clear')?.addEventListener('click', function() {
   send('set_overtime', { logo: null });
 });
 
-// ── Ad-slot sponsor pickers — pull logos from the ACTIVE BRAND's sponsor set ──
-// Single source of truth: sponsor logos are uploaded per client in the Brands tab;
-// each Dashboard ad slot just *picks which* brand sponsor fills it (or "Upload custom").
-const AD_PICKERS = [
-  { pick: 'pick-ot-logo',     custom: 'custom-ot-logo',     slot: 'overtime',     field: 'logo',      msg: 'set_overtime' },
-  { pick: 'pick-replay-logo', custom: 'custom-replay-logo', slot: 'replay',       field: 'logo',      msg: 'set_replay' },
-  { pick: 'pick-replay-outro',custom: 'custom-replay-outro',slot: 'replay',       field: 'outroLogo', msg: 'set_replay' },
-  { pick: 'pick-sbad-logo',   custom: 'custom-sbad-logo',   slot: 'scoreboardAd', field: 'logo',      msg: 'set_scoreboard_ad' },
-];
 function brandSponsorsWithLogos(data) {
   const list = (data && data.brand && Array.isArray(data.brand.sponsors)) ? data.brand.sponsors : [];
   return list.filter((s) => s && s.logo);
@@ -10907,6 +11280,7 @@ el('input-logo-orange')?.addEventListener('change', e => { handleLogoInput('oran
     const t = findTeam(name);
     if (!t) return;
     el(`input-name-${side}`).value = t.name;
+    setAbbrField(side, t.abbr);
     if (side === 'blue') { pendingLogoBlue = t.logo; setSideLogo('blue', t.logo); }
     else { pendingLogoOrange = t.logo; setSideLogo('orange', t.logo); }
     updateTeamSavedBadge(side);
@@ -10928,7 +11302,8 @@ function applyTeam(side) {
     // is the same stale-identity problem as the logo.
     const defColor = side === 'blue' ? '#055fdb' : '#e97139';
     const colorEl = el(`input-color-${side}`); if (colorEl) colorEl.value = defColor;
-    send('set_team', { side, name, logo: null, players: [], color: defColor });
+    setAbbrField(side, '');
+    send('set_team', { side, name, logo: null, players: [], color: defColor, abbr: '' });
     return;
   }
   const t = findTeam(name);
@@ -10938,7 +11313,7 @@ function applyTeam(side) {
   // in the library and vault. Untouched, the side keeps reading the saved team's crest as before.
   const dirty = !!_logoDirty[side];
   const logo = dirty ? (pending || null) : (pending || (t && t.logo) || null);
-  const payload = { side, name, logo };
+  const payload = { side, name, logo, abbr: abbrField(side) };
   if (dirty) payload.logoChanged = true;
   // Picking a saved/event team makes its roster THE side's roster — even an empty one.
   // (A rosterless team like JONZEY must clear the previous team's players, not inherit them.)
@@ -10956,6 +11331,22 @@ el('btn-apply-orange')?.addEventListener('click', () => applyTeam('orange'));
   if (c) c.addEventListener('input', function() { send('set_team_color', { side, color: this.value }); });
 });
 
+// ── Team abbreviation (Match ▸ Teams) ────────────────────────────────────────
+// The short tag every overlay prints where a full name won't fit (RL Worlds series board,
+// matchup crest, countdown/replay-desk name pair, Pulse/GRID tiles). Blank = the library/vault tag
+// for that team, else initials — so "AUTO" is the placeholder, not a value. Typing one applies on
+// change (no Apply click), the same way the colour picker does, and Save banks it to the library.
+function cleanAbbr(v) { return String(v || '').replace(/[^\p{L}\p{N}|&.-]/gu, '').toUpperCase().slice(0, 6); }
+function abbrField(side) { const e = el(`input-abbr-${side}`); return e ? cleanAbbr(e.value) : ''; }
+function setAbbrField(side, v) { const e = el(`input-abbr-${side}`); if (e && document.activeElement !== e) e.value = cleanAbbr(v); }
+['blue', 'orange'].forEach(side => {
+  const a = el(`input-abbr-${side}`);
+  if (!a) return;
+  a.addEventListener('input', function () { const c = cleanAbbr(this.value); if (this.value !== c) this.value = c; });
+  a.addEventListener('change', function () { send('set_team_abbr', { side, abbr: cleanAbbr(this.value) }); });
+  a.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); a.blur(); } });
+});
+
 ['blue', 'orange'].forEach(side => {
   el(`input-name-${side}`).addEventListener('keydown', (e) => {
     if (e.key === 'Enter') applyTeam(side);
@@ -10969,6 +11360,7 @@ el('btn-apply-orange')?.addEventListener('click', () => applyTeam('orange'));
     if (isTbdName(this.value)) { applyTeam(side); return; }
     const t = findTeam(this.value);
     if (t) {
+      setAbbrField(side, t.abbr);
       if (side === 'blue') { pendingLogoBlue = t.logo; setSideLogo('blue', t.logo); }
       else { pendingLogoOrange = t.logo; setSideLogo('orange', t.logo); }
       // Exact match (e.g. picked from the autocomplete) → apply now so its roster
@@ -11095,6 +11487,9 @@ el('btn-quick-save-blue')?.addEventListener('click', () => {
   if (!name) { showToast('Enter team name.', '#ef4444'); return; }
   if (isTbdName(name)) { showToast('TBD is a placeholder — nothing to save.', '#fbbf24'); return; }
   const payload = { name, color: teamOwnColor('blue') };
+  // A typed abbreviation is banked with the team; blank never clears the library's own tag.
+  const abbrBlue = abbrField('blue');
+  if (abbrBlue) payload.abbr = abbrBlue;
   // Changed here: send it as set (null = the producer hit Default) and say so. Untouched: send the
   // crest on show, or nothing when there is none - a bare side used to wipe the saved crest.
   if (_logoDirty.blue) { payload.logo = pendingLogoBlue || null; payload.logoChanged = true; }
@@ -11108,6 +11503,9 @@ el('btn-quick-save-orange')?.addEventListener('click', () => {
   if (!name) { showToast('Enter team name.', '#ef4444'); return; }
   if (isTbdName(name)) { showToast('TBD is a placeholder — nothing to save.', '#fbbf24'); return; }
   const payload = { name, color: teamOwnColor('orange') };
+  // A typed abbreviation is banked with the team; blank never clears the library's own tag.
+  const abbrOrange = abbrField('orange');
+  if (abbrOrange) payload.abbr = abbrOrange;
   // Changed here: send it as set (null = the producer hit Default) and say so. Untouched: send the
   // crest on show, or nothing when there is none - a bare side used to wipe the saved crest.
   if (_logoDirty.orange) { payload.logo = pendingLogoOrange || null; payload.logoChanged = true; }
@@ -11147,6 +11545,15 @@ function scorecardHTML(sfx) {
       <span class="series-label">Best of</span>
       <div class="best-of-options">${bo}</div>
     </div>
+    <!-- Overwatch only: how the scoreboard's centre pill words the format — FT3 (first to 3 wins)
+         or BO5 (best of 5 maps). Classes, not ids: this card renders twice. -->
+    <div class="sc-bottom-row sc-ow-label" style="display:none;">
+      <span class="series-label">Label</span>
+      <div class="pb-seg sc-ow-label-seg">
+        <button type="button" data-sc="ow-label" data-v="ft">FT3</button>
+        <button type="button" data-sc="ow-label" data-v="bo">BO5</button>
+      </div>
+    </div>
     <!-- Live match controls, ABOVE the game counter: these are the two things a producer reaches
          for mid-game, so they sit nearer the score than the Best-of / Game config rows do.
          Classes, not ids — the scorecard renders TWICE (Dashboard + Teams tab), so an id would
@@ -11176,7 +11583,8 @@ function wireScorecard(containerId, sfx) {
     const kind = b.dataset.sc;
     if (kind === 'series') send('adjust_series', { side: b.dataset.side, delta: parseInt(b.dataset.delta, 10) });
     else if (kind === 'game') send('adjust_game_number', { delta: parseInt(b.dataset.delta, 10) });
-    else if (kind === 'reset') send('reset_series');
+    else if (kind === 'reset') confirmResetSeries();
+    else if (kind === 'ow-label') send('ow_set_series_label', { label: b.dataset.v === 'bo' ? 'bo' : 'ft' });
     // Toggle off the button's OWN state so a double-click can't desync; the incoming
     // MatchPaused/Unpaused event snaps every copy of the button back to the truth.
     else if (kind === 'pause') send('set_rl_paused', { paused: b.dataset.paused !== '1' });
@@ -11435,6 +11843,7 @@ el('btn-swap-teams')?.addEventListener('click', () => {
   // Optimistic swap of the visible top-level fields → instant feedback (server confirms).
   const swapVal = (a, b) => { const ea = el(a), eb = el(b); if (ea && eb) { const t = ea.value; ea.value = eb.value; eb.value = t; } };
   swapVal('input-name-blue', 'input-name-orange');
+  swapVal('input-abbr-blue', 'input-abbr-orange');
   swapVal('input-color-blue', 'input-color-orange');
   const lb = el('preview-logo-blue'), lo = el('preview-logo-orange');
   if (lb && lo) {
@@ -12182,7 +12591,7 @@ el('settings-show-series')?.addEventListener('change', function () {
 });
 [['grid-copy-4', '/grid.html?tiles=4'], ['grid-copy-2', '/grid.html?tiles=2'], ['grid-copy-bars', '/grid-bars.html?tiles=4']].forEach(function (pair) {
   el(pair[0])?.addEventListener('click', function () {
-    const url = 'http://127.0.0.1:3000' + pair[1];
+    const url = 'http://localhost:3000' + pair[1];
     if (navigator.clipboard) navigator.clipboard.writeText(url).then(() => showToast('Browser-source URL copied.', '#22c55e', 2000));
   });
 });
@@ -12258,8 +12667,9 @@ el('input-banner-image')?.addEventListener('change', async (e) => {
 // ── Producer profile (portable .zip, secret-free) — the one consolidated export/import ──────
 el('btn-export-profile')?.addEventListener('click', () => send('export_profile'));
 el('btn-import-profile')?.addEventListener('click', () => {
-  const applySettings = el('chk-import-settings')?.checked !== false;
-  send('import_profile', { options: { settings: applySettings } });   // server opens a native file picker
+  // Libraries + show settings always merge; overlay STYLES only when the producer asks (see applyProfileBundle).
+  const replaceStyles = !!el('chk-import-settings')?.checked;
+  send('import_profile', { options: { settings: true, styles: replaceStyles } });   // server opens a native file picker
 });
 
 // ── Cloud sync (Nameless backend) — UI stays hidden until the backend is configured ──
@@ -12268,8 +12678,8 @@ el('btn-cloud-push')?.addEventListener('click', () => send('cloud_push_profile',
 el('btn-cloud-refresh')?.addEventListener('click', () => send('cloud_list_profiles'));
 el('cloud-profiles-list')?.addEventListener('click', (e) => {
   const load = e.target.closest('.cloud-load'); if (!load) return;
-  const applySettings = el('chk-import-settings')?.checked !== false;
-  send('cloud_pull_profile', { id: load.dataset.id, options: { settings: applySettings } });
+  const replaceStyles = !!el('chk-import-settings')?.checked;
+  send('cloud_pull_profile', { id: load.dataset.id, options: { settings: true, styles: replaceStyles } });
 });
 el('tab-ajustes')?.addEventListener('click', cloudRequestStatus);   // section lives on the Settings tab
 setTimeout(cloudRequestStatus, 1500);
@@ -12482,7 +12892,9 @@ function renderCloudProfiles(d) {
   const wrap = el('cloud-profiles-list'); if (!wrap) return;
   if (!d || !d.ok) { wrap.innerHTML = `<div class="section-desc">${(d && d.message) ? String(d.message).replace(/</g,'&lt;') : 'Cloud unavailable.'}</div>`; return; }
   const esc = (x) => String(x == null ? '' : x).replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
-  const list = d.profiles || [];
+  // Yours first. Every producer's auto-synced library is named "My Profile" by default, so in an org
+  // the list was N identical "My Profile" rows; the API sends `mine` + `ownerName` to tell them apart.
+  const list = (d.profiles || []).slice().sort((a, b) => (a.mine === false) - (b.mine === false));
   // Org-share toggle: only meaningful for your OWN profiles (mine !== false), and only in an
   // org workspace — a solo/personal workspace has no team to share with.
   const isOrg = !!(window._cloudWorkspaceId && !String(window._cloudWorkspaceId).startsWith('user:'));
@@ -12493,8 +12905,8 @@ function renderCloudProfiles(d) {
           ? `<button class="btn btn-xs cloud-share-toggle ${shared ? 'btn-secondary' : 'btn-primary'}" data-id="${esc(p.id)}" data-scope="${shared ? 'private' : 'workspace'}" title="${shared ? 'Stop sharing this with your organization' : 'Share teams, brand kits & more in this profile with your organization'}">${shared ? 'Shared ✓' : 'Share with org'}</button>`
           : '';
         return `<div class="cloud-prof-row">
-        <span class="cloud-prof-name">${esc(p.name) || '(unnamed)'}</span>
-        <span class="cloud-prof-meta">${p.updatedAt ? new Date(p.updatedAt).toLocaleDateString() : ''}${p.scope ? ' · ' + esc(p.scope) : ''}</span>
+        <span class="cloud-prof-name">${esc(p.name) || '(unnamed)'} <span class="cloud-prof-owner">${p.mine === false ? esc(p.ownerName || 'A teammate') : 'You'}</span></span>
+        <span class="cloud-prof-meta">${p.updatedAt ? 'Updated ' + new Date(p.updatedAt).toLocaleDateString() : ''}${p.scope === 'workspace' ? ' · shared with org' : p.scope ? ' · ' + esc(p.scope) : ''}</span>
         ${shareBtn}
         <button class="btn btn-secondary btn-xs cloud-load" data-id="${esc(p.id)}" title="Merge this profile in">Load</button>
       </div>`;
@@ -12560,17 +12972,171 @@ el('btn-startgg-sync')?.addEventListener('click', () => {
   send('startgg_sync_set', { setId: el('input-startgg-setid')?.value.trim() || '' });
 });
 
+// ── Challengermode integration ────────────────────────────────────────────
+// challengermode.com — a DIFFERENT platform from Challonge above. GraphQL + bot token, multi-stage
+// tournaments, and real finish placements (including ties like "5-8").
+
+function getChallengermodePayload() {
+  return {
+    enabled: !!(el('check-cm-enabled')?.checked),
+    tournamentId: (el('input-cm-tournament')?.value || '').trim(),
+    refreshKey: (el('input-cm-key')?.value || '').trim(),
+    spaceId: (el('input-cm-space')?.value || '').trim(),
+    pollSec: parseInt(el('input-cm-poll')?.value, 10) || 30
+  };
+}
+
+el('btn-cm-save')?.addEventListener('click', () => {
+  send('set_challengermode_settings', getChallengermodePayload());
+  const r = el('cm-result'); if (r) { r._userMsg = true; r.style.color = 'var(--muted)'; r.textContent = 'Saved.'; }
+});
+el('input-cm-poll')?.addEventListener('change', () => send('set_challengermode_settings', getChallengermodePayload()));
+
+el('btn-cm-test')?.addEventListener('click', () => {
+  send('set_challengermode_settings', getChallengermodePayload());
+  send('challengermode_test_connection');
+  const r = el('cm-result'); if (r) { r._userMsg = true; r.style.color = 'var(--muted)'; r.textContent = 'Testing connection…'; }
+});
+
+el('btn-cm-load')?.addEventListener('click', () => {
+  send('set_challengermode_settings', getChallengermodePayload());
+  send('load_challengermode_tournament', { id: (el('input-cm-tournament')?.value || '').trim() });
+  const r = el('cm-result'); if (r) { r._userMsg = true; r.style.color = 'var(--muted)'; r.textContent = 'Loading tournament…'; }
+});
+
+el('btn-cm-refresh')?.addEventListener('click', () => {
+  send('challengermode_refresh');
+  const r = el('cm-result'); if (r) { r._userMsg = true; r.style.color = 'var(--muted)'; r.textContent = 'Refreshing…'; }
+});
+
+el('cm-autofollow')?.addEventListener('change', (e) => {
+  send('set_challengermode_auto_follow', { enabled: e.target.checked });
+});
+
+el('btn-cm-push-top8')?.addEventListener('click', () => send('push_challengermode_placements', { limit: 8 }));
+
+el('btn-cm-change-key')?.addEventListener('click', () => {
+  const k = el('input-cm-key');
+  if (!k) return;
+  k.readOnly = false; k.value = ''; k.placeholder = 'Paste your Challengermode refresh key';
+  k.style.opacity = '1'; k.style.cursor = 'text'; k.focus();
+  const b = el('btn-cm-change-key'); if (b) b.style.display = 'none';
+});
+
+function renderChallengermodeSettings(data) {
+  const c = data.challengermode || {};
+  const enabledCb = el('check-cm-enabled');
+  const idInp = el('input-cm-tournament');
+  const keyInp = el('input-cm-key');
+  const badge = el('cm-conn-badge');
+  const changeBtn = el('btn-cm-change-key');
+  const refreshBtn = el('btn-cm-refresh');
+  const infoWrap = el('cm-tournament-info');
+
+  if (enabledCb && document.activeElement !== enabledCb) enabledCb.checked = !!c.enabled;
+  if (idInp && document.activeElement !== idInp) idInp.value = c.tournamentId || '';
+
+  // A stored key is never sent back to the client — show it as masked and offer a re-entry path.
+  if (keyInp && c.hasKey && !keyInp.value && !keyInp.readOnly) {
+    keyInp.readOnly = true; keyInp.value = ''; keyInp.placeholder = '••••••••••••••••••••';
+    keyInp.style.opacity = '0.5'; keyInp.style.cursor = 'default';
+    if (changeBtn) changeBtn.style.display = '';
+  }
+  if (badge) badge.style.display = c.connected ? '' : 'none';
+  if (refreshBtn) refreshBtn.style.display = c.selectedTournament ? '' : 'none';
+
+  const pollSel = el('input-cm-poll');
+  if (pollSel && document.activeElement !== pollSel) {
+    const v = String(c.pollSec || 30);
+    if (![].some.call(pollSel.options, (o) => o.value === v)) pollSel.add(new Option('Every ' + v + ' seconds', v));
+    pollSel.value = v;
+  }
+
+  const af = el('cm-autofollow');
+  if (af && document.activeElement !== af) af.checked = !!c.autoFollow;
+
+  const spaceInp = el('input-cm-space');
+  if (spaceInp && document.activeElement !== spaceInp) spaceInp.value = c.spaceId || '';
+  // A changed Space id invalidates the cached tournament list, or a producer who sets it AFTER
+  // first opening the Events panel keeps looking at the empty result it cached.
+  if (_evCmSpaceSeen !== (c.spaceId || '')) { _evCmSpaceSeen = c.spaceId || ''; _evCmList = null; }
+  // The Events-page hint depends on both the key and the Space id, so refresh it from here — it is
+  // the one place that sees every change to either.
+  if (typeof evCmHint === 'function') evCmHint();
+
+  if (c.selectedTournament && infoWrap) {
+    infoWrap.style.display = '';
+    const t = c.selectedTournament;
+    const nameEl = el('cm-t-name'); if (nameEl) nameEl.textContent = t.name || '';
+    const metaEl = el('cm-t-meta');
+    if (metaEl) {
+      // Say what the game resolved to. Loading a tournament can SWITCH the active game, and a
+      // silent switch is alarming; a game we could not recognise is worth flagging, because the
+      // overlay then stays on whatever was already active.
+      const gName = ((currentState.games || {})[c.gameId] || {}).name || '';
+      const gNote = c.gameId ? (c.gameApplied ? ' · switched to ' + gName : ' · ' + gName)
+                             : (t.gameName ? ' · game not recognised - pick it in the header' : '');
+      const stages = ((currentState.bracket || {}).phases || []).length;
+      metaEl.textContent = [
+        t.state ? t.state.charAt(0) + t.state.slice(1).toLowerCase() : '',
+        t.gameName,
+        t.lineupCount ? t.lineupCount + ' entrants' : '',
+        stages > 1 ? stages + ' stages' : ''
+      ].filter(Boolean).join(' · ') + gNote;
+    }
+    const linkEl = el('cm-t-link'); if (linkEl && t.url) linkEl.href = t.url;
+
+    // Say how much finish order exists, so "Push Top 8" is never a guess.
+    const note = el('cm-placement-note');
+    if (note) {
+      const pl = data.challengermodePlacements || {};
+      const n = (pl.rows || []).length;
+      note.textContent = !n
+        ? 'No finish order yet — Challengermode assigns a placement once an entrant is out.'
+        : `${n} placement${n === 1 ? '' : 's'} known${pl.complete ? ' · final' : ' · still updating'}`;
+    }
+  } else if (infoWrap) {
+    infoWrap.style.display = 'none';
+  }
+
+  const resultEl = el('cm-result');
+  if (resultEl && c.lastError && !resultEl._userMsg) {
+    resultEl.style.color = '#f87171'; resultEl.textContent = c.lastError;
+  }
+}
+
+// Server replies to every Challengermode action on one channel. Exposed on `window` and called
+// from the socket dispatch, the same way every other platform's result box is wired.
+window._handleChallengermodeResult = function (d) {
+  d = d || {};
+  const r = el('cm-result');
+  if (!r) return;
+  r._userMsg = true;
+  r.style.color = d.ok ? '#86efac' : '#f87171';
+  r.textContent = d.message || (d.ok ? 'Done.' : 'Failed.');
+  // Let a later state push own the line again once the producer has read this one.
+  clearTimeout(r._clear);
+  r._clear = setTimeout(() => { r._userMsg = false; }, 8000);
+};
+
 // ── Challonge integration ─────────────────────────────────────────────────
 
 function getChallongePayload() {
   return {
     enabled: !!(el('check-challonge-enabled')?.checked),
     tournamentSlug: (el('input-challonge-slug')?.value || '').trim(),
-    apiKey: (el('input-challonge-key')?.value || '').trim()
+    apiKey: (el('input-challonge-key')?.value || '').trim(),
+    pollSec: parseInt(el('input-challonge-poll')?.value, 10) || 30
   };
 }
 
 el('btn-challonge-save')?.addEventListener('click', () => {
+  send('set_challonge_settings', getChallongePayload());
+});
+
+// The poll interval is the dial for the API quota, so it applies on change rather than waiting for
+// a Save the producer may not think to press while a bracket is already polling.
+el('input-challonge-poll')?.addEventListener('change', () => {
   send('set_challonge_settings', getChallongePayload());
 });
 
@@ -12628,13 +13194,44 @@ function renderChallongeSettings(data) {
   if (badge) badge.style.display = c.connected ? '' : 'none';
   if (refreshBtn) refreshBtn.style.display = c.selectedTournament ? '' : 'none';
 
+  // Poll interval + this month's API spend. Challonge's free plan is 500 requests/month and each
+  // poll costs three — a producer needs to see that number BEFORE a 429 kills the bracket on air.
+  const pollSel = el('input-challonge-poll');
+  if (pollSel && document.activeElement !== pollSel) {
+    const v = String(c.pollSec || 30);
+    if (![].some.call(pollSel.options, (o) => o.value === v)) pollSel.add(new Option('Every ' + v + ' seconds', v));
+    pollSel.value = v;
+  }
+  const budgetEl = el('challonge-budget');
+  if (budgetEl) {
+    const b = c.budget || {};
+    const used = Number(b.used) || 0;
+    const limit = Number(b.limit) || 500;
+    const pct = limit ? used / limit : 0;
+    budgetEl.textContent = used ? `${used} / ${limit} requests this month` : '';
+    budgetEl.style.color = pct >= 1 ? '#f87171' : pct >= 0.8 ? '#fbbf24' : 'var(--muted)';
+    budgetEl.title = pct >= 0.8
+      ? "Close to Challonge's free-plan limit. Past it the API returns 429 and the bracket stops updating — raise the interval or upgrade the plan."
+      : 'Counted since the start of this calendar month. A paid Challonge plan raises the limit.';
+  }
+
   // Tournament info panel
   if (c.selectedTournament && infoWrap) {
     infoWrap.style.display = '';
     const t = c.selectedTournament;
     const nameEl = el('challonge-t-name'); if (nameEl) nameEl.textContent = t.name || '';
     const metaEl = el('challonge-t-meta');
-    if (metaEl) metaEl.textContent = [t.type, t.gameName, t.state ? t.state.charAt(0).toUpperCase() + t.state.slice(1) : ''].filter(Boolean).join(' · ');
+    if (metaEl) {
+      // Say what the tournament's game resolved to. Loading a bracket can SWITCH the active game
+      // (that is what makes Challonge work across games), and a silent switch is alarming — while
+      // a game we couldn't recognise is worth flagging, because the overlay then stays on whatever
+      // was already active.
+      const gName = ((currentState.games || {})[c.gameId] || {}).name || '';
+      const gNote = c.gameId
+        ? (c.gameApplied ? ' · switched to ' + gName : ' · ' + gName)
+        : (t.gameName ? " · game not recognised - pick it in the header" : '');
+      metaEl.textContent = [t.type, t.gameName, t.state ? t.state.charAt(0).toUpperCase() + t.state.slice(1) : ''].filter(Boolean).join(' · ') + gNote;
+    }
     const linkEl = el('challonge-t-link'); if (linkEl && t.url) { linkEl.href = t.url; }
     const labelEl = el('challonge-teams-label');
     if (labelEl) labelEl.textContent = `Participants (${(c.eventTeams || []).length})`;
@@ -14615,6 +15212,10 @@ let _evNxgenSearchTimer = null;
 let _evFaceitPick = null;          // { id, type, name } chosen from the FACEIT dropdown
 let _evFaceitSearchTimer = null;
 let _evFaceitMyComps = null;       // cached organiser competitions (null = not fetched yet)
+let _evCmPick = '';                // tournament id chosen from the Challengermode dropdown
+let _evCmSearchTimer = null;
+let _evCmList = null;              // cached Space tournaments (null = not fetched yet)
+let _evCmSpaceSeen = null;         // the Space id the cache above was built for
 
 function updateEvTokenBadge() {
   const badge = el('ev-token-badge');
@@ -14627,6 +15228,8 @@ function updateEvTokenBadge() {
     badge.style.display = currentState.nxgen?.hasKey ? 'none' : '';
   } else if (_evActivePlatform === 'faceit') {
     badge.style.display = currentState.faceit?.hasKey ? 'none' : '';
+  } else if (_evActivePlatform === 'challengermode') {
+    badge.style.display = currentState.challengermode?.hasKey ? 'none' : '';
   } else {
     badge.style.display = 'none';   // My league needs no platform key
   }
@@ -14641,6 +15244,7 @@ document.querySelectorAll('.ev-plat-tab').forEach(tab => {
     const chalPanel  = el('ev-plat-panel-challonge');
     const nxgenPanel = el('ev-plat-panel-nxgen');
     const faceitPanel = el('ev-plat-panel-faceit');
+    const cmPanel    = el('ev-plat-panel-challengermode');
     const leaguePanel = el('ev-plat-panel-league');
     if (leaguePanel) leaguePanel.style.display = _evActivePlatform === 'league'    ? '' : 'none';
     // Load Event / Clear belong to the platform importers; My league has its own buttons.
@@ -14651,6 +15255,8 @@ document.querySelectorAll('.ev-plat-tab').forEach(tab => {
     if (chalPanel)   chalPanel.style.display   = _evActivePlatform === 'challonge' ? '' : 'none';
     if (nxgenPanel)  nxgenPanel.style.display  = _evActivePlatform === 'nxgen'     ? '' : 'none';
     if (faceitPanel) faceitPanel.style.display = _evActivePlatform === 'faceit'    ? '' : 'none';
+    if (cmPanel)     cmPanel.style.display     = _evActivePlatform === 'challengermode' ? '' : 'none';
+    if (_evActivePlatform === 'challengermode' && typeof evCmHint === 'function') evCmHint();
     updateEvTokenBadge();
   });
 });
@@ -14675,6 +15281,13 @@ el('btn-load-event-dash')?.addEventListener('click', () => {
     if (!slug) { showToast('Enter an event slug or search for a NXGEN event.', '#f59e0b'); return; }
     if (status) status.textContent = 'Loading…';
     send('load_nxgen_event', { slug });
+  } else if (_evActivePlatform === 'challengermode') {
+    // A pick from the dropdown wins; otherwise whatever is typed is treated as a pasted link and
+    // parseTournamentId() on the server digs the UUID out of it.
+    const cmId = _evCmPick || (el('ev-cm-search')?.value || '').trim() || (currentState.challengermode?.tournamentId || '');
+    if (!cmId) { showToast('Paste a Challengermode tournament link, or pick one from the search.', '#f59e0b'); return; }
+    if (status) status.textContent = 'Loading…';
+    send('load_challengermode_tournament', { id: cmId });
   } else if (_evActivePlatform === 'faceit') {
     // A pick from the dropdown wins; otherwise treat whatever is typed as a pasted FACEIT link
     // (the server pulls the UUID and the championship/hub kind out of it).
@@ -14723,7 +15336,9 @@ el('btn-clear-event-dash')?.addEventListener('click', async () => {
 });
 
 // Clear active event card button
-el('ev-active-clear')?.addEventListener('click', () => {
+el('ev-active-clear')?.addEventListener('click', async () => {
+  // Same question the Events page asks before clearing — this card's ✕ used to skip it.
+  if (!await customConfirm('Clear event', 'Clear the active event? Its imported teams, bracket and match queue are removed until you load it again.', 'Clear event')) return;
   send('clear_active_event', {});
   if (el('dash-active-event')) el('dash-active-event').style.display = 'none';
 });
@@ -14740,6 +15355,171 @@ el('nxgen-autofollow')?.addEventListener('change', (e) => {
 el('faceit-autofollow')?.addEventListener('change', (e) => {
   send('set_faceit_auto_follow', { enabled: e.target.checked });
 });
+
+// ── Events ▸ Challengermode panel ───────────────────────────────────────────
+// Challengermode addresses tournaments by UUID, so PASTE A LINK is the primary path and search is
+// the convenience. Searching needs a Space id (the organisation), which is why the hint below
+// tells the producer when that is the thing standing in their way rather than silently showing
+// an empty dropdown.
+
+const CM_UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const looksLikeChallengermodeLink = (v) => CM_UUID_RE.test(String(v || ''));
+
+function evCmHint() {
+  const hint = el('ev-cm-hint');
+  if (!hint) return;
+  const cm = currentState.challengermode || {};
+  if (!cm.hasKey) {
+    hint.textContent = 'Add your Challengermode refresh key in Settings ▸ Integrations first.';
+  } else if (!cm.spaceId) {
+    hint.textContent = 'Paste a tournament link to load it. To browse instead, set your Space id in Settings.';
+  } else {
+    hint.textContent = 'Paste a link, or type to search your Space’s tournaments.';
+  }
+}
+
+async function evCmSearch(term) {
+  const box = el('ev-cm-results');
+  if (!box) return;
+  const cm = currentState.challengermode || {};
+  const q = String(term || '').trim().toLowerCase();
+
+  // A pasted link is not a search — it IS the answer. Show it as a one-row pick so the producer
+  // gets the same confirm-then-load flow either way.
+  if (looksLikeChallengermodeLink(q)) {
+    _evCmPick = (String(term).match(CM_UUID_RE) || [''])[0].toLowerCase();
+    box.innerHTML = '<div class="ev-dropdown-row" data-cmid="' + escapeHtml(_evCmPick) + '">'
+      + '<div class="ev-dropdown-info"><div class="ev-dropdown-name">Tournament ' + escapeHtml(_evCmPick.slice(0, 8)) + '…</div>'
+      + '<div class="ev-dropdown-meta">Link recognised — press Load Event</div></div></div>';
+    box.style.display = 'block';
+    return;
+  }
+
+  if (!cm.hasKey || !cm.spaceId) { box.style.display = 'none'; return; }
+
+  if (_evCmList === null) {
+    box.innerHTML = '<div class="ev-dropdown-msg">Loading your Challengermode tournaments…</div>';
+    box.style.display = 'block';
+    try {
+      const r = await fetch('http://127.0.0.1:3000/api/challengermode/tournaments', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ spaceId: cm.spaceId })
+      });
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error(d.error || 'Could not list tournaments');
+      _evCmList = d.tournaments || [];
+    } catch (err) {
+      _evCmList = [];
+      box.innerHTML = '<div class="ev-dropdown-msg" style="color:#ef4444;">' + escapeHtml(friendlyError(err)) + '</div>';
+      return;
+    }
+  }
+
+  const hits = _evCmList.filter((t) => !q || String(t.name || '').toLowerCase().includes(q)).slice(0, 12);
+  if (!hits.length) {
+    box.innerHTML = '<div class="ev-dropdown-msg">No tournaments match. You can paste a link instead.</div>';
+    box.style.display = 'block';
+    return;
+  }
+  const STATE_COLORS = { RUNNING: '#10b981', OPEN: '#f59e0b', STARTING: '#f59e0b', COMPLETED: '#6b7280', CANCELLED: '#ef4444' };
+  box.innerHTML = hits.map((t) => {
+    // Say which of OUR games it will switch to — loading changes the overlay, the team labels and
+    // the roster size, and that should never be a surprise.
+    const g = (currentState.games || {})[t.gameId];
+    const meta = [g ? g.name : (t.gameName || ''), t.entrants ? t.entrants + ' entrants' : '']
+      .filter(Boolean).map(escapeHtml).join(' · ');
+    const st = String(t.state || '');
+    return '<div class="ev-dropdown-row" data-cmid="' + escapeHtml(t.id) + '">'
+      + '<div class="ev-dropdown-logo-ph"><svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4v4h4"/><path d="M17 16v-4h-4"/><path d="M17 8A7 7 0 0 0 4.5 6"/><path d="M3 12a7 7 0 0 0 12.5 2"/></svg></div>'
+      + '<div class="ev-dropdown-info"><div class="ev-dropdown-name">' + escapeHtml(t.name || 'Untitled') + '</div>'
+      + '<div class="ev-dropdown-meta">' + meta + '</div></div>'
+      + '<span class="ev-dropdown-badge" style="background:rgba(0,0,0,.2); color:' + (STATE_COLORS[st] || '#6b7280') + '; text-transform:capitalize;">'
+      + escapeHtml(st ? st.charAt(0) + st.slice(1).toLowerCase() : '') + '</span></div>';
+  }).join('');
+  box.style.display = 'block';
+}
+
+el('ev-cm-search')?.addEventListener('input', (e) => {
+  const v = e.target.value;
+  const clear = el('ev-cm-clear'); if (clear) clear.style.display = v ? '' : 'none';
+  _evCmPick = '';
+  clearTimeout(_evCmSearchTimer);
+  // A pasted link resolves instantly; a typed search waits for the producer to stop typing.
+  _evCmSearchTimer = setTimeout(() => evCmSearch(v), looksLikeChallengermodeLink(v) ? 0 : 250);
+});
+
+el('ev-cm-clear')?.addEventListener('click', () => {
+  const inp = el('ev-cm-search'); if (inp) inp.value = '';
+  _evCmPick = '';
+  const box = el('ev-cm-results'); if (box) box.style.display = 'none';
+  const clear = el('ev-cm-clear'); if (clear) clear.style.display = 'none';
+});
+
+el('ev-cm-results')?.addEventListener('click', (e) => {
+  const item = e.target.closest('[data-cmid]');
+  if (!item) return;
+  _evCmPick = item.dataset.cmid;
+  const inp = el('ev-cm-search');
+  const nameEl = item.querySelector('.ev-dropdown-name');
+  if (inp && nameEl) inp.value = nameEl.textContent;
+  const box = el('ev-cm-results'); if (box) box.style.display = 'none';
+});
+
+// Focusing the empty box offers the Space list straight away, same as the Challonge picker.
+el('ev-cm-search')?.addEventListener('focus', () => {
+  const cm = currentState.challengermode || {};
+  const box = el('ev-cm-results');
+  if (!box) return;
+  if (!cm.hasKey) {
+    box.innerHTML = '<div class="ev-dropdown-msg" style="color:#f59e0b;">Add a Challengermode refresh key in Integrations first.</div>';
+    box.style.display = 'block';
+    return;
+  }
+  evCmSearch(el('ev-cm-search').value);
+});
+
+// Click-away closes it, matching every other picker on this page.
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#ev-cm-search-wrap') && !e.target.closest('#ev-cm-results')) {
+    const box = el('ev-cm-results'); if (box) box.style.display = 'none';
+  }
+});
+
+el('cm-autofollow-queue')?.addEventListener('change', (e) => {
+  send('set_challengermode_auto_follow', { enabled: e.target.checked });
+});
+
+function renderDashChallengermodeQueue(queue, fetchedAt) {
+  const container = el('dash-cm-queue');
+  const status = el('dash-cm-queue-status');
+  if (!container) return;
+  // RUNNING and WAITING are the playable states; the server has already sorted live-first.
+  const open = (queue || []).filter((m) => m.state === 'RUNNING' || m.state === 'WAITING' || m.state === 'PAUSED');
+  if (!open.length) {
+    container.innerHTML = '<div style="font-size:12px; color:var(--muted); padding:4px 0;">No open matches.</div>';
+  } else {
+    container.innerHTML = '';
+    open.slice(0, 6).forEach((m) => {
+      const row = document.createElement('div');
+      row.style.cssText = `display:flex; align-items:center; gap:8px; padding:4px 6px; border-radius:5px; background:rgba(255,255,255,.04); margin-bottom:4px; border:1px solid ${m.live ? 'rgba(236,72,153,.3)' : 'var(--border)'};`;
+      const bo = m.bestOf ? `<span style="font-size:9px; color:var(--muted); flex-shrink:0;">BO${m.bestOf}</span>` : '';
+      row.innerHTML = `
+        ${m.live ? '<span style="font-size:9px; font-weight:700; color:#7C3AED; flex-shrink:0;">LIVE</span>' : `<span style="font-size:9px; color:var(--muted); flex-shrink:0;">${escapeHtml(m.round || 'M')}</span>`}
+        <span style="flex:1; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(m.teamA || 'TBD')} <span style="color:var(--muted);">vs</span> ${escapeHtml(m.teamB || 'TBD')}</span>
+        ${bo}
+        <button class="btn btn-ghost btn-xs cm-dash-set-live" style="flex-shrink:0;">Set Live</button>`;
+      row.querySelector('.cm-dash-set-live').addEventListener('click', () => {
+        send('set_team', { side: 'blue', name: m.teamA || '', ...(m.logoA ? { logo: m.logoA } : {}) });
+        send('set_team', { side: 'orange', name: m.teamB || '', ...(m.logoB ? { logo: m.logoB } : {}) });
+        // Following a series without its format leaves the scorebar on the previous match's
+        // best-of, which is wrong on screen the moment the first game ends.
+        if (m.bestOf) send('set_best_of', { value: m.bestOf });
+      });
+      container.appendChild(row);
+    });
+  }
+  if (status && fetchedAt) status.textContent = `Updated ${new Date(fetchedAt).toLocaleTimeString()}`;
+}
 
 // Challonge search wiring
 (function wireChallongeEventPicker() {
@@ -15694,7 +16474,9 @@ el('draft-front-input')?.addEventListener('keydown', (e) => { if (e.key === 'Ent
 el('btn-draft-front-open')?.addEventListener('click', () => window._gfxOpenPopout && window._gfxOpenPopout('draft'));
 el('btn-draft-front-undo')?.addEventListener('click', () => send('draft_undo', {}));
 el('btn-draft-front-reset')?.addEventListener('click', () => {
-  appConfirm('Reset the draft board? Every pick and ban made so far will be cleared (the board and format stay).', 'Reset', true)
+  // Nothing to lose yet — just re-apply the settings, no confirm.
+  if (!(currentState?.draft?.ops || []).length) { send('draft_reset', {}); return; }
+  appConfirm('Reset pick / ban? Every pick and ban made on this map will be cleared.', 'Reset', true)
     .then((ok) => { if (ok) send('draft_reset', {}); });
 });
 // Front-card scene title / subtext — live-edit the draft overlay's header without a restart.
@@ -15707,9 +16489,9 @@ function _sendDraftMeta() {
 }
 el('draft-front-title')?.addEventListener('input', _sendDraftMeta);
 el('draft-front-subtitle')?.addEventListener('input', _sendDraftMeta);
-// Overwatch hero-ban count — persist the preference now; it takes effect on the next Start Draft
-// (changing it rebuilds the ban sequence, so it can't safely apply mid-draft).
-el('draft-front-owbans')?.addEventListener('change', () => send('set_draft_meta', { owBanCount: Number(el('draft-front-owbans')?.value) || 4 }));
+// Overwatch hero-ban count — applies at once if no ban has been made yet; mid-draft it takes
+// effect on Reset / the next Start Draft (the server rebuilds the ban slots then).
+el('draft-front-owbans')?.addEventListener('change', () => send('set_draft_meta', { owBanCount: Number(el('draft-front-owbans')?.value) || 2 }));
 el('btn-draft-undo')?.addEventListener('click', () => send('draft_undo', {}));
 el('btn-draft-reset')?.addEventListener('click', () => {
   appConfirm('Reset the draft board? Every pick and ban made so far will be wiped and cannot be recovered.', 'Reset', true).then((ok) => {
@@ -15799,7 +16581,8 @@ function renderDraftManager(data) {
   const owBansRow = el('draft-front-owbans-row'), owBansSel = el('draft-front-owbans');
   const isOw = selGame === 'overwatch';
   if (owBansRow) owBansRow.style.display = isOw ? 'flex' : 'none';
-  if (owBansSel && document.activeElement !== owBansSel) owBansSel.value = String(d.owBanCount === 2 ? 2 : 4);
+  if (owBansSel && document.activeElement !== owBansSel) owBansSel.value = String(d.owBanCount === 4 ? 4 : 2);
+  el('draft-front-owbans-seg')?.querySelectorAll('button[data-v]').forEach((b) => b.classList.toggle('is-on', b.dataset.v === String(d.owBanCount === 4 ? 4 : 2)));
 
   // Typeahead datalist
   const dl = el('draft-champs');
@@ -15921,30 +16704,42 @@ function renderOwFrontBoard(data, d) {
   if (turnEl) {
     if (d.turn && d.turn.team) {
       const c = sideColor(d.turn.team);
-      turnEl.innerHTML = `<b style="color:${c}">${tlEsc(sideName(d.turn.team))}</b> to <span class="act-ban">BAN</span>`;
+      turnEl.className = 'dm-front-ow-turn is-live';
+      turnEl.style.setProperty('--tc', c);
+      turnEl.innerHTML = `<span class="pb-turn-dot"></span><b>${tlEsc(sideName(d.turn.team))}</b> is banning`;
     } else {
-      turnEl.innerHTML = '<span class="act-done">Bans complete — picks are simultaneous, no fixed order.</span>';
+      turnEl.className = 'dm-front-ow-turn is-done';
+      turnEl.style.removeProperty('--tc');
+      turnEl.innerHTML = 'Bans locked in';
     }
   }
 
+  // Two team columns (blue left, orange right), each listing that team's ban slots in order.
+  // ops[i] fills sequence[i], so the index is carried through to find each slot's hero.
   const slotsEl = el('dm-front-ow-slots');
   if (slotsEl) {
-    const sig = JSON.stringify({ seq: (d.sequence || []).map((s) => s.by + s.action), ops: d.ops, turn: d.turn });
+    const sig = JSON.stringify({ seq: (d.sequence || []).map((s) => s.by + s.action), ops: d.ops, turn: d.turn, n: [blueTeam, orangeTeam, blueColor, orangeColor] });
     if (slotsEl.dataset.sig !== sig) {
       slotsEl.dataset.sig = sig;
-      slotsEl.innerHTML = (d.sequence || []).map((step, i) => {
-        const op = (d.ops || [])[i];
-        const isActive = !op && d.turn && (d.ops || []).length === i;
-        const c = sideColor(step.by);
-        const img = op && op.image ? `<img src="http://127.0.0.1:3000${op.image}" alt="">` : '';
-        const label = op
-          ? tlEsc(op.name) + (op.role ? `<span class="dm-fslot-role">${tlEsc(op.role)}</span>` : '')
-          : (isActive ? 'selecting…' : tlEsc(sideName(step.by)) + ' ban');
-        return `<div class="dm-fslot${op ? ' filled' : ''}${isActive ? ' active' : ''}" style="--sc:${c}">${img}<span class="dm-fslot-nm">${label}</span></div>`;
-      }).join('');
+      const ops = d.ops || [];
+      const col = (side) => {
+        const steps = (d.sequence || []).map((step, i) => ({ step, i })).filter((x) => x.step.by === side);
+        const slots = steps.map(({ i }, k) => {
+          const op = ops[i];
+          const isActive = !op && !!d.turn && ops.length === i;
+          const img = op && op.image ? `<img src="http://127.0.0.1:3000${tlEsc(op.image)}" alt="" onerror="this.style.visibility='hidden'">` : '<span class="pb-slot-ph"></span>';
+          const name = op ? tlEsc(op.name) : (isActive ? 'Banning…' : (steps.length > 1 ? 'Ban ' + (k + 1) : 'Ban'));
+          const role = op && op.role ? `<span class="pb-slot-role">${tlEsc(op.role)}</span>` : '';
+          return `<div class="pb-slot${op ? ' filled' : ''}${isActive ? ' active' : ''}">${img}<span class="pb-slot-txt"><span class="pb-slot-nm">${name}</span>${role}</span></div>`;
+        }).join('');
+        return `<div class="pb-team pb-team-${side}" style="--sc:${sideColor(side)}"><div class="pb-team-hd">${tlEsc(sideName(side))}</div>${slots}</div>`;
+      };
+      slotsEl.innerHTML = col('a') + col('b');
     }
   }
 
+  // Nothing left to ban — drop the search row instead of leaving a dead, disabled input.
+  const inpRow = el('dm-front-ow-input'); if (inpRow) inpRow.style.display = d.turn ? '' : 'none';
   const inp = el('draft-front-input');
   if (inp) inp.disabled = !d.turn;
 
@@ -15995,107 +16790,9 @@ function renderOwFrontBoard(data, d) {
   });
 })();
 
-// ── Overwatch 2 hero ban manager ────────────────────────────────────────────
-const OW_HEROES_BY_ROLE = {
-  tank:    ['D.Va','Doomfist','Hazard','Junker Queen','Mauga','Orisa','Ramattra','Reinhardt','Roadhog','Sigma','Winston','Wrecking Ball','Zarya'],
-  damage:  ['Ashe','Bastion','Cassidy','Echo','Freja','Genji','Hanzo','Junkrat','Mei','Pharah','Reaper','Sojourn','Soldier: 76','Sombra','Symmetra','Torbjörn','Tracer','Venture','Widowmaker'],
-  support: ['Ana','Baptiste','Brigitte','Illari','Juno','Kiriko','Lifeweaver','Lúcio','Mercy','Moira','Zenyatta']
-};
-
-// Flat list for searching: [{name, role, slug, img}]
-const OW_ALL_HEROES = (function() {
-  var out = [];
-  Object.keys(OW_HEROES_BY_ROLE).forEach(function(role) {
-    OW_HEROES_BY_ROLE[role].forEach(function(name) {
-      var slug = name.toLowerCase()
-        .replace(/ö/g,'o').replace(/ú/g,'u')
-        .replace(/[.']/g,'').replace(/:\s*/g,'-')
-        .replace(/\s+/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
-      out.push({ name: name, role: role, slug: slug, img: 'http://127.0.0.1:3000/assets/overwatch/heroes/' + slug + '.png' });
-    });
-  });
-  return out;
-}());
-
-function owHeroSlug(n) {
-  return (n||'').toLowerCase()
-    .replace(/ö/g,'o').replace(/ú/g,'u')
-    .replace(/[.']/g,'').replace(/:\s*/g,'-')
-    .replace(/\s+/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
-}
-function owHeroImgUrl(n) {
-  var s = owHeroSlug(n);
-  return s ? 'http://127.0.0.1:3000/assets/overwatch/heroes/' + s + '.png' : '';
-}
-
-// Current OW map index tracked from state (game.number - 1)
-var _owCurMapIdx = 0;
-
-// sid = 'a0','a1','b0','b1'
-function owSetBanFromSearch(sid, hero) {
-  var side = sid[0];
-  var slot = parseInt(sid[1], 10);
-  send('ow_ban_hero', { mapIdx: _owCurMapIdx, side: side, slot: slot, hero: hero, role: '' });
-  owUpdateSearchPreview(sid, hero);
-  var inp = el('ow-ban-input-' + sid);
-  if (inp) inp.value = hero;
-  owCloseDropdown(sid);
-}
-
-function owUpdateSearchPreview(sid, hero) {
-  var prev = el('ow-ban-preview-' + sid);
-  if (!prev) return;
-  prev.innerHTML = hero ? '<img src="' + owHeroImgUrl(hero) + '" alt="' + hero + '">' : '';
-}
-
-function owCloseDropdown(sid) {
-  var dd = el('ow-ban-dropdown-' + sid);
-  if (dd) dd.classList.remove('open');
-}
-
-function owOpenDropdown(sid, query) {
-  var dd = el('ow-ban-dropdown-' + sid);
-  if (!dd) return;
-  // Fuzzy + ranked: hero names are long and often misspelt under time pressure.
-  var q = (query || '').trim();
-  var matches = NESearch.filter(OW_ALL_HEROES, q, function (h) { return [{ text: h.name, weight: 2 }, h.role]; });
-  if (!matches.length) { dd.classList.remove('open'); return; }
-  dd.innerHTML = matches.map(function(h) {
-    return '<div class="ow-hero-option" data-hero="' + h.name.replace(/"/g,'&quot;') + '" data-sid="' + sid + '">'
-         + '<img src="' + h.img + '" alt="' + h.name + '" loading="lazy">'
-         + '<span class="ow-hero-option-name">' + h.name + '</span>'
-         + '<span class="ow-hero-option-role">' + h.role + '</span>'
-         + '</div>';
-  }).join('');
-  dd.querySelectorAll('.ow-hero-option').forEach(function(opt) {
-    opt.addEventListener('mousedown', function(e) {
-      e.preventDefault();
-      owSetBanFromSearch(this.dataset.sid, this.dataset.hero);
-    });
-  });
-  dd.classList.add('open');
-}
-
-function owInitSearch(sid) {
-  var inp = el('ow-ban-input-' + sid);
-  if (!inp) return;
-  inp.addEventListener('focus', function() { owOpenDropdown(sid, this.value); });
-  inp.addEventListener('input', function() { owOpenDropdown(sid, this.value); });
-  inp.addEventListener('blur',  function() { setTimeout(function() { owCloseDropdown(sid); }, 150); });
-}
-owInitSearch('a0');
-owInitSearch('a1');
-owInitSearch('b0');
-owInitSearch('b1');
-
-function owClearBan(sid) {
-  var side = sid[0];
-  var slot = parseInt(sid[1], 10);
-  send('ow_ban_hero', { mapIdx: _owCurMapIdx, side: side, slot: slot, hero: '', role: '' });
-  owUpdateSearchPreview(sid, '');
-  var inp = el('ow-ban-input-' + sid); if (inp) inp.value = '';
-}
-
+// ── Overwatch 2 match manager (mode, map results, attack side) ───────────────
+// Hero bans used to be entered here too; they now live only on Graphics > Pick / Ban (state.draft,
+// mirrored per map into owMatch.bansByMap), so there is one place to run them.
 // Game mode buttons
 var OW_MODES = ['escort','hybrid','control','push','flashpoint','clash'];
 OW_MODES.forEach(function(mode) {
@@ -16129,10 +16826,6 @@ var OW_MODE_KEYS = ['escort','hybrid','control','push','flashpoint','clash'];
   });
 })();
 
-el('btn-ow-ban-a0-clear')?.addEventListener('click', () => owClearBan('a0'));
-el('btn-ow-ban-a1-clear')?.addEventListener('click', () => owClearBan('a1'));
-el('btn-ow-ban-b0-clear')?.addEventListener('click', () => owClearBan('b0'));
-el('btn-ow-ban-b1-clear')?.addEventListener('click', () => owClearBan('b1'));
 el('btn-ow-show')?.addEventListener('click', () => send('ow_visible', { visible: true }));
 el('btn-ow-hide')?.addEventListener('click', () => send('ow_visible', { visible: false }));
 el('btn-ow-atk-a')?.addEventListener('click', () => send('ow_set_attack', { side: 'a' }));
@@ -16144,14 +16837,6 @@ el('ow-show-attack')?.addEventListener('change', function() {
   if (ctrl) { ctrl.style.opacity = this.checked ? '1' : '.35'; ctrl.style.pointerEvents = this.checked ? '' : 'none'; }
 });
 
-function owGetBanArr(bansByMap, idx, side) {
-  var entry = (Array.isArray(bansByMap) ? bansByMap[idx] : null) || {};
-  var v = entry[side];
-  if (Array.isArray(v)) return [v[0] && v[0].hero || '', v[1] && v[1].hero || ''];
-  if (v && v.hero) return [v.hero, ''];
-  return ['', ''];
-}
-
 function renderOwBanManager(data) {
   var section = el('section-ow-bans');
   if (!section) return;
@@ -16160,14 +16845,9 @@ function renderOwBanManager(data) {
   section.style.display = hasOW ? '' : 'none';
   if (!hasOW) return;
   var teams = data.teams  || {};
-  var game  = data.game   || {};
   var nameA = (teams.blue   && teams.blue.name)   || 'Team A';
   var nameB = (teams.orange && teams.orange.name) || 'Team B';
 
-  _owCurMapIdx = Math.max(0, (game.number || 1) - 1);
-
-  var lblA = el('ow-ban-label-a'); if (lblA) lblA.textContent = nameA + ' — Hero Bans (Game ' + (game.number || 1) + ')';
-  var lblB = el('ow-ban-label-b'); if (lblB) lblB.textContent = nameB + ' — Hero Bans (Game ' + (game.number || 1) + ')';
 
   // Game mode button highlight
   var curMode = ow.gameMode || 'control';
@@ -16217,17 +16897,6 @@ function renderOwBanManager(data) {
   if (btnAtkA) { btnAtkA.className = 'btn btn-sm' + (atkSide === 'a' ? ' btn-primary' : ''); }
   if (btnAtkB) { btnAtkB.className = 'btn btn-sm' + (atkSide === 'b' ? ' btn-primary' : ''); }
 
-  var bansByMap = Array.isArray(ow.bansByMap) ? ow.bansByMap : [];
-  ['a', 'b'].forEach(function(side) {
-    var heroes = owGetBanArr(bansByMap, _owCurMapIdx, side);
-    [0, 1].forEach(function(slot) {
-      var sid = side + slot;
-      var hero = heroes[slot] || '';
-      owUpdateSearchPreview(sid, hero);
-      var inp = el('ow-ban-input-' + sid);
-      if (inp && document.activeElement !== inp) inp.value = hero;
-    });
-  });
 }
 
 // ── Marvel Rivals hero ban manager ──────────────────────────────────────────
@@ -16499,7 +17168,7 @@ function renderMrBanManager(data) {
 }
 
 // ── Scenes cockpit: On-Air control + source launcher ────────────────────────
-const SCENE_BASE_URL = 'http://127.0.0.1:3000';
+const SCENE_BASE_URL = 'http://localhost:3000';
 
 // Copy text to the clipboard with a brief "Copied!" flash on the button.
 function copyText(text, btn) {
@@ -16527,7 +17196,7 @@ const ONAIR_SCENES = [
     check: (s) => !!(s && s.gfxActive === 'matchup'),
     showData: { scene: 'matchup' }, hideData: { scene: null } },
   { key: 'veto',      label: 'Map Pool / Series', msg: 'set_veto',              path: 'veto.visible' },
-  { key: 'draft',     label: 'Draft',             msg: 'draft_visible',         path: 'draft.visible' },
+  { key: 'draft',     label: 'Pick / Ban',        msg: 'draft_visible',         path: 'draft.visible' },
   { key: 'seriesstats', label: 'Series Stats',    msg: 'set_series_stats',      path: 'seriesStats.visible' },
   { key: 'bracket',   label: 'Bracket',           msg: 'set_bracket_settings',  path: 'bracket.visible' },
   { key: 'upcoming',  label: 'Schedule',          msg: 'set_upcoming',          path: 'upcoming.visible' },
@@ -16591,10 +17260,12 @@ function svgIcon(key, cls) {
 // shows under the name. The standalone launcher (scenes.html) mirrors this list.
 const SCENE_SOURCES = [
   { group: 'In-Game HUD', icon: 'gamepad', items: [
-    { name: 'Main Overlay (RL)', path: '/', live: 'always', desc: 'Scoreboard, goal replays, post-match stats, ticker, spotlight.' },
     { name: 'Smash Scoreboard', path: '/smash.html', live: 'always', desc: 'Super Smash Bros. 1v1 — players, flags, fighters, stocks (lives) + set score. Stocks/characters set in Match ▸ Teams ▸ Smash.' },
+    { name: 'Brawlhalla Scoreboard', path: '/brawlhalla.html', live: 'always', desc: 'Brawlhalla 1v1 / 2v2 — players, legends, stocks + set score, with live rank/ELO chips from the official stats API. Stocks and legends are set in Match ▸ Teams ▸ Brawlhalla (the game has no live feed).' },
     { name: 'Smash Team Scoreboard', path: '/smash-team.html', live: 'always', desc: 'Super Smash Bros. crew battle — teams, logos, aggregate team stocks + set score / Best-of. Team mode in Match ▸ Teams ▸ Smash.' },
     { name: 'RL HUD (Modern)', path: '/rl-hud.html', live: 'always', desc: 'Modern Rocket League scorebar + boost/stat HUD.' },
+    { name: 'RL Player HUD', path: '/rl-player.html', live: 'always', desc: 'For playing on this PC: follows YOUR car (boost, stats). Best popped out over the game.' },
+    { name: 'RL Worlds HUD', path: '/rl-worlds.html', live: 'always', desc: 'RLCS Worlds-style Rocket League HUD: stats sidebar, scores ticker, title sponsor.' },
     { name: 'Live HUD (auto-game)', path: '/live.html', live: 'always', desc: 'Unified HUD that follows whichever game is active.' },
     { name: 'CS2 / CS:GO HUD', path: '/csgo.html', live: 'always', desc: 'GSI scorebar, players, radar, bomb, economy.' },
     { name: 'Valorant HUD', path: '/valorant.html', live: 'always', desc: 'Round scorebar, agents, spike + economy.' },
@@ -16790,6 +17461,7 @@ function buildSceneCard(it, groupName) {
     <div class="scene-thumb" title="${tip}"><iframe class="scene-thumb-frame" loading="lazy" scrolling="no" data-nw="${nativeW}" data-nh="${nativeH}" data-src="${thumbUrl()}"></iframe><span class="scene-thumb-block"></span><span class="scene-onair-pill" hidden>ON AIR</span><span class="scene-aspect">${aspect}</span><span class="scene-thumb-name">${it.name}</span>
       <div class="scene-thumb-acts">
         <button class="scene-thumb-btn ss-open" title="Open in new window">${svgIcon('external')}</button>
+        ${window.electronAPI?.openGameOverlay ? `<button class="scene-thumb-btn ss-game" title="Pop out over the game: transparent, always on top, click-through">${svgIcon('monitor')}</button>` : ''}
         <button class="scene-thumb-btn ss-copy" title="Copy browser-source URL">${svgIcon('copy')}</button>
         <button class="scene-thumb-btn ss-settings" title="Settings — background fill (colour + opacity) and Edit HTML">${svgIcon('gear')}</button>
       </div>
@@ -16831,6 +17503,12 @@ function buildSceneCard(it, groupName) {
   opIn.addEventListener('input', () => { bg.op = parseInt(opIn.value, 10); opVal.textContent = bg.op + '%'; persist(); });
 
   card.querySelector('.ss-open').addEventListener('click', (e) => { e.stopPropagation(); window.open(liveUrl(), '_blank'); });
+  card.querySelector('.ss-game')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    window.electronAPI.openGameOverlay({ url: liveUrl(), path: it.path, name: it.name, nativeW, nativeH })
+      .then((r) => { if (!r || !r.ok) showToast('Could not open the overlay window.', '#ef4444'); })
+      .catch(() => showToast('Could not open the overlay window.', '#ef4444'));
+  });
   card.querySelector('.ss-edit').addEventListener('click', () => openSceneEditor(it.path, it.name));
   card.querySelector('.scene-thumb').addEventListener('click', () => window.open(fullPrev(), '_blank'));
   const copyBtn = card.querySelector('.ss-copy');
@@ -16842,6 +17520,46 @@ function buildSceneCard(it, groupName) {
     else prompt('Copy URL:', url);
   });
   return card;
+}
+
+// Overlays popped out over the game (backend/game-overlay-windows.js). Listed above the scene
+// cards while any are open, so a producer can lock/unlock or close one without hunting for it
+// on screen. Electron-only: browser/pop-out panels have no electronAPI and never show this.
+function renderGameOverlayMgr(list) {
+  const box = el('game-overlay-mgr');
+  if (!box) return;
+  list = Array.isArray(list) ? list : [];
+  box.hidden = !list.length;
+  if (!list.length) { box.innerHTML = ''; return; }
+  const hidden = list.some((o) => o.hidden);
+  box.innerHTML = `
+    <div class="go-mgr-head">
+      <span class="go-mgr-title">Over-game overlays</span>
+      <span class="go-mgr-keys">Ctrl+Shift+F9 lock / unlock all &middot; Ctrl+Shift+F10 hide / show all</span>
+      <button class="btn btn-ghost btn-xs" data-go-all="toggle-hidden">${hidden ? 'Show all' : 'Hide all'}</button>
+      <button class="btn btn-ghost btn-xs" data-go-all="close-all">Close all</button>
+    </div>
+    ${list.map((o) => `
+      <div class="go-mgr-row" data-key="${tlEsc(o.key)}">
+        <span class="go-mgr-name">${tlEsc(o.name)}</span>
+        <span class="go-mgr-state ${o.locked ? 'locked' : 'edit'}">${o.locked ? 'Locked' : 'Editing'}</span>
+        <span class="go-mgr-meta">${o.scale}% &middot; ${o.opacity}% opacity</span>
+        <button class="btn btn-ghost btn-xs" data-go="next-screen" title="Move to the next monitor and fill it">Next screen</button>
+        <button class="btn btn-secondary btn-xs" data-go="toggle-lock">${o.locked ? 'Edit position' : 'Lock'}</button>
+        <button class="btn btn-ghost btn-xs" data-go="close">Close</button>
+      </div>`).join('')}`;
+}
+if (window.electronAPI?.onGameOverlaysChanged) {
+  window.electronAPI.onGameOverlaysChanged(renderGameOverlayMgr);
+  window.electronAPI.listGameOverlays().then(renderGameOverlayMgr).catch(() => {});
+  document.addEventListener('click', (e) => {
+    const all = e.target.closest('#game-overlay-mgr [data-go-all]');
+    if (all) { window.electronAPI.gameOverlayCommand(null, all.dataset.goAll); return; }
+    const b = e.target.closest('#game-overlay-mgr [data-go]');
+    if (!b) return;
+    const row = b.closest('.go-mgr-row');
+    if (row) window.electronAPI.gameOverlayCommand(row.dataset.key, b.dataset.go);
+  });
 }
 
 async function buildSceneSourceList() {
@@ -17326,13 +18044,13 @@ GOLIVE_TRIGGERS.forEach((t) => {
 });
 // All trigger graphics share one browser source (overlay/triggers.html).
 el('btn-copy-triggers-url')?.addEventListener('click', (e) => {
-  const url = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://127.0.0.1:3000') + '/triggers.html';
+  const url = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://localhost:3000') + '/triggers.html';
   if (typeof copyText === 'function') copyText(url, e.currentTarget);
   else if (navigator.clipboard) navigator.clipboard.writeText(url);
 });
 // Copy the standalone countdown overlay URL from the rail Countdown trigger.
 el('ck-break-copy')?.addEventListener('click', (e) => {
-  const url = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://127.0.0.1:3000') + '/countdown.html';
+  const url = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://localhost:3000') + '/countdown.html';
   if (typeof copyText === 'function') copyText(url, e.currentTarget);
   else if (navigator.clipboard) navigator.clipboard.writeText(url);
 });
@@ -18980,7 +19698,7 @@ el('ptp-popout')?.addEventListener('click', () => openPopout('timer'));
 el('dcc-popout-btn')?.addEventListener('click', () => openPopout('dcc'));
 el('dcc-refresh-btn')?.addEventListener('click', (e) => { if (typeof cfTalentRefresh === 'function') cfTalentRefresh(e.currentTarget); });
 el('ptp-copy')?.addEventListener('click', (e) => {
-  const url = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://127.0.0.1:3000') + '/countdown.html';
+  const url = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://localhost:3000') + '/countdown.html';
   if (typeof copyText === 'function') copyText(url, e.currentTarget);
   else if (navigator.clipboard) navigator.clipboard.writeText(url);
 });
@@ -21470,7 +22188,7 @@ function renderGameSwitcher(data) {
     const feats = (active && active.features) || [];
     const parts = [];
     if (layoutName) parts.push('HUD: ' + layoutName);
-    if (path) parts.push('http://127.0.0.1:3000' + (path === '/' ? '' : path));
+    if (path) parts.push('http://localhost:3000' + (path === '/' ? '' : path));
     if (feats.includes('stats-api')) parts.push('RL Stats API :49123');
     if (feats.includes('gsi')) parts.push('CS2 GSI');
     if (feats.includes('director')) parts.push('AI Director');
@@ -21479,7 +22197,7 @@ function renderGameSwitcher(data) {
   const dashLink = el('dash-overlay-link');
   if (dashLink) {
     const path = data.activeOverlay != null ? data.activeOverlay : (active && active.overlay) || '/';
-    dashLink.href = 'http://127.0.0.1:3000' + (path === '/' ? '' : path);
+    dashLink.href = 'http://localhost:3000' + (path === '/' ? '' : path);
   }
 }
 
@@ -21526,7 +22244,7 @@ function applyGameDesignState(data) {
     const layout = data.overlayLayout;
     const path = data.activeOverlay != null ? data.activeOverlay : (layout && layout.path) || (active && active.overlay) || '';
     if (path) {
-      note.textContent = `OBS browser source: http://127.0.0.1:3000${path === '/' ? '' : path}` +
+      note.textContent = `OBS browser source: http://localhost:3000${path === '/' ? '' : path}` +
         (layout && layout.name ? ` (${layout.name})` : '');
     } else {
       note.textContent = 'No dedicated in-game HUD yet — use Production browser sources (countdown, casters, bracket).';
@@ -21670,7 +22388,11 @@ function renderPresets(presets) {
     const loadBtn = document.createElement('button');
     loadBtn.className = 'btn btn-primary btn-sm';
     loadBtn.textContent = 'Load';
-    loadBtn.addEventListener('click', () => send('load_preset', { id: p.id }));
+    loadBtn.addEventListener('click', async () => {
+      // Loading replaces the current show set-up; a mis-click mid-show used to wipe it silently.
+      if (!await customConfirm('Load preset', `Load "${p.name}"? It replaces the current game, overlay layout, event name, best-of, banner, ticker and casters.`, 'Load')) return;
+      send('load_preset', { id: p.id });
+    });
 
     const delBtn = document.createElement('button');
     delBtn.className = 'btn btn-danger btn-sm';
@@ -21717,7 +22439,7 @@ let brandPackages = [];
 let editingPackageId = null;
 let editingActivePackageId = null;
 function newBrandPackage(name) {
-  return { id: 'p' + Math.random().toString(36).slice(2, 9), name: name || 'Package', sponsorLabel: 'PARTNERS', sponsorInterval: 6, sponsorMode: 'cycle', sponsors: [], bannerImages: [], bannerCaptions: [], bannerSlant: 'right', bannerHeader: '', bannerInterval: 10, replaySkin: null, scoreboardBg: null };
+  return { id: 'p' + Math.random().toString(36).slice(2, 9), name: name || 'Package', sponsorLabel: 'PARTNERS', presentedLabel: '', sponsorInterval: 6, sponsorMode: 'cycle', sponsors: [], bannerImages: [], bannerCaptions: [], bannerSlant: 'right', bannerHeader: '', bannerInterval: 10, replaySkin: null, scoreboardBg: null };
 }
 // Copy the live editor fields back into the package being edited (call before switching/saving).
 function flushEditorToPackage() {
@@ -21727,6 +22449,7 @@ function flushEditorToPackage() {
   // We store exactly what's typed (trimmed) — the 'PARTNERS' default only seeds a brand-new package
   // (newBrandPackage), so clearing the field and saving persists '' rather than snapping back.
   pkg.sponsorLabel = el('input-brand-sponsor-label').value.trim();
+  if (el('input-brand-presented-label')) pkg.presentedLabel = el('input-brand-presented-label').value.trim();
   pkg.sponsorInterval = Number(el('input-brand-interval').value) || 6;
   pkg.sponsorMode = el('select-brand-sponsor-mode')?.value === 'static' ? 'static' : 'cycle';
   pkg.sponsors = brandSponsors;
@@ -21745,6 +22468,7 @@ function loadPackageIntoEditor(pkg) {
   brandBannerImages = Array.isArray(pkg.bannerImages) ? [...pkg.bannerImages] : [];
   brandBannerCaptions = Array.isArray(pkg.bannerCaptions) ? [...pkg.bannerCaptions] : [];
   el('input-brand-sponsor-label').value = pkg.sponsorLabel || '';
+  if (el('input-brand-presented-label')) el('input-brand-presented-label').value = pkg.presentedLabel || '';
   el('input-brand-interval').value = pkg.sponsorInterval || 6;
   if (el('select-brand-sponsor-mode')) el('select-brand-sponsor-mode').value = pkg.sponsorMode === 'static' ? 'static' : 'cycle';
   el('input-brand-banner-interval').value = pkg.bannerInterval || 10;
@@ -21841,7 +22565,7 @@ async function populateBrandObsSelects(currentCollection, currentProfile) {
   const collSel = el('select-brand-obs-collection');
   const profSel = el('select-brand-obs-profile');
   if (!collSel || !profSel) return;
-  const base = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : null) || 'http://127.0.0.1:3000';
+  const base = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : null) || 'http://localhost:3000';
   const safeJson = (r) => { if (!r.ok) throw new Error('http' + r.status); return r.json(); };
   try {
     const [cRes, pRes] = await Promise.all([
@@ -21878,6 +22602,7 @@ wireColorHexPair('input-brand-accent', 'input-brand-accent-hex');
 function resetBrandForm() {
   editingBrandId = null;
   editingBrandThemes = {};
+  { const ls = el('chk-brand-link-styles'); if (ls) ls.checked = false; }
   pendingBrandLogo = null;
   pendingSponsorLogo = null;
   const pkg = newBrandPackage('Main');
@@ -22038,7 +22763,7 @@ function renderBrandDesignSummary() {
     const tn = ((games[g] && games[g].themes) || []).find((t) => t.id === editingBrandThemes[g]);
     return `${gn} → ${tn ? tn.name : editingBrandThemes[g]}`;
   });
-  sum.textContent = parts.length ? 'Designs set: ' + parts.join('  ·  ') : 'No per-game designs set — overlays use the default.';
+  sum.textContent = parts.length ? 'Designs set: ' + parts.join('  ·  ') : 'No per-game designs set — your current overlay layouts are left alone.';
 }
 
 // The package a kit currently has live (falls back to legacy top-level fields).
@@ -22296,6 +23021,7 @@ el('dbk-new')?.addEventListener('click', () => { resetBrandForm(); openBrandEdit
 function loadBrandIntoForm(k) {
   editingBrandId = k.id;
   editingBrandThemes = (k.themes && typeof k.themes === 'object') ? { ...k.themes } : {};
+  { const ls = el('chk-brand-link-styles'); if (ls) ls.checked = !!k.linkStyles; }
   pendingBrandLogo = k.logo || null;
   // Server sends kit.packages; fall back to wrapping legacy top-level sponsor/banner fields.
   let src = Array.isArray(k.packages) && k.packages.length ? k.packages
@@ -22479,6 +23205,7 @@ function saveBrandKitFromEditor(activate) {
     color: normalizeAnyColor(el('input-brand-color-hex')?.value) || el('input-brand-color').value,
     accent: normalizeAnyColor(el('input-brand-accent-hex')?.value) || el('input-brand-accent').value,
     themes: editingBrandThemes,
+    linkStyles: !!el('chk-brand-link-styles')?.checked,
     packages: brandPackages,
     activePackageId: editingActivePackageId,
     obsSceneCollection: (el('select-brand-obs-collection')?.value || '').trim(),
@@ -22561,6 +23288,9 @@ el('btn-csgo-spectator')?.addEventListener('click', () => {
   send('install_spectator_cfg', { path: (el('input-csgo-path')?.value || '').trim() });
 });
 
+el('check-csgo-auto-winner')?.addEventListener('change', (e) => {
+  send('csgo_auto_winner', { enabled: !!e.target.checked });
+});
 el('check-csgo-history')?.addEventListener('change', (e) => {
   send('csgo_show_history', { visible: !!e.target.checked });
 });
@@ -22591,7 +23321,11 @@ function applyValorantState(data) {
   const conn = el('val-conn');
   if (conn) {
     const connected = !!val.connected;
-    conn.textContent = connected ? 'Valorant: connected' : 'Valorant: waiting';
+    // Name the RELAY, not the game. Valorant has no first-party feed, so "waiting" always means
+    // the Overwolf relay has not reported — the producer's next move is on that PC, not this one.
+    const where = val.map && val.map.displayName ? (' — ' + val.map.displayName +
+      ' ' + (val.order && val.order.score || 0) + '-' + (val.chaos && val.chaos.score || 0)) : '';
+    conn.textContent = connected ? ('Valorant: relay live' + where) : 'Valorant: waiting for the Overwolf relay';
     conn.className = 'prod-chip' + (connected ? ' ok' : '');
   }
 }
@@ -22608,15 +23342,26 @@ function applyLolState(data) {
   const mode = lol.hudMode || 'auto';
   document.querySelectorAll('#lol-hud-mode .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
 
-  // OCR gold override — toggle, region inputs, status
+  // OCR gold override — toggle, monitor, region inputs, calibration boxes, status
   const ocr = lol.ocr || {};
   const enEl = el('lol-ocr-enable');
   if (enEl && document.activeElement !== enEl) enEl.checked = !!ocr.enabled;
+  const dispEl = el('lol-ocr-display');
+  if (dispEl && document.activeElement !== dispEl && !_lolCal.drag) {
+    if (!dispEl.options.length && !_lolCal.displaysAsked) { _lolCal.displaysAsked = true; send('lol_ocr_displays', {}); }
+    if (dispEl.options.length && dispEl.value !== (ocr.displayId || '')) {
+      const has = Array.from(dispEl.options).some((o) => o.value === (ocr.displayId || ''));
+      dispEl.value = has ? (ocr.displayId || '') : '';
+    }
+  }
   const r = ocr.regions || {};
-  const setReg = (id, v) => { const e = el(id); if (e && document.activeElement !== e && v != null) e.value = v; };
-  if (r.blue) { setReg('lol-ocr-bx', r.blue.x); setReg('lol-ocr-by', r.blue.y); setReg('lol-ocr-bw', r.blue.w); setReg('lol-ocr-bh', r.blue.h); }
-  if (r.red)  { setReg('lol-ocr-rx', r.red.x);  setReg('lol-ocr-ry', r.red.y);  setReg('lol-ocr-rw', r.red.w);  setReg('lol-ocr-rh', r.red.h); }
-  lolOcrStatus(ocr.status || 'off', ocr.statusDetail || '', ocr.lastBlue, ocr.lastRed, ocr.available);
+  if (!_lolCal.drag) {
+    const setReg = (id, v) => { const e = el(id); if (e && document.activeElement !== e && v != null) e.value = v; };
+    if (r.blue) { setReg('lol-ocr-bx', r.blue.x); setReg('lol-ocr-by', r.blue.y); setReg('lol-ocr-bw', r.blue.w); setReg('lol-ocr-bh', r.blue.h); }
+    if (r.red)  { setReg('lol-ocr-rx', r.red.x);  setReg('lol-ocr-ry', r.red.y);  setReg('lol-ocr-rw', r.red.w);  setReg('lol-ocr-rh', r.red.h); }
+    if (r.blue && r.red) { _lolCal.regions = { blue: { ...r.blue }, red: { ...r.red } }; lolCalRender(); }
+  }
+  lolOcrStatus(ocr.status || 'off', ocr.statusDetail || '', ocr.lastBlue, ocr.lastRed, { blueConf: ocr.lastBlueConf, redConf: ocr.lastRedConf, reason: ocr.lastReason, source: ocr.source });
 }
 
 // Apex LiveAPI — connection + server status chips + scoring/teams/series panels.
@@ -22681,7 +23426,10 @@ function apexRenderGames(games) {
       '<button class="btn btn-secondary btn-sm apex-rm-game" data-i="' + i + '" style="margin-left:auto;">Remove</button>' +
     '</div>';
   }).join('');
-  box.querySelectorAll('.apex-rm-game').forEach((b) => b.addEventListener('click', () => send('apex_remove_game', { index: +b.dataset.i })));
+  box.querySelectorAll('.apex-rm-game').forEach((b) => b.addEventListener('click', async () => {
+    if (!await customConfirm('Remove game', `Remove game ${(+b.dataset.i) + 1} and its placements and kills from the series standings?`, 'Remove')) return;
+    send('apex_remove_game', { index: +b.dataset.i });
+  }));
 }
 
 function apexRenderTeamMap(standings, teamMap) {
@@ -22763,18 +23511,29 @@ function wireApexSetup() {
   });
 }
 
-function lolOcrStatus(status, detail, lastBlue, lastRed) {
+// extra = { blueConf, redConf, reason:{blue,red}, source } from the server's lol_ocr_status / state.
+function lolOcrStatus(status, detail, lastBlue, lastRed, extra) {
+  const x = extra || {};
   const chip = el('lol-ocr-status');
   if (chip) {
-    const map = { off: 'OCR: off', starting: 'OCR: starting…', reading: 'OCR: reading', error: 'OCR: error', unavailable: 'OCR: unavailable' };
+    const map = { off: 'OCR: off', starting: 'OCR: starting…', reading: 'OCR: locked', holding: 'OCR: holding last good read', searching: 'OCR: searching', error: 'OCR: error', unavailable: 'OCR: unavailable' };
     chip.textContent = map[status] || ('OCR: ' + status);
     chip.className = 'prod-chip' + (status === 'reading' ? ' ok' : (status === 'error' || status === 'unavailable' ? ' warn' : ''));
-    if ((status === 'unavailable' || status === 'error') && detail) chip.title = detail;
+    chip.title = detail || '';
   }
   const read = el('lol-ocr-read');
   if (read) {
-    if (lastBlue != null || lastRed != null) read.textContent = 'blue ' + (lastBlue == null ? '—' : lastBlue) + '  /  red ' + (lastRed == null ? '—' : lastRed);
-    else if (detail) read.textContent = detail;
+    const REASON = { lowconf: 'unsure', jump: 'jump held', decrease: 'drop held', noread: 'no read', range: 'out of range', reset: 'new game' };
+    const side = (v, conf, reason) => {
+      let s = v == null ? '—' : String(v);
+      if (conf != null && v != null) s += ' (' + Math.round(conf) + '%)';
+      if (reason && REASON[reason]) s += ' · ' + REASON[reason];
+      return s;
+    };
+    if (lastBlue != null || lastRed != null) {
+      read.textContent = 'blue ' + side(lastBlue, x.blueConf, x.reason && x.reason.blue) + '   /   red ' + side(lastRed, x.redConf, x.reason && x.reason.red)
+        + (x.source === 'ocr' ? '   · driving the overlay' : '');
+    } else if (detail) read.textContent = detail;
   }
 }
 
@@ -22782,6 +23541,7 @@ function sendLolOcrConfig() {
   const num = (id) => { const v = Number(el(id)?.value); return isNaN(v) ? undefined : v; };
   send('lol_ocr_config', {
     enabled: !!el('lol-ocr-enable')?.checked,
+    displayId: el('lol-ocr-display')?.value || '',
     regions: {
       blue: { x: num('lol-ocr-bx'), y: num('lol-ocr-by'), w: num('lol-ocr-bw'), h: num('lol-ocr-bh') },
       red:  { x: num('lol-ocr-rx'), y: num('lol-ocr-ry'), w: num('lol-ocr-rw'), h: num('lol-ocr-rh') }
@@ -22789,7 +23549,175 @@ function sendLolOcrConfig() {
   });
 }
 el('lol-ocr-enable')?.addEventListener('change', sendLolOcrConfig);
-el('lol-ocr-apply')?.addEventListener('click', sendLolOcrConfig);
+el('lol-ocr-apply')?.addEventListener('click', () => { sendLolOcrConfig(); lolOcrRequestSnapshot(400); });
+el('lol-ocr-display')?.addEventListener('change', () => { sendLolOcrConfig(); lolOcrRequestSnapshot(400); });
+el('lol-ocr-details')?.addEventListener('toggle', (e) => { if (e.target.open) send('lol_ocr_displays', {}); });
+
+// ── OCR calibration picture ───────────────────────────────────────────────────
+// A snapshot of the chosen monitor with the two capture boxes drawn on it. Regions are kept
+// in the monitor's physical pixels; the picture is only scaled for display. Dragging edits
+// the local copy, mouse-up sends it (lol_ocr_config) and refreshes the snapshot so the
+// per-box previews show what the engine will actually read.
+const _lolCal = { w: 0, h: 0, regions: null, side: 'blue', drag: null, displaysAsked: false, snapTimer: null };
+
+function lolOcrMsg(text, bad) {
+  const m = el('lol-ocr-msg');
+  if (!m) return;
+  m.textContent = text || '';
+  m.classList.toggle('bad', !!bad);
+}
+
+function lolOcrRequestSnapshot(delayMs) {
+  if (_lolCal.snapTimer) clearTimeout(_lolCal.snapTimer);
+  _lolCal.snapTimer = setTimeout(() => { _lolCal.snapTimer = null; send('lol_ocr_snapshot', {}); }, delayMs || 0);
+}
+
+function lolCalScale() {
+  const img = el('lol-ocr-shot');
+  if (!img || !_lolCal.w || !img.clientWidth) return 0;
+  return img.clientWidth / _lolCal.w;
+}
+
+function lolCalRender() {
+  const k = lolCalScale();
+  ['blue', 'red'].forEach((side) => {
+    const box = el('lol-ocr-box-' + side);
+    if (!box) return;
+    const r = _lolCal.regions && _lolCal.regions[side];
+    if (!k || !r) { box.style.display = 'none'; return; }
+    box.style.display = '';
+    box.style.left = (r.x * k) + 'px'; box.style.top = (r.y * k) + 'px';
+    box.style.width = Math.max(4, r.w * k) + 'px'; box.style.height = Math.max(4, r.h * k) + 'px';
+    box.classList.toggle('active', _lolCal.side === side);
+  });
+}
+
+function lolCalWriteInputs(side) {
+  const r = _lolCal.regions && _lolCal.regions[side];
+  if (!r) return;
+  const p = side === 'blue' ? 'b' : 'r';
+  const set = (k, v) => { const e = el('lol-ocr-' + p + k); if (e) e.value = Math.round(v); };
+  set('x', r.x); set('y', r.y); set('w', r.w); set('h', r.h);
+}
+
+function lolCalClamp(r) {
+  r.w = Math.max(8, Math.min(_lolCal.w, r.w)); r.h = Math.max(8, Math.min(_lolCal.h, r.h));
+  r.x = Math.max(0, Math.min(_lolCal.w - r.w, r.x)); r.y = Math.max(0, Math.min(_lolCal.h - r.h, r.y));
+  return r;
+}
+
+(function wireLolCal() {
+  const cal = el('lol-ocr-cal'), shot = el('lol-ocr-shot');
+  if (!cal || !shot) return;
+  shot.addEventListener('load', () => { cal.classList.add('has-shot'); lolCalRender(); });
+  window.addEventListener('resize', () => lolCalRender());
+  document.querySelectorAll('#lol-ocr-side .seg-btn').forEach((b) => b.addEventListener('click', () => {
+    _lolCal.side = b.dataset.side;
+    document.querySelectorAll('#lol-ocr-side .seg-btn').forEach((x) => x.classList.toggle('active', x === b));
+    lolCalRender();
+  }));
+
+  const pos = (ev) => {
+    const k = lolCalScale(); const rect = shot.getBoundingClientRect();
+    return k ? { x: (ev.clientX - rect.left) / k, y: (ev.clientY - rect.top) / k } : null;
+  };
+  cal.addEventListener('pointerdown', (ev) => {
+    if (ev.button !== 0 || !_lolCal.w || !_lolCal.regions) return;
+    const p = pos(ev); if (!p) return;
+    const k = lolCalScale();
+    let mode = 'draw', side = _lolCal.side;
+    // Hit test, active side first so overlapping boxes stay grabbable.
+    for (const s of [_lolCal.side, _lolCal.side === 'blue' ? 'red' : 'blue']) {
+      const r = _lolCal.regions[s];
+      if (!r) continue;
+      const inside = p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
+      const nearCorner = Math.abs(p.x - (r.x + r.w)) * k <= 12 && Math.abs(p.y - (r.y + r.h)) * k <= 12;
+      if (nearCorner) { mode = 'resize'; side = s; break; }
+      if (inside) { mode = 'move'; side = s; break; }
+    }
+    const start = mode === 'draw' ? { x: p.x, y: p.y, w: 8, h: 8 } : { ..._lolCal.regions[side] };
+    if (mode === 'draw') _lolCal.regions[side] = { ...start };
+    _lolCal.drag = { mode, side, p0: p, start };
+    _lolCal.side = side;
+    document.querySelectorAll('#lol-ocr-side .seg-btn').forEach((x) => x.classList.toggle('active', x.dataset.side === side));
+    cal.setPointerCapture(ev.pointerId);
+    ev.preventDefault();
+  });
+  cal.addEventListener('pointermove', (ev) => {
+    const d = _lolCal.drag; if (!d) return;
+    const p = pos(ev); if (!p) return;
+    const dx = p.x - d.p0.x, dy = p.y - d.p0.y;
+    let r;
+    if (d.mode === 'move') r = { x: d.start.x + dx, y: d.start.y + dy, w: d.start.w, h: d.start.h };
+    else if (d.mode === 'resize') r = { x: d.start.x, y: d.start.y, w: d.start.w + dx, h: d.start.h + dy };
+    else r = { x: Math.min(d.p0.x, p.x), y: Math.min(d.p0.y, p.y), w: Math.abs(dx), h: Math.abs(dy) };
+    _lolCal.regions[d.side] = lolCalClamp(r);
+    lolCalWriteInputs(d.side);
+    lolCalRender();
+  });
+  const finish = (ev) => {
+    const d = _lolCal.drag; if (!d) return;
+    _lolCal.drag = null;
+    try { cal.releasePointerCapture(ev.pointerId); } catch (e) {}
+    lolCalWriteInputs(d.side);
+    sendLolOcrConfig();
+    lolOcrRequestSnapshot(350);
+  };
+  cal.addEventListener('pointerup', finish);
+  cal.addEventListener('pointercancel', finish);
+
+  el('lol-ocr-snapshot')?.addEventListener('click', () => { lolOcrMsg('Taking a snapshot…'); send('lol_ocr_snapshot', {}); });
+  el('lol-ocr-autolocate')?.addEventListener('click', () => {
+    lolOcrMsg('Looking for the gold numbers on the top of the screen…');
+    const b = el('lol-ocr-autolocate'); if (b) b.disabled = true;
+    send('lol_ocr_autolocate', {});
+    setTimeout(() => { if (b) b.disabled = false; }, 8000);
+  });
+})();
+
+function onLolOcrDisplays(msg) {
+  const sel = el('lol-ocr-display');
+  if (!sel) return;
+  const list = Array.isArray(msg.displays) ? msg.displays : [];
+  const cur = sel.value || msg.current || '';
+  sel.innerHTML = '';
+  if (!list.length) { const o = document.createElement('option'); o.value = ''; o.textContent = 'Primary display'; sel.appendChild(o); }
+  list.forEach((d) => {
+    const o = document.createElement('option');
+    o.value = d.primary ? '' : d.id;
+    o.textContent = d.label;
+    sel.appendChild(o);
+  });
+  const has = Array.from(sel.options).some((o) => o.value === cur);
+  sel.value = has ? cur : '';
+}
+
+function onLolOcrSnapshot(msg) {
+  if (!msg.ok) { lolOcrMsg(msg.message || 'Snapshot failed.', true); return; }
+  _lolCal.w = msg.width || 0; _lolCal.h = msg.height || 0;
+  const shot = el('lol-ocr-shot');
+  if (shot && msg.image) shot.src = msg.image;
+  ['blue', 'red'].forEach((side) => {
+    const img = el('lol-ocr-prev-' + side), txt = el('lol-ocr-prev-' + side + '-txt');
+    const s = msg[side];
+    if (img) { if (s && s.png) { img.src = s.png; img.style.display = ''; } else img.style.display = 'none'; }
+    if (txt) {
+      if (!s) txt.textContent = '';
+      else if (s.error) txt.textContent = s.error;
+      else txt.textContent = (s.text ? 'read "' + s.text + '"' : 'nothing read') + (s.value != null ? ' = ' + s.value : '') + ' · ' + (s.confidence || 0) + '% sure' + (s.pass === 'binary' ? ' (binarised)' : '');
+    }
+  });
+  lolOcrMsg('');
+  lolCalRender();
+}
+
+function onLolOcrAutolocate(msg) {
+  const b = el('lol-ocr-autolocate'); if (b) b.disabled = false;
+  if (!msg.ok) { lolOcrMsg(msg.message || 'Auto-detect could not find the gold numbers.', true); return; }
+  const w = msg.words || {};
+  lolOcrMsg('Found blue "' + ((w.blue && w.blue.text) || '?') + '" and red "' + ((w.red && w.red.text) || '?') + '". Boxes saved — check the snapshot.');
+  lolOcrRequestSnapshot(200);
+}
 
 function applyCsgoState(data) {
   const cs = data.csgo || {};
@@ -22802,6 +23730,8 @@ function applyCsgoState(data) {
     conn.className = 'prod-chip' + (cs.connected ? ' ok' : '');
   }
 
+  const awEl = el('check-csgo-auto-winner');
+  if (awEl && document.activeElement !== awEl) awEl.checked = cs.autoWinner !== false;
   const histEl = el('check-csgo-history');
   if (histEl && document.activeElement !== histEl) histEl.checked = !!cs.showHistory;
 
@@ -22921,6 +23851,7 @@ function wireRlSceneAuto() {
     rtTog._rlWired = true;
     rtTog.addEventListener('change', function () {
       send('set_rl_replay_transitions', { on: this.checked });
+      const st = el('sel-replay-style'); if (st) st.disabled = !this.checked;   // moot pick while off
     });
   }
   // Occasional title-sponsor roll-out from the bottom-right statcard on the RL HUD.
@@ -22929,6 +23860,54 @@ function wireRlSceneAuto() {
     srTog._rlWired = true;
     srTog.addEventListener('change', function () {
       send('set_rl_sponsor_roll', { on: this.checked });
+    });
+  }
+  // Scores ticker on/off, Worlds overlay only.
+  const wtTog = el('chk-worlds-ticker');
+  if (wtTog && !wtTog._wtWired) {
+    wtTog._wtWired = true;
+    wtTog.addEventListener('change', function () {
+      send('set_worlds_ticker', { on: this.checked });
+    });
+  }
+  // Worlds overlay stats sidebar (optional ranked panel): toggle + title/subtitle + Name|Value rows.
+  const wsbTog = el('chk-worlds-sidebar');
+  if (wsbTog && !wsbTog._wsbWired) {
+    wsbTog._wsbWired = true;
+    function wsbParseRows() {
+      return (el('inp-wsb-rows').value || '').split('\n').map(function (ln) {
+        var t = ln.trim(); if (!t) return null;
+        var parts = t.split(/\s*[|\t]\s*|\s{2,}|\s*,\s*/); // split on | , tab or a run of spaces
+        var name = (parts.shift() || '').trim();
+        var value = parts.join(' ').trim();
+        return name ? { name: name, value: value } : null;
+      }).filter(Boolean);
+    }
+    function wsbSend() {
+      send('set_worlds_sidebar', {
+        visible: wsbTog.checked,
+        title: (el('inp-wsb-title').value || '').trim(),
+        subtitle: (el('inp-wsb-sub').value || '').trim(),
+        source: 'manual',
+        rows: wsbParseRows(),
+      });
+      var s = el('wsb-saved'); if (s) { s.style.display = ''; clearTimeout(s._t); s._t = setTimeout(function () { s.style.display = 'none'; }, 1600); }
+    }
+    wsbTog.addEventListener('change', wsbSend);
+    el('btn-wsb-save').addEventListener('click', wsbSend);
+    el('btn-wsb-fill-standings').addEventListener('click', function () {
+      var st = ((typeof currentState !== 'undefined' && currentState) || {});
+      // prefer live league/competition standings; fall back to the standings overlay rows
+      var src = (st.standings && st.standings.rows) || (st.startggLeagueStandings && st.startggLeagueStandings.rows) || [];
+      if (!Array.isArray(src) || !src.length) { alert('No standings loaded yet — load a league/competition first, or type rows by hand.'); return; }
+      var lines = src.slice(0, 10).map(function (r, i) {
+        var name = r.team || r.name || r.entrant || r.player || '';
+        var value = (r.points != null ? r.points : (r.wins != null ? (r.wins + '-' + (r.losses != null ? r.losses : 0)) : (r.value != null ? r.value : '')));
+        return name ? (name + ' | ' + value) : '';
+      }).filter(Boolean);
+      el('inp-wsb-rows').value = lines.join('\n');
+      if (!el('inp-wsb-title').value) el('inp-wsb-title').value = 'Standings';
+      wsbSend();
     });
   }
   // Stats-screen skin (show/hide the stat table + pick the design) — applies to the scoreboard scene.
@@ -23089,7 +24068,7 @@ function wireSmashControls() {
   on('smash-auto-advance', 'change', (n) => send('set_smash_auto_advance', { value: n.checked }));
   on('btn-smash-reset', 'click', () => send('reset_smash_stocks', {}));
   on('btn-smash-swap', 'click', () => send('swap_teams', {}));
-  on('btn-smash-reset-series', 'click', () => send('reset_series', {}));
+  on('btn-smash-reset-series', 'click', () => confirmResetSeries());
   // Scoreboard title ("Ultimate Singles"). Emptying the box re-arms the start.gg auto-fill rather
   // than blanking the badge - the server falls back to whatever the last event reported.
   const st = el('smash-title');
@@ -23310,6 +24289,235 @@ function applySmashControls(data) {
   });
 }
 
+// ── Brawlhalla controls (Match ▸ Teams ▸ Brawlhalla) ─────────────────────────
+// Stocks and legends are MANUAL — Brawlhalla ships no live match feed, so this strip is the only
+// way they reach the overlay. The rank/ELO chips beside each player are the part that IS real
+// data: a linked Brawlhalla account is pulled from the official API (backend/brawlhalla.js).
+const BH_SIDE = { blue: { tag: 'P1', label: 'Player 1' }, orange: { tag: 'P2', label: 'Player 2' } };
+let _bhWired = false;
+
+function bhLegendNames() {
+  return (typeof BRAWLHALLA_LEGENDS !== 'undefined') ? BRAWLHALLA_LEGENDS : [];
+}
+
+function wireBrawlhallaControls() {
+  if (_bhWired) return; _bhWired = true;
+  const dl = el('bh-legends');
+  if (dl && !dl.childElementCount) dl.innerHTML = bhLegendNames().map((n) => `<option value="${tlEsc(n)}"></option>`).join('');
+  const on = (id, ev, fn) => { const n = el(id); if (n) n.addEventListener(ev, () => fn(n)); };
+  on('bh-start-stocks', 'change', (n) => send('set_brawlhalla_start_stocks', { value: parseInt(n.value, 10) }));
+  on('bh-best-of', 'change', (n) => send('set_best_of', { value: parseInt(n.value, 10) }));
+  on('bh-auto-advance', 'change', (n) => send('set_brawlhalla_options', { autoAdvance: n.checked }));
+  on('bh-show-rank', 'change', (n) => send('set_brawlhalla_options', { showRank: n.checked }));
+  on('bh-rank-mode', 'change', (n) => send('set_brawlhalla_options', { rankMode: n.value }));
+  on('bh-region', 'change', (n) => send('set_brawlhalla_options', { region: n.value }));
+  on('btn-bh-reset', 'click', () => send('reset_brawlhalla_stocks', {}));
+  on('btn-bh-swap', 'click', () => send('swap_teams', {}));
+  on('btn-bh-refresh', 'click', () => {
+    send('refresh_brawlhalla_cards', {});
+    const st = el('bh-status'); if (st) st.textContent = 'Refreshing ranks…';
+  });
+  const title = el('bh-title');
+  if (title) {
+    title.addEventListener('change', () => send('set_brawlhalla_options', { title: title.value.trim() }));
+    title.addEventListener('keydown', (e) => { if (e.key === 'Enter') title.blur(); });
+  }
+  document.querySelectorAll('#bh-mode-seg .seg-btn').forEach((btn) => {
+    btn.addEventListener('click', () => send('set_brawlhalla_mode', { mode: btn.dataset.bhMode }));
+  });
+
+  // The side cards are re-rendered from state, so everything inside them is delegated.
+  ['blue', 'orange'].forEach((side) => {
+    const card = el('bh-side-' + side);
+    if (!card) return;
+    card.addEventListener('click', (e) => {
+      const t = e.target.closest('[data-act]'); if (!t || !card.contains(t)) return;
+      const row = t.closest('.sm-row');
+      const seat = row ? (parseInt(row.dataset.idx, 10) || 0) : 0;
+      const act = t.dataset.act;
+      if (act === 'stock') send('set_brawlhalla_stocks', { side, seat, value: (parseInt(t.dataset.i, 10) || 0) + 1 });
+      else if (act === 'stock-step') send('brawlhalla_stock_delta', { side, seat, delta: parseInt(t.dataset.d, 10) || 0 });
+      else if (act === 'series') send('adjust_series', { side, delta: parseInt(t.dataset.d, 10) || 0 });
+      else if (act === 'games') {
+        const target = (parseInt(t.dataset.i, 10) || 0) + 1;
+        send('adjust_series', { side, delta: target - (parseInt(card.dataset.won, 10) || 0) });
+      }
+      else if (act === 'bh-find') bhFindPlayer(side, seat);
+      else if (act === 'bh-unlink') send('link_brawlhalla_player', { side, seat, bhId: 0 });
+    });
+    card.addEventListener('change', (e) => {
+      const row = e.target.closest('.sm-row');
+      const seat = row ? (parseInt(row.dataset.idx, 10) || 0) : 0;
+      if (e.target.classList.contains('bh-legend-in')) {
+        send('set_brawlhalla_legend', { side, seat, legend: e.target.value.trim() });
+      }
+    });
+  });
+}
+
+/*
+  Look a player up and link them.
+
+  This is a ranked-LEADERBOARD search — the only name lookup the Brawlhalla API has — so an
+  unranked player cannot be found by name at all. The prompt says so, and offers the Brawlhalla ID
+  as the way in, because otherwise "no results" reads as a broken integration.
+*/
+async function bhFindPlayer(side, seat) {
+  const st = el('bh-status');
+  const t = (currentState.teams || {})[side] || {};
+  const roster = Array.isArray(t.players) ? t.players : [];
+  const guess = ((roster[seat] && (roster[seat].gamertag || roster[seat].name)) || '').trim();
+  const q = prompt('Brawlhalla name to look up (or paste a numeric Brawlhalla ID):', guess);
+  if (q == null) return;
+  const query = q.trim();
+  if (!query) return;
+  // A bare number is an ID — link it straight away and skip the search entirely.
+  if (/^\d+$/.test(query)) {
+    send('link_brawlhalla_player', { side, seat, bhId: parseInt(query, 10) });
+    if (st) st.textContent = 'Linking Brawlhalla ID ' + query + '…';
+    return;
+  }
+  if (st) st.textContent = 'Searching Brawlhalla ranked for "' + query + '"…';
+  try {
+    const r = await fetch('http://127.0.0.1:3000/api/brawlhalla/search', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, region: (currentState.brawlhalla || {}).region || 'ALL', limit: 10 })
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || 'Lookup failed');
+    const hits = (d.hits || []).filter((h) => h.brawlhallaId);
+    if (!hits.length) { if (st) st.textContent = d.note || 'No ranked player by that name.'; return; }
+    const pick = hits.length === 1 ? hits[0] : (() => {
+      const lines = hits.map((h, i) => `${i + 1}. ${h.name} — ${h.tier || 'unranked'} ${h.rating || ''} (${h.region}) #${h.rank}`);
+      const n = prompt('Which player?\n\n' + lines.join('\n'), '1');
+      const idx = parseInt(n, 10);
+      return (idx >= 1 && idx <= hits.length) ? hits[idx - 1] : null;
+    })();
+    if (!pick) { if (st) st.textContent = ''; return; }
+    send('link_brawlhalla_player', { side, seat, bhId: pick.brawlhallaId });
+    if (st) st.textContent = `Linked ${pick.name} (${pick.tier || 'unranked'}, ${pick.region}).`;
+  } catch (err) {
+    if (st) st.textContent = friendlyError(err);
+  }
+}
+
+function applyBrawlhallaControls(data) {
+  wireBrawlhallaControls();
+  const strip = el('msp-brawlhalla');
+  if (strip) strip.style.display = (data && data.activeGame === 'brawlhalla') ? '' : 'none';
+  if (!data) return;   // filled even off-air so Game Settings can prep it
+  const bh = data.brawlhalla || {};
+  const mode = bh.mode === '2v2' ? '2v2' : '1v1';
+  const seats = mode === '2v2' ? 2 : 1;
+  const start = Math.max(1, Math.min(9, Number(bh.startStocks) || 3));
+  const setVal = (id, v) => { const n = el(id); if (n && document.activeElement !== n) n.value = v; };
+
+  document.querySelectorAll('#bh-mode-seg .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.bhMode === mode));
+  const hint = el('bh-mode-hint');
+  if (hint) {
+    hint.textContent = mode === '2v2'
+      ? 'Both players show on each side and their stocks pool — the side is out when the pair runs dry.'
+      : 'One player per side, with their legend and stocks.';
+  }
+  setVal('bh-start-stocks', String(start));
+  setVal('bh-rank-mode', bh.rankMode === 'ranked_3v3' ? 'ranked_3v3' : 'ranked_1v1');
+  setVal('bh-region', bh.region || 'ALL');
+  const bo = el('bh-best-of');
+  if (bo && document.activeElement !== bo) {
+    const v = String(data.bestOf || 3);
+    if (![].some.call(bo.options, (o) => o.value === v)) bo.add(new Option(v, v));
+    bo.value = v;
+  }
+  const aa = el('bh-auto-advance'); if (aa && document.activeElement !== aa) aa.checked = bh.autoAdvance !== false;
+  const sr = el('bh-show-rank'); if (sr && document.activeElement !== sr) sr.checked = bh.showRank !== false;
+  const ti = el('bh-title');
+  if (ti && document.activeElement !== ti) {
+    ti.value = bh.title || '';
+    ti.placeholder = 'Auto: ' + (mode === '2v2' ? '2v2 Doubles' : '1v1 Singles');
+  }
+  const status = el('bh-status');
+  // Only overwrite the status line with an ERROR — a lookup's own "Linked X" message should stay
+  // on screen rather than being wiped by the state push that the link itself caused.
+  if (status && bh.lastError) status.textContent = 'Brawlhalla API: ' + bh.lastError;
+
+  const need = Math.max(1, Math.ceil((Number(data.bestOf) || 3) / 2));
+  const series = data.series || {};
+  ['blue', 'orange'].forEach((side) => {
+    const card = el('bh-side-' + side);
+    if (!card) return;
+    const t = (data.teams && data.teams[side]) || {};
+    const roster = Array.isArray(t.players) ? t.players.filter(Boolean) : [];
+    const sd = bh[side] || {};
+    const won = Number(series[side]) || 0;
+    const nameOf = (p) => (p ? String(p.gamertag || p.name || '').trim() : '');
+
+    const rows = [];
+    for (let i = 0; i < seats; i++) {
+      const p = (sd.players || [])[i] || {};
+      rows.push({
+        name: nameOf(roster[i]),
+        // Singles keeps its stock count on the SIDE (that is what the overlay draws); 2v2 keeps
+        // one per seat. Reading the wrong one is how a board shows full stocks after three KOs.
+        stocks: Math.max(0, Number(seats === 1 ? sd.stocks : p.stocks) || 0),
+        legend: (seats === 1 ? sd.legend : p.legend) || '',
+        bhId: Number(p.bhId) || 0,
+        card: p.card || null
+      });
+    }
+    const title = (rows[0].name || String(t.name || '').trim() || BH_SIDE[side].label);
+    const left = rows.reduce((a, r) => a + Math.min(start, r.stocks), 0);
+
+    const sig = JSON.stringify([mode, title, won, need, start, rows.map((r) => [r.name, r.stocks, r.legend, r.bhId,
+      r.card ? [r.card.tier, r.card.rating, r.card.wins, r.card.losses, r.card.regionRank, r.card.globalRank].join('~') : ''])]);
+    if (card.dataset.sig === sig) return;
+    card.dataset.sig = sig;
+    card.dataset.won = String(won);
+
+    const pips = (n, lit, act, cls) => Array.from({ length: n }, (_, i) =>
+      `<button type="button" class="${cls}${i < lit ? ' on' : ''}" data-act="${act}" data-i="${i}" title="Set to ${i + 1}"></button>`).join('');
+    // The rank line for a seat: what the API actually returned, or the prompt to link one.
+    const rankLine = (r) => {
+      if (!r.bhId) return `<button type="button" class="btn btn-ghost btn-xs" data-act="bh-find" title="Search the Brawlhalla ranked leaderboard and link this player's account">Link rank</button>`;
+      if (!r.card) return `<span class="sm-pname is-empty">Loading rank…</span>`;
+      const c = r.card;
+      const rank = c.regionRank ? `${c.region} #${c.regionRank}` : (c.globalRank ? `#${c.globalRank}` : '');
+      return `<span class="bh-rank" title="${tlEsc(c.name)} — peak ${c.peakRating}">`
+        + `<b>${tlEsc(c.tier || 'Unranked')}</b>`
+        + (c.rating ? ` · ${c.rating}` : '')
+        + (rank ? ` · ${tlEsc(rank)}` : '')
+        + (c.games ? ` · ${c.wins}-${c.losses}` : '')
+        + `</span> <button type="button" class="btn btn-ghost btn-xs" data-act="bh-unlink" title="Unlink this Brawlhalla account">×</button>`;
+    };
+    card.innerHTML =
+      `<div class="sm-side-hd">` +
+        `<span class="sm-tag">${BH_SIDE[side].tag}</span>` +
+        `<span class="sm-side-name" title="${tlEsc(title)}">${tlEsc(title)}</span>` +
+        `<span class="sm-games" title="Games won - click to set">${pips(need, won, 'games', 'sm-game')}</span>` +
+        `<span class="sm-score">` +
+          `<button type="button" class="sm-step" data-act="series" data-d="-1" title="Take a game off">&minus;</button>` +
+          `<span class="sm-score-n">${won}</span>` +
+          `<button type="button" class="sm-step" data-act="series" data-d="1" title="Give this side a game">+</button>` +
+        `</span>` +
+      `</div>` +
+      `<div class="sm-rows${seats === 1 ? ' sm-rows--solo' : ''}">` +
+        rows.map((r, i) => {
+          const lit = Math.min(start, r.stocks);
+          return `<div class="sm-row${lit === 0 ? ' is-out' : ''}" data-idx="${i}">` +
+            (seats > 1 ? `<span class="sm-pname${r.name ? '' : ' is-empty'}">${tlEsc(r.name || ('Player ' + (i + 1)))}</span>` : '') +
+            `<input type="text" class="input-text bh-legend-in" list="bh-legends" placeholder="Legend" value="${tlEsc(r.legend)}">` +
+            `<span class="sm-stocks">` +
+              `<button type="button" class="sm-step" data-act="stock-step" data-d="-1" title="Lose a stock">&minus;</button>` +
+              `<span class="sm-pips">${pips(start, lit, 'stock', 'sm-stock')}</span>` +
+              `<button type="button" class="sm-step" data-act="stock-step" data-d="1" title="Give a stock back">+</button>` +
+            `</span>` +
+            `<span class="bh-rank-cell">${rankLine(r)}</span>` +
+          `</div>`;
+        }).join('') +
+      `</div>` +
+      (seats > 1 ? `<div class="sm-side-ft"><b>${left}</b> / ${rows.length * start} stocks left</div>` : '');
+  });
+}
+
 // ── Built-in chat commands (!bracket / !discord / !casters) ───────────────────
 // The preview mirrors server.js chatCommandReply() so the producer sees the EXACT line the bot
 // will post — keep the two in step if either changes.
@@ -23418,8 +24626,19 @@ function applyRlSceneAuto(data) {
   const pEn = el('chk-rl-postgame'); if (pEn) pEn.checked = !!pg.enabled;
   const pd = el('inp-rl-postgame-delay'); if (pd && document.activeElement !== pd) pd.value = pg.delaySec || 20;
   const hEn = el('chk-rl-hide-ui'); if (hEn && document.activeElement !== hEn) hEn.checked = !!(data && data.rlHudHidden);
-  const rtEn = el('chk-rl-replay-transitions'); if (rtEn && document.activeElement !== rtEn) rtEn.checked = (data && data.rlReplayTransitions) !== false;
+  const rtOn = (data && data.rlReplayTransitions) !== false;
+  const rtEn = el('chk-rl-replay-transitions'); if (rtEn && document.activeElement !== rtEn) rtEn.checked = rtOn;
+  const rtSel = el('sel-replay-style'); if (rtSel) rtSel.disabled = !rtOn;
   const srEn = el('chk-rl-sponsor-roll'); if (srEn && document.activeElement !== srEn) srEn.checked = !!(data && data.rlSponsorRoll);
+  const wtEn = el('chk-worlds-ticker'); if (wtEn && document.activeElement !== wtEn) wtEn.checked = (data && data.worldsTicker) !== false;
+  { // Worlds stats sidebar — hydrate the toggle + fields (skip whatever the producer is editing)
+    const sb = (data && data.worldsSidebar) || {};
+    const wt = el('chk-worlds-sidebar'); if (wt && document.activeElement !== wt) wt.checked = !!sb.visible;
+    const wti = el('inp-wsb-title'); if (wti && document.activeElement !== wti) wti.value = sb.title || '';
+    const wsu = el('inp-wsb-sub'); if (wsu && document.activeElement !== wsu) wsu.value = sb.subtitle || '';
+    const wr = el('inp-wsb-rows');
+    if (wr && document.activeElement !== wr) wr.value = (Array.isArray(sb.rows) ? sb.rows : []).map((r) => (r.name || '') + (r.value !== '' && r.value != null ? ' | ' + r.value : '')).join('\n');
+  }
   { // Sponsors tab card: which title sponsor the roll-out will show (brand kit's title-tagged sponsor)
     const b = (data && data.brand) || {}, logo = (b.spots && b.spots.title) || '';
     const sp = (b.sponsors || []).find((x) => x && x.logo && x.placements && x.placements.title);
@@ -23429,6 +24648,19 @@ function applyRlSceneAuto(data) {
     const miss = el('sponroll-missing'); if (miss) miss.style.display = logo ? 'none' : '';
   }
   setRlSbLocSeg(!!(data && data.rlScoreboardSeparate));
+  // Overwatch FT/BO label row: only for Overwatch, buttons read the live numbers (FT3 / BO5).
+  {
+    const isOw = !!(data && data.activeGame === 'overwatch');
+    const bestOf = (data && data.bestOf) || 5;
+    const lbl = (data && data.owMatch && data.owMatch.seriesLabel) === 'bo' ? 'bo' : 'ft';
+    document.querySelectorAll('.sc-ow-label').forEach((row) => {
+      row.style.display = isOw ? '' : 'none';
+      row.querySelectorAll('button[data-v]').forEach((b) => {
+        b.textContent = b.dataset.v === 'bo' ? 'BO' + bestOf : 'FT' + Math.ceil(bestOf / 2);
+        b.classList.toggle('is-on', b.dataset.v === lbl);
+      });
+    });
+  }
   // RL auto-spectate + first-kickoff camera reflection REMOVED 2026-08 (the camera automation is gone).
   // Live-match pause button: label + data-state track the true pause state (which the
   // MatchPaused/Unpaused events confirm), and the button is inert unless RL is connected.
@@ -23613,6 +24845,7 @@ function applyObsState(data) {
   if (typeof syncSheetsUi === 'function') syncSheetsUi(data);   // Google Sheets integration settings
   if (typeof syncCreditsShiftEventSelect === 'function') syncCreditsShiftEventSelect();   // credits event picker
   applySmashControls(data); // Smash-only stocks + fighters strip
+  applyBrawlhallaControls(data);   // Brawlhalla stocks + legends + ranked-card linking
   if (window.GamesHub) window.GamesHub.onState(data); // Settings ▸ Games + Dashboard Game Settings (games-hub.js)
   applyTokonControls(data); // Marvel Tokon format/game + rail corner
   applyChatCommands(data);  // !bracket / !discord / !casters config + live reply preview
@@ -23710,7 +24943,7 @@ document.querySelectorAll('#switcher-target-seg .seg-btn').forEach((b) => b.addE
 // To restore: add 'chatgames' back here, re-add the panels/titles entries below, and
 // un-comment the subnav button + store card in index.html (the #integration-chatgames panel
 // itself was left in place, just orphaned).
-const INT_TABS = ['store', 'api', 'plugins', 'switcher', 'streamdeck', 'cameras', 'tournaments', 'twitch'];
+const INT_TABS = ['store', 'api', 'plugins', 'switcher', 'streamdeck', 'cameras', 'tournaments', 'twitch', 'riot'];
 const INT_TOP_TABS = ['store', 'api', 'plugins'];   // top-level Marketplace sections — no back bar   // 'games' moved to Settings ▸ Games
 let _intTab = 'store';
 function _intShowTab(which) {
@@ -23724,6 +24957,7 @@ function _intShowTab(which) {
     streamdeck: [el('integration-streamdeck')],
     cameras: [el('integration-vdo')],
     tournaments: [el('integration-startgg')],
+    riot: [el('integration-riot')],
     twitch: [el('integration-twitch')],   // Games & Features (#integration-twitchgames) moved to Settings ▸ Features
     api: [el('integration-api')]
     // chatgames: [el('integration-chatgames')]   — parked, see INT_TABS above
@@ -23741,7 +24975,7 @@ function _intShowTab(which) {
   if (backbar) {
     backbar.style.display = isTop ? 'none' : 'flex';
     const titles = { switcher: 'Video Switcher', cameras: 'Cameras', streamdeck: 'Elgato Stream Deck',
-      games: 'Games & GSI', tournaments: 'Tournament Platforms', twitch: 'Twitch' };
+      games: 'Games & GSI', tournaments: 'Tournament Platforms', twitch: 'Twitch', riot: 'Riot Games' };
     const t = el('int-backbar-title');
     if (t) t.textContent = (typeof INT_APP_NAMES !== 'undefined' && INT_APP_NAMES[_intAppFilter]) || titles[_intTab] || '';
   }
@@ -23766,7 +25000,7 @@ el('int-back')?.addEventListener('click', () => { _intAppFilter = ''; _intShowTa
 let _intAppFilter = '';
 const INT_APP_NAMES = { obs: 'OBS Studio', vmix: 'vMix', twitch: 'Twitch', startgg: 'start.gg',
   challonge: 'Challonge', nxgen: 'NXGEN', faceit: 'FACEIT', vdo: 'VDO.Ninja', rl: 'Rocket League',
-  cs2: 'Counter-Strike 2', valorant: 'Valorant', lol: 'League of Legends' };
+  cs2: 'Counter-Strike 2', valorant: 'Valorant', lol: 'League of Legends', riot: 'Riot Games' };
 function _intApplyAppFilter() {
   // One app = one titled <section class="section"> inside its shared panel.
   const scope = {
@@ -23840,6 +25074,9 @@ function renderIntegrationStore(data) {
                       fc.hasKey ? (fc.connected ? 'Connected' : 'Key saved') : 'No key') ? 1 : 0;
   on += set('sheets', sh.hasKey ? (sh.connected ? 'on' : 'warn') : 'off',
                       sh.hasKey ? (sh.connected ? 'Connected' : 'Key saved') : 'No key') ? 1 : 0;
+  const rt = data.riot || {};
+  on += set('riot', rt.hasKey ? (rt.lastError ? 'warn' : 'on') : 'off',
+                    rt.hasKey ? (rt.lastError ? 'Key rejected' : 'Key saved') : 'No key') ? 1 : 0;
   on += set('rl',  data.rlConnected ? 'on' : 'off', data.rlConnected ? 'Connected' : 'Waiting for game') ? 1 : 0;
   on += set('cs2', (data.csgo && data.csgo.connected) ? 'on' : 'off',
                    (data.csgo && data.csgo.connected) ? 'Connected' : 'Waiting for game') ? 1 : 0;
@@ -23848,7 +25085,7 @@ function renderIntegrationStore(data) {
   const sdStatus = el('streamdeck-conn-status');
   if (sdStatus) sdStatus.textContent = sd ? 'Plugin connected — keys are live.' : 'Plugin not connected.';
   const count = el('int-strip-count');
-  if (count) count.textContent = on + ' of 11';
+  if (count) count.textContent = on + ' of 12';
 }
 
 function applyVmixState(data) {
@@ -24810,7 +26047,7 @@ function renderPlaylistPane(c) {
       // One shared browser source for EVERYTHING (single clips + all playlists). Add this once to OBS;
       // clips and playlists all render here and the playlist just cuts to its chosen scene. (No more
       // per-playlist ?playlist=<id> sources — those fought each other.)
-      const obsUrl = (window.SCENE_BASE_URL || 'http://127.0.0.1:3000') + '/replay-player.html';
+      const obsUrl = (window.SCENE_BASE_URL || 'http://localhost:3000') + '/replay-player.html';
       const urlText = el('rp-pl-url-text'); if (urlText) urlText.value = obsUrl;
       const copyBtn = el('rp-pl-url-copy');
       if (copyBtn && !copyBtn.dataset.wired) {
@@ -25845,7 +27082,7 @@ function deckFire(b) {
   if (!b) return;
   if (b.type === 'scene') { if (b.target) send('obs_switch_scene', { sceneName: b.target }); }
   else if (b.type === 'trigger') {
-    const g = (typeof GOLIVE_TRIGGERS !== 'undefined' ? GOLIVE_TRIGGERS : []).find((t) => t.state === b.target);
+    const g = (typeof GOLIVE_TRIGGERS !== 'undefined' ? GOLIVE_TRIGGERS : []).find((t) => t.state === trigStateKey(b.target));
     if (g) { const live = !!(currentState[g.state] && currentState[g.state].visible); send(g.msg, live ? { visible: false } : g.show()); }
   } else if (b.type === 'view') { send(b.target === 'scoreboard' ? 'force_scoreboard' : 'force_hud'); }
   else if (b.type === 'audio') { const inp = ((currentState.obs && currentState.obs.audioInputs) || []).find((i) => i.name === b.target); send(inp && inp.muted ? 'obs_input_unmute' : 'obs_input_mute', { inputName: b.target }); }
@@ -25877,7 +27114,7 @@ function deckLiveClass(b) {
   if (b.type === 'scene') return (obs.currentScene && obs.currentScene === b.target) ? 'on' : '';
   if (b.type === 'source') { const q = bbSourceParse(b.target); const x = q && (obs.sources || []).find((y) => y.scene === q.scene && y.source === q.source); return x && x.enabled ? 'on' : ''; }
   if (b.type === 'audio') { const a = (obs.audioInputs || []).find((y) => y.name === b.target); return a && a.muted ? 'muted' : ''; }
-  if (b.type === 'trigger') return (currentState[b.target] && currentState[b.target].visible) ? 'on' : '';
+  if (b.type === 'trigger') { const k = trigStateKey(b.target); return (currentState[k] && currentState[k].visible) ? 'on' : ''; }
   return '';
 }
 // Per-tick refresh of deck live lighting without rebuilding the grid.
@@ -26125,7 +27362,7 @@ function gfxSetPathVal(obj, dotted, val) {
   for (let i = 0; i < parts.length - 1; i++) { if (o[parts[i]] == null) o[parts[i]] = {}; o = o[parts[i]]; }
   o[parts[parts.length - 1]] = val;
 }
-const GFX_KEY2TRIG = { break: 'breakScreen', winner: 'winner', intro: 'intro', veto: 'veto', spotlight: 'spotlight' };
+const GFX_KEY2TRIG = { break: 'breakScreen', winner: 'winner', intro: 'intro', veto: 'veto', spotlight: 'watchlist' };
 
 el('credits-pull-shifts')?.addEventListener('click', () => {
   const chosen = el('credits-shift-event')?.value || '';
@@ -26451,7 +27688,7 @@ function rdActive() {
 let _rdSegs = rdActive().segs;
 let _rdRunning = false, _rdIdx = -1, _rdTimer = null, _rdEditIdx = -1;
 function rdSave() { rdActive().segs = _rdSegs; try { localStorage.setItem(RDS_KEY, JSON.stringify(_rdStore)); } catch {} }
-const RD_TRIGGERS = [['breakScreen', 'Countdown'], ['winner', 'Winner'], ['intro', 'Line-up'], ['spotlight', 'Spotlight'], ['veto', 'Map Veto']];
+const RD_TRIGGERS = [['breakScreen', 'Countdown'], ['winner', 'Winner'], ['intro', 'Line-up'], ['spotlight', 'Teams to Watch'], ['veto', 'Map Veto']];
 function rdTargetLabel(seg) {
   if (seg.type === 'scene') return seg.target || '(no scene)';
   if (seg.type === 'trigger') return (RD_TRIGGERS.find((t) => t[0] === seg.target) || [, seg.target])[1];
@@ -26597,7 +27834,7 @@ function rdRunSegment(seg) {
   // Clear a lingering countdown overlay when moving to a non-countdown segment.
   if (seg.type !== 'countdown' && currentState.breakScreen && currentState.breakScreen.visible) send('set_break', { visible: false });
   if (seg.type === 'scene') { if (seg.target) send('obs_switch_scene', { sceneName: seg.target }); }
-  else if (seg.type === 'trigger') { const g = (typeof GOLIVE_TRIGGERS !== 'undefined' ? GOLIVE_TRIGGERS : []).find((t) => t.state === seg.target); if (g) send(g.msg, g.show()); }
+  else if (seg.type === 'trigger') { const g = (typeof GOLIVE_TRIGGERS !== 'undefined' ? GOLIVE_TRIGGERS : []).find((t) => t.state === trigStateKey(seg.target)); if (g) send(g.msg, g.show()); }
   else if (seg.type === 'countdown') { send('set_break', { visible: true, seconds: Math.max(1, seg.hold || 60), title: (seg.label || 'STARTING SOON') }); }
   else if (seg.type === 'playout') { playMontageById(seg.target); }
   else if (seg.type === 'flow') { const f = rdFlows().find((x) => x.id === seg.target); if (f && typeof flowFire === 'function') flowFire(f); }
@@ -28466,6 +29703,9 @@ function renderCreditSponsors(data) {
   // End-card text mirrors state (don't clobber while the producer is typing).
   const et = el('credits-endtext');
   if (et && document.activeElement !== et) et.value = (data && data.credits && data.credits.endText) || '';
+  const cr = (data && data.credits) || {};
+  const t8 = el('credits-show-top8'); if (t8) t8.checked = cr.showTop8 !== false;
+  const ac = el('credits-show-activity'); if (ac) ac.checked = cr.showActivity !== false;
   const list = el('cs-list'); if (!list) return;
   const sponsors = (data && data.credits && Array.isArray(data.credits.sponsors)) ? data.credits.sponsors : csSponsors();
   const sig = JSON.stringify(sponsors);
@@ -28503,6 +29743,8 @@ el('cs-add')?.addEventListener('click', () => {
   if (el('cs-logo-name')) el('cs-logo-name').textContent = 'No logo';
   if (el('cs-logo-file')) el('cs-logo-file').value = '';
 });
+el('credits-show-top8')?.addEventListener('change', function () { send('set_credits', { showTop8: this.checked }); });
+el('credits-show-activity')?.addEventListener('change', function () { send('set_credits', { showActivity: this.checked }); });
 // End-card text — debounced live edit (blank → overlay shows "Thanks For Watching").
 let _credEndT;
 el('credits-endtext')?.addEventListener('input', function () {
@@ -30114,7 +31356,7 @@ el('rp-ready-fix')?.addEventListener('click', () => {
   send('obs_ensure_browser_source', {
     sceneName: scene,
     sourceName: RP_PLAYER_SOURCE_NAME,
-    url: (window.SCENE_BASE_URL || 'http://127.0.0.1:3000') + '/replay-player.html',
+    url: (window.SCENE_BASE_URL || 'http://localhost:3000') + '/replay-player.html',
   });
   setTimeout(rpCheckPlayerSource, 900);   // let OBS settle, then confirm it landed
 });
@@ -30426,6 +31668,7 @@ document.querySelectorAll('.qr-tab[data-qrtab]').forEach((b) => {
     if (b.dataset.qrtab === 'playlists') renderQrailPlaylists(currentState);
   });
 });
+el('qr-tw-load')?.addEventListener('click', () => qrTwLoad());
 async function qrTwLoad() {
   const list = el('qr-tw-list'); if (!list) return;
   list.innerHTML = '<div class="field-hint" style="margin:0;">Loading Twitch clips…</div>';
@@ -30525,7 +31768,7 @@ function rpClearProgram() {
   const st = el('rp-screen-status'); if (st) { st.textContent = 'Program cleared.'; st.style.color = 'var(--muted)'; }
 }
 el('rp-screen-clear')?.addEventListener('click', rpClearProgram);
-el('rp-screen-open')?.addEventListener('click', () => window.open('http://127.0.0.1:3000/replay-player.html', '_blank', 'noopener'));
+el('rp-screen-open')?.addEventListener('click', () => window.open('http://localhost:3000/replay-player.html', '_blank', 'noopener'));
 function takeToProgram() {
   // Nothing cued? Tell the producer instead of taking black to air. currentState.replay.preview is
   // a replica that only updates once the server's replay_play echo arrives — a Take clicked right
@@ -31984,7 +33227,13 @@ async function connect() {
     } else if (msg.type === 'apex_update') {
       applyApexState({ apex: msg.data, activeGame: 'apex' });    // keep the Apex chip live between full_states
     } else if (msg.type === 'lol_ocr_status') {
-      lolOcrStatus(msg.status, msg.detail, msg.lastBlue, msg.lastRed);
+      lolOcrStatus(msg.status, msg.detail, msg.lastBlue, msg.lastRed, msg);
+    } else if (msg.type === 'lol_ocr_displays') {
+      onLolOcrDisplays(msg);
+    } else if (msg.type === 'lol_ocr_snapshot') {
+      onLolOcrSnapshot(msg);
+    } else if (msg.type === 'lol_ocr_autolocate') {
+      onLolOcrAutolocate(msg);
     } else if (msg.type === 'startgg_import') {
       onStartggImport(msg.data || {});
     } else if (msg.type === 'analytics_update') {
@@ -32165,6 +33414,8 @@ async function connect() {
       }
     } else if (msg.type === 'challonge-result') {
       if (typeof window._handleChallongeResult === 'function') window._handleChallongeResult(msg.data);
+    } else if (msg.type === 'challengermode-result') {
+      if (typeof window._handleChallengermodeResult === 'function') window._handleChallengermodeResult(msg.data);
     } else if (msg.type === 'nxgen-result') {
       if (typeof window._handleNxgenResult === 'function') window._handleNxgenResult(msg.data);
     } else if (msg.type === 'faceit-result') {
@@ -32332,6 +33583,15 @@ async function connect() {
         // Mark as fresh so a state broadcast's lastError doesn't immediately overwrite the reply.
         r.dataset.fresh = '1';
         setTimeout(() => { delete r.dataset.fresh; }, 6000);
+      }
+    } else if (msg.type === 'riot-result') {
+      const r = el('riot-result');
+      if (r) {
+        r.textContent = msg.data.message || '';
+        r.style.color = msg.data.ok ? '#9ae6b4' : '#f56565';
+        // Mark fresh so the next state broadcast's lastError doesn't wipe the reply.
+        r.dataset.fresh = '1';
+        setTimeout(() => { delete r.dataset.fresh; }, 8000);
       }
     } else if (msg.type === 'csgo-result') {
       const resultEl = el('csgo-result');

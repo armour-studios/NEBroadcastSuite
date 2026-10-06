@@ -65,10 +65,10 @@
   .tk-pbar.down { background: #e23b3b; }
   .tk-pbar.off { background: #454c55; }
   .tk-tag { font-size: 15px; font-weight: 800; letter-spacing: .3px; white-space: nowrap; }
-  .tk-pts { font-size: 15px; font-weight: 800; color: var(--accent-2); font-variant-numeric: tabular-nums; margin-left: 2px; }
+  .tk-pts { font-size: 15px; font-weight: 800; color: var(--accent-2-ink, var(--accent-2)); font-variant-numeric: tabular-nums; margin-left: 2px; }
   .tk-remain { display: flex; align-items: center; gap: 7px; padding: 0 16px; background: rgba(0,0,0,.28);
     clip-path: polygon(14px 0, 100% 0, 100% 100%, 0 100%); }
-  .tk-remain b { font-size: 20px; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .tk-remain b { font-size: 20px; font-weight: 800; color: var(--accent-ink, var(--accent)); font-variant-numeric: tabular-nums; }
   .tk-remain small { font-size: 9px; font-weight: 700; color: var(--dim); letter-spacing: 1px; }
 
   /* ══════════════════ RIGHT: squad standings ══════════════════ */
@@ -93,7 +93,7 @@
   .st-row.dead .st-rank { color: var(--dead); }
   .st-name { flex: 1; font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .st-bars { margin: 0 4px; }   /* three-bar squad indicator (shares .tk-pbar styling) */
-  .st-kills { width: 30px; text-align: right; font-size: 14px; font-weight: 800; color: var(--accent-2); font-variant-numeric: tabular-nums; }
+  .st-kills { width: 30px; text-align: right; font-size: 14px; font-weight: 800; color: var(--accent-2-ink, var(--accent-2)); font-variant-numeric: tabular-nums; }
   .st-kills svg { width: 11px; height: 11px; vertical-align: -1px; opacity: .7; }
 
   /* ══════════════════ BOTTOM-LEFT: spectated TEAM lower third (seed · logo · name · kills) ══════════════════ */
@@ -115,7 +115,7 @@
   .sp-name { font-size: 25px; font-weight: 800; letter-spacing: .4px; white-space: nowrap; text-transform: uppercase; }
   .sp-kills { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 20px;
     border-left: 1px solid rgba(255,255,255,.07); background: rgba(0,0,0,.24); }
-  .sp-kills b { font-size: 25px; font-weight: 800; color: var(--accent-2); line-height: 1; font-variant-numeric: tabular-nums; }
+  .sp-kills b { font-size: 25px; font-weight: 800; color: var(--accent-2-ink, var(--accent-2)); line-height: 1; font-variant-numeric: tabular-nums; }
   .sp-kills small { font-size: 8px; font-weight: 700; color: var(--dim); letter-spacing: 1.5px; margin-top: 2px; }
 
   /* ══════════════════ BOTTOM-RIGHT: kill feed ══════════════════ */
@@ -130,7 +130,7 @@
   @keyframes kfIn { from { transform: translateX(30px); opacity: 0; } to { transform: none; opacity: 1; } }
   .kf-a { color: var(--txt); }
   .kf-w { color: var(--dim); font-size: 11px; font-weight: 600; }
-  .kf-arrow { color: var(--accent); font-weight: 800; }
+  .kf-arrow { color: var(--accent-ink, var(--accent)); font-weight: 800; }
   .kf-v { color: var(--dim); text-decoration: line-through; }
   .kf-row.down { border-left-color: var(--accent-2); opacity: .82; }
 
@@ -479,7 +479,10 @@ function stepDemo(){ if (!devState) devState = demoBase(); const s = devState;
 
 // ?live=1 = clean production; ?demo=1 = OBS preview (populated demo, no dev toolbar)
 const _params = new URLSearchParams(location.search);
-const IS_LIVE = _params.get('live') === '1';
+// Inside OBS, or embedded by live.html, the bare URL IS production: never auto-load the demo there
+// (fabricated standings + a fake kill feed went on air while LiveAPI was disconnected).
+const IS_LIVE = _params.get('live') === '1'
+  || (_params.get('demo') !== '1' && (/\bOBS\/\d/.test(navigator.userAgent) || window !== window.top));
 const IS_DEMO = _params.get('demo') === '1';
 if (IS_LIVE || IS_DEMO) document.body.classList.add('live');
 if (IS_DEMO) { devState = demoBase(); _autoDemo = false; render(devState); }

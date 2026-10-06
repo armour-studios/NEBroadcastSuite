@@ -183,6 +183,12 @@
     <div class="scroll-track" id="scroll-track"><!-- roll injected here --></div>
   </div>
 
+  <!-- Side rails: event TOP 8 (left) and this stream's Twitch activity (right). The render code and
+       styles (cr-top8 / cr-activity, .cr-rail) were already here but these two elements were missing,
+       so neither rail could ever show. Each hides itself (.is-empty) when it has nothing to list. -->
+  <aside class="cr-rail cr-rail-left is-empty" id="cr-top8"></aside>
+  <aside class="cr-rail cr-rail-right is-empty" id="cr-activity"></aside>
+
   <div class="empty-state" id="empty-state" style="display:none;">
     <div class="empty-icon">🎬</div>
     <div class="empty-label">No credits yet</div>
@@ -473,8 +479,9 @@ function render() {
 
   // ── Left rail: TOP 8 from the event standings (manual rows win, else bracket) ──
   const _t8 = document.getElementById('cr-top8');
+  const _credOpts = fullState.credits || {};
   if (_t8) {
-    const _rows = ((fullState.standings && fullState.standings.rows && fullState.standings.rows.length)
+    const _rows = _credOpts.showTop8 === false ? [] : ((fullState.standings && fullState.standings.rows && fullState.standings.rows.length)
       ? fullState.standings.rows : (fullState.bracket && fullState.bracket.standings) || [])
       .filter((r) => r && r.name).slice(0, 8);
     const _logoOf = (name) => {
@@ -497,8 +504,9 @@ function render() {
   // ── Right rail: Twitch activity summary — counts per type + latest names ──
   const _act = document.getElementById('cr-activity');
   if (_act) {
-    _act.classList.toggle('is-empty', !activeSecs.length);
-    _act.innerHTML = !activeSecs.length ? '' : '<div class="cr-rail-head">Stream Activity</div>' + activeSecs.map((sec) => {
+    const _actOn = _credOpts.showActivity !== false && activeSecs.length > 0;
+    _act.classList.toggle('is-empty', !_actOn);
+    _act.innerHTML = !_actOn ? '' : '<div class="cr-rail-head">Stream Activity</div>' + activeSecs.map((sec) => {
       const list = groups[sec.key] || [];
       const names = list.slice(-4).map((e) => esc(e.username || e.from || '')).filter(Boolean).join(', ');
       return '<div class="cr-act-row"><span class="cr-act-ico">' + sec.icon + '</span>'

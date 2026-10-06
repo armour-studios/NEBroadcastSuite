@@ -15,7 +15,7 @@
     opacity: 0; transition: opacity .45s ease; padding: 60px 80px; }
   .ts-stage.show { opacity: 1; }
 
-  .ts-eyebrow { font-size: 24px; font-weight: 800; letter-spacing: .34em; text-transform: uppercase; color: var(--accent); margin-bottom: 18px; }
+  .ts-eyebrow { font-size: 24px; font-weight: 800; letter-spacing: .34em; text-transform: uppercase; color: var(--accent-ink, var(--accent)); margin-bottom: 18px; }
 
   .ts-card { width: 100%; max-width: 1480px; background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.015));
     border: 1px solid rgba(255,255,255,.10); border-radius: 30px; padding: 46px 56px; display: flex; flex-direction: column; align-items: center;
@@ -33,7 +33,7 @@
   .ts-stats { display: flex; gap: 16px; margin-top: 22px; flex-wrap: wrap; }
   .ts-stat { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.10); border-radius: 16px; padding: 12px 24px; min-width: 130px; text-align: center; }
   .ts-stat .v { font-size: 40px; font-weight: 900; line-height: 1; color: #fff; }
-  .ts-stat .v.accent { color: var(--accent); }
+  .ts-stat .v.accent { color: var(--accent-ink, var(--accent)); }
   .ts-stat .k { font-size: 16px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: #aeb6c6; margin-top: 6px; }
 
   .ts-divider { width: 100%; height: 1px; background: rgba(255,255,255,.10); margin: 34px 0; }
@@ -49,7 +49,7 @@
   .ts-result .sc { font-weight: 800; color: #cbd5e1; font-variant-numeric: tabular-nums; }
   .ts-next { font-size: 30px; font-weight: 800; overflow-wrap: anywhere; }
   .ts-next .round { font-size: 18px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #aeb6c6; display: block; margin-bottom: 6px; }
-  .ts-next .vs { color: var(--accent); }
+  .ts-next .vs { color: var(--accent-ink, var(--accent)); }
   .ts-next .live { display: inline-block; margin-left: 12px; font-size: 16px; font-weight: 900; letter-spacing: .1em; background: #ef4444; color: #fff; padding: 3px 10px; border-radius: 6px; vertical-align: middle; }
   .ts-muted { font-size: 24px; color: #6b7480; font-style: italic; }
 
@@ -58,7 +58,7 @@
   .ts-player { flex: 1; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.09); border-radius: 16px; padding: 18px 20px; text-align: center; }
   .ts-player.onair { border-color: rgba(239,68,68,.5); box-shadow: inset 0 0 0 1px rgba(239,68,68,.25); }
   .ts-ptag { font-size: 30px; font-weight: 900; letter-spacing: .03em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .ts-pstat { font-size: 23px; font-weight: 700; color: var(--accent-2); margin-top: 8px; }
+  .ts-pstat { font-size: 23px; font-weight: 700; color: var(--accent-2-ink, var(--accent-2)); margin-top: 8px; }
   .ts-pstat.seed { color: #cbd5e1; }
   .ts-pstat .lbl { font-size: 13px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #828b9b; display: block; }
 

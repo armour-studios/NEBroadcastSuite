@@ -1,6 +1,6 @@
 {
   "name": "ne-broadcast-suite",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Professional Esports Broadcast Overlay Suite by Armour Studios",
   "author": "Armour Studios",
   "main": "main.js",
@@ -43,6 +43,11 @@
     "appId": "es.jotasonder.rl-overlay",
     "productName": "NE Broadcast Suite",
     "asar": true,
+    "asarUnpack": [
+      "node_modules/tesseract.js/**",
+      "node_modules/tesseract.js-core/**",
+      "assets/ocr/**"
+    ],
     "copyright": "© 2026 Armour Studios",
     "directories": {
       "output": "dist"

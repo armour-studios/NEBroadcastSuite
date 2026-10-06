@@ -34,12 +34,29 @@
   .owp.right .tb-name { text-align: right; }
   .owp .tb-score { font-size: 40px; font-weight: 900; line-height: 1; letter-spacing: -1px;
     color: #fff; flex-shrink: 0; min-width: 34px; text-align: center; }
+  /* Hero bans — same labelled block as overwatch.html: [BAN tag] [struck portrait(s)] at the outer edge. */
+  .owp .bans { display: none; align-items: center; gap: 8px; align-self: stretch; flex-shrink: 0;
+    padding: 0 12px 0 0; border-right: 1px solid rgba(255,255,255,.12); }
+  .owp .bans.on { display: flex; }
+  .owp.right .bans { flex-direction: row-reverse; padding: 0 0 0 12px; border-right: 0; border-left: 1px solid rgba(255,255,255,.12); }
+  .owp .bans-tag { display: flex; flex-direction: column; align-items: center; gap: 4px; color: #ff4d57;
+    font-size: 14px; font-weight: 900; letter-spacing: .12em; line-height: 1; text-transform: uppercase; }
+  .owp .bans-tag svg { width: 18px; height: 18px; display: block; }
+  .owp .bans-tiles { display: flex; gap: 5px; }
+  .owp.right .bans-tiles { flex-direction: row-reverse; }
+  .owp .ban { width: 46px; height: 50px; border-radius: 4px; overflow: hidden; position: relative; flex-shrink: 0;
+    background: #161c2e; border: 1px solid rgba(255,77,87,.6); }
+  .owp .ban img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 22%; display: block; filter: saturate(.5) brightness(.8); }
+  .owp .ban::after { content: ''; position: absolute; left: -6px; right: -6px; top: 50%; height: 2px; margin-top: -1px;
+    background: #ff4d57; transform: rotate(-42deg); box-shadow: 0 0 5px rgba(255,77,87,.7); }
   .tb-sub { position: absolute; top: 0; left: 50%; transform: translateX(-50%);
     height: 34px; display: flex; align-items: center; padding: 0 32px;
     background: rgba(7,9,15,.94); clip-path: polygon(0 0, 100% 0, calc(100% - 14px) 100%, 14px 100%);
     font-size: 14px; font-weight: 800; letter-spacing: .24em; text-transform: uppercase; color: #fff;
     white-space: nowrap; filter: drop-shadow(0 4px 12px rgba(0,0,0,.5));
-    animation: tbIn .5s .12s cubic-bezier(.16,.84,.24,1) both; }
+    animation: tbSubIn .5s .12s cubic-bezier(.16,.84,.24,1) both; }
+  /* Own keyframes: tbIn ends on transform:none, which wiped this pill's translateX(-50%) and left it off-centre. */
+  @keyframes tbSubIn { from { opacity: 0; transform: translate(-50%, -70px); } to { opacity: 1; transform: translateX(-50%); } }
   .tb-sub:empty { display: none; }
 
   /* ── Bottom player strips ── */
@@ -69,8 +86,8 @@
 </head>
 <body>
 <div id="stage">
-  <div class="owp left"><img class="tb-logo" id="logo-a" style="display:none"><span class="tb-name" id="name-a">BLUE</span><span class="tb-score" id="score-a">0</span><span class="accent"></span></div>
-  <div class="owp right"><img class="tb-logo" id="logo-b" style="display:none"><span class="tb-name" id="name-b">ORANGE</span><span class="tb-score" id="score-b">0</span><span class="accent"></span></div>
+  <div class="owp left"><div class="bans" id="bans-a"></div><img class="tb-logo" id="logo-a" style="display:none"><span class="tb-name" id="name-a">BLUE</span><span class="tb-score" id="score-a">0</span><span class="accent"></span></div>
+  <div class="owp right"><div class="bans" id="bans-b"></div><img class="tb-logo" id="logo-b" style="display:none"><span class="tb-name" id="name-b">ORANGE</span><span class="tb-score" id="score-b">0</span><span class="accent"></span></div>
   <div class="tb-sub" id="tb-sub"></div>
   <div class="ps a" id="ps-a"></div>
   <div class="ps b" id="ps-b"></div>
@@ -80,9 +97,34 @@
 (function () {
   var el = function (id) { return document.getElementById(id); };
   function heroSlug(n) { return String(n || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); }
-  function heroImg(n) { var s = heroSlug(n); return s ? '/assets/overwatch/heroes/' + s + '.png' : ''; }
+  var owData = null;   // latest state — resolves heroes added via Custom content
+  function heroImg(n) {
+    var c = SceneBase.customCharacter(owData, 'overwatch', n);
+    if (c && c.image) return c.image;
+    var s = heroSlug(n); return s ? '/assets/overwatch/heroes/' + s + '.png' : '';
+  }
   function esc(x) { return String(x == null ? '' : x).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
   function short(n) { return Math.round(Number(n) || 0).toLocaleString(); }
+
+  // Same slug rule as overwatch.html (keeps "D.Va" -> dva, "Soldier: 76" -> soldier-76, "Lúcio" -> lucio).
+  function banImg(n) {
+    var s = String(n || '').toLowerCase().replace(/ö/g, 'o').replace(/ú/g, 'u').replace(/[.']/g, '').replace(/:\s*/g, '-').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    return s ? '/assets/overwatch/heroes/' + s + '.png' : '';
+  }
+  // Bans for the CURRENT map: the live draft when it is the Overwatch one, else the per-map tracker.
+  // A team may have one ban or two.
+  function banNames(data, side) {
+    var d = data.draft;
+    if (d && d.game === 'overwatch' && Array.isArray(d.ops)) {
+      return d.ops.filter(function (o) { return o.by === side && o.action === 'ban' && o.name; }).slice(0, 2).map(function (o) { return o.name; });
+    }
+    var idx = Math.max(0, ((data.game && data.game.number) || 1) - 1);
+    var byMap = (data.owMatch && data.owMatch.bansByMap) || [];
+    var v = ((Array.isArray(byMap) ? byMap[idx] : null) || {})[side];
+    if (Array.isArray(v)) return v.map(function (x) { return x && x.hero; }).filter(Boolean).slice(0, 2);
+    return v && v.hero ? [v.hero] : [];
+  }
+  var BAN_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><line x1="5.6" y1="5.6" x2="18.4" y2="18.4"/></svg>';
 
   function orient(gep, teams) {
     // GEP team values -> broadcast sides by roster-name vote (same rule as overwatch.html).
@@ -120,7 +162,7 @@
 
     var sig = JSON.stringify([teams.blue && teams.blue.name, teams.orange && teams.orange.name,
       data.series, fresh && gep.roster.map(function (p) { return [p.player_name, p.hero_name, p.kills, p.deaths, p.assists, p.damage, p.healed, p.is_alive]; }),
-      fresh && gep.map]);
+      fresh && gep.map, banNames(data, 'a'), banNames(data, 'b')]);
     if (sig === _sig) return;
     _sig = sig;
 
@@ -129,6 +171,14 @@
       el('name-' + s).textContent = (t.name || (s === 'a' ? 'BLUE' : 'ORANGE')).toUpperCase();
       var lg = el('logo-' + s);
       if (t.logo || t.customLogo) { SceneBase.applyTeamLogo(lg, t.customLogo, t.logo); lg.style.display = ''; } else lg.style.display = 'none';
+    });
+    ['a', 'b'].forEach(function (s) {
+      var host = el('bans-' + s), names = banNames(data, s);
+      host.classList.toggle('on', names.length > 0);
+      host.innerHTML = names.length
+        ? '<div class="bans-tag">' + BAN_ICON + '<span>' + (names.length > 1 ? 'Bans' : 'Ban') + '</span></div><div class="bans-tiles">'
+          + names.map(function (n) { return '<div class="ban" title="' + esc(n) + '"><img src="' + banImg(n) + '" alt="" onerror="this.remove()"></div>'; }).join('') + '</div>'
+        : '';
     });
     var ser = data.series || {};
     el('score-a').textContent = Number(ser.blue) || 0;
@@ -156,7 +206,7 @@
     stage.classList.add('show');
   }
 
-  SceneBase.connect(function (data) { SceneBase.applySceneConfig('owhud', data); render(data); });
+  SceneBase.connect(function (data) { owData = data; SceneBase.applySceneConfig('owhud', data); render(data); });
 
   if (SceneBase.preview || location.protocol === 'file:') {
     var mk = function (t, n, h, k, d2, a, dm, he, alive) { return { team: t, player_name: n, hero_name: h, kills: k, deaths: d2, assists: a, damage: dm, healed: he, is_alive: alive !== false }; };

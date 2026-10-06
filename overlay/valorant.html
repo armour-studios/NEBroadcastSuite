@@ -358,8 +358,10 @@
   }
   .col-def .pbar1-name { text-align: right; }
   .pcard-hpbar { height: 6px; overflow: visible; flex-shrink: 0; position: relative; }
-  .col-atk .pcard-hpbar { padding-left: 63px; padding-right: 94px; }
-  .col-def .pcard-hpbar { padding-right: 63px; padding-left: 94px; }
+  /* Right inset clears the shield badge (28px + 10px card padding). It was 94px when a 52px
+     HP number sat beside it; Valorant's live feed has no per-player health, so that is gone. */
+  .col-atk .pcard-hpbar { padding-left: 63px; padding-right: 38px; }
+  .col-def .pcard-hpbar { padding-right: 63px; padding-left: 38px; }
   .pcard-hpbar-fill { height: 100%; transition: width 0.35s ease; overflow: hidden; }
   .col-atk .pcard-hpbar-fill { background: var(--atk-color); }
   .col-def .pcard-hpbar-fill { background: var(--def-color); margin-left: auto; }
@@ -381,14 +383,7 @@
   }
   .pbar1-sh-val.no-sh { display: none; }
 
-  .pbar1-hp {
-    font-size: 24px; font-weight: 900; color: #fff; line-height: 1;
-    font-variant-numeric: tabular-nums; width: 52px; flex: 0 0 52px;
-    text-align: right; transition: color 0.3s ease;
-  }
-  .col-def .pbar1-hp { text-align: left; }
-
-  /* ── BAR 2: Ult | C/Q/E abilities | Weapon | Credits ─────────────── */
+  /* ── BAR 2: Ult | Weapon | Credits ─────────────── */
   .pbar2 {
     display: flex; align-items: center; gap: 6px;
     padding: 0 10px; height: 38px;
@@ -800,7 +795,7 @@
      DEVELOPER TOOLBAR
      Hidden inside OBS by default. Add ?dev=1 to the browser source URL to
      show the toolbar and auto-load demo data inside OBS for testing/demo use.
-     e.g.  http://127.0.0.1:3000/valorant.html?dev=1
+     e.g.  http://localhost:3000/valorant.html?dev=1
   ══════════════════════════════════════════════════════════════════════════ */
   #dev-panel {
     display: none; position: fixed; left: 14px; bottom: 14px; z-index: 9999;
@@ -1402,8 +1397,6 @@ function buildCard(p, side, teamLogo) {
 
   const mid = document.createElement('div'); mid.className = 'pbar1-mid';
   const nameEl = document.createElement('div'); nameEl.className = 'pbar1-name'; nameEl.textContent = p.name;
-  const hp = p.alive ? Math.max(0, p.health || 0) : 0;
-  const hpTint = hp > 60 ? '' : hp > 30 ? '#f5a623' : '#e74c3c';
   mid.append(nameEl);
   bar1.appendChild(mid);
 
@@ -1416,9 +1409,9 @@ function buildCard(p, side, teamLogo) {
   shVal.className = 'pbar1-sh-val ' + (armor === 2 ? 'heavy' : armor === 1 ? 'light' : 'no-sh');
   shVal.textContent = armor === 2 ? '50' : armor === 1 ? '25' : '';
   shWrap.append(shIco, shVal);
-  const hpNum = document.createElement('div'); hpNum.className = 'pbar1-hp';
-  hpNum.textContent = hp;
-  right.append(shWrap, hpNum);
+  // No HP number: Valorant's live feed (Overwolf GEP) reports every player's SHIELD but no
+  // player's health — only the local client's own. A ten-man health column would be invented.
+  right.append(shWrap);
   bar1.appendChild(right);
   wrap.appendChild(bar1);
 
@@ -1434,25 +1427,18 @@ function buildCard(p, side, teamLogo) {
   withCdnFallback(ultIc, abilityIconUrl(p.agent, 'x'), `agent_icons/${p.agent}/ability_x.webp`, null);
   ultDisp.appendChild(ultIc);
 
+  // Team-coloured rule under the name. It reads full while the player is up and empties on
+  // death (the card also greys out) — it is an ALIVE state, not a health meter.
   const hpSep = document.createElement('div'); hpSep.className = 'pcard-hpbar';
   const hpFill = document.createElement('div'); hpFill.className = 'pcard-hpbar-fill';
-  hpFill.style.width = hp + '%';
+  hpFill.style.width = (p.alive ? 100 : 0) + '%';
   hpSep.append(hpFill, ultDisp);
   wrap.appendChild(hpSep);
 
-  // ── BAR 2: C/Q/E abilities | Weapon | Credits ─────────────────────────
+  // ── BAR 2: Weapon | Credits ─────────────────────────
+  // The C/Q/E utility pips used to live here. GEP reports ability charges for the local player
+  // only, so for nine of the ten cards they were always drawn unlit — removed rather than faked.
   const bar2 = document.createElement('div'); bar2.className = 'pbar2';
-
-  if (p.alive) {
-    const aRow = document.createElement('div'); aRow.className = 'pbar2-abilities';
-    ['c','q','e'].forEach(slot => {
-      const aImg = document.createElement('img'); aImg.className = 'pbar2-abi';
-      withCdnFallback(aImg, abilityIconUrl(p.agent, slot), `agent_icons/${p.agent}/ability_${slot}.webp`, null);
-      if (!!p[`${slot}_util`]) aImg.classList.add('ready');
-      aRow.appendChild(aImg);
-    });
-    bar2.appendChild(aRow);
-  }
 
   const wWrap = document.createElement('div'); wWrap.className = 'pbar2-weap-wrap';
   const wImg = document.createElement('img'); wImg.className = 'pbar2-weap'; wImg.alt = p.weapon || '';
@@ -1485,14 +1471,8 @@ function updateCard(card, p) {
   card.classList.toggle('spectated', !!p.observed);
   card.querySelector('.spike-carrier')?.classList.toggle('show', !!p.hasSpike);
 
-  const hp = p.alive ? Math.max(0, p.health || 0) : 0;
-  const hpTint = hp > 60 ? '' : hp > 30 ? '#f5a623' : '#e74c3c';
-
   const hpFill = card.querySelector('.pcard-hpbar-fill');
-  if (hpFill) { hpFill.style.width = hp + '%'; hpFill.style.background = ''; }
-
-  const hpNum = card.querySelector('.pbar1-hp');
-  if (hpNum) { hpNum.textContent = hp; hpNum.style.color = ''; }
+  if (hpFill) { hpFill.style.width = (p.alive ? 100 : 0) + '%'; hpFill.style.background = ''; }
 
   const shIco = card.querySelector('.pbar1-sh-img');
   const shVal = card.querySelector('.pbar1-sh-val');
@@ -1503,11 +1483,6 @@ function updateCard(card, p) {
     shVal.classList.add(shArmor === 2 ? 'heavy' : shArmor === 1 ? 'light' : 'no-sh');
     shVal.textContent = shArmor === 2 ? '50' : shArmor === 1 ? '25' : '';
   }
-
-  card.querySelectorAll('.pbar2-abi').forEach((img, i) => {
-    const slot = ['c','q','e'][i];
-    if (slot) img.classList.toggle('ready', !!p[`${slot}_util`]);
-  });
 
   const wImg = card.querySelector('.pbar2-weap');
   if (wImg) {
@@ -1638,9 +1613,11 @@ function renderBuyLt(v, atkPlayers, defPlayers, atkTeam, defTeam) {
   const slots = Array.from({length: displayCount}, (_, i) => {
     const r = startRound + i;
     const h = hist.find(hr => hr.round === r);
+    // A history entry with no winner means the round happened before the relay attached, so who
+    // won it is unknown. Render it neutral rather than defaulting to a DEF win.
     const atkWon = h && ((h.winner === 'ORDER' && atkSide === 'order') || (h.winner === 'CHAOS' && atkSide === 'chaos'));
-    const defWon = h && !atkWon;
-    const cls = !h ? '' : (r > 24 ? 'ot' : (atkWon ? 'won-atk' : 'won-def'));
+    const defWon = h && h.winner && !atkWon;
+    const cls = !h || !h.winner ? '' : (r > 24 ? 'ot' : (atkWon ? 'won-atk' : 'won-def'));
     const winLogo = atkWon ? atkLogo : defWon ? defLogo : '';
     const logoHtml = winLogo ? `<img src="${winLogo}" onerror="this.onerror=null;this.src='${VAL_LOGO_FALLBACK}'" alt="">` : '';
     return `<div class="blt-rslot ${cls}${r === round ? ' cur' : ''}">
@@ -1657,18 +1634,11 @@ function renderBuyLt(v, atkPlayers, defPlayers, atkTeam, defTeam) {
     const ultPct = ultN > 0 ? Math.round((ultG / ultN) * 100) : 0;
     const shCls  = p.armor === 2 ? 'heavy' : p.armor === 1 ? 'light' : 'none';
     const agent  = p.agent || 'sova';
-    const spent  = p.spentCredits ? `-${p.spentCredits.toLocaleString()}` : '';
+    // Credits SPENT and per-ability charges are not in Valorant's live feed (GEP gives current
+    // `money` only, and utility for the local player alone) — the buy card shows what is real.
     return `<div class="blt-cell blt-${side}">
       <div class="bc-money">
-        ${spent ? `<span class="bc-spent">${spent}</span>` : ''}
         <span class="bc-cred"><img src="${creditsIconUrl()}" alt=""> ${(p.credits||0).toLocaleString()}</span>
-      </div>
-      <div class="bc-abi">
-        ${['c','q','e'].map(slot => cdnImg(
-          `bc-abi-ic${p[slot+'_util'] ? ' ready' : ''}`,
-          abilityIconUrl(agent, slot),
-          `agent_icons/${agent}/ability_${slot}.webp`
-        )).join('')}
       </div>
       <div class="bc-gear">
         <img class="bc-sh ${shCls}" src="../assets/weapons/shield.png" alt="">
@@ -1908,16 +1878,16 @@ function makeDemoState(overrides) {
       { round:7, winner:'ORDER' },
     ],
     players: [
-      { name:'TenZ',    agent:'jett',      agentName:'Jett',      team:'ORDER', health:100,maxHealth:150,armor:2, alive:true, kills:8,deaths:2,assists:1,  hasSpike:false, credits:3900, spentCredits:3900, ultPointsNeeded:7,ultPointsGained:3, c_util:true,q_util:false,e_util:true,  weapon:'vandal' },
-      { name:'Johnqt',  agent:'chamber',   agentName:'Chamber',   team:'ORDER', health:85, maxHealth:125,armor:1, alive:true, kills:5,deaths:3,assists:2,  hasSpike:false, credits:2400, spentCredits:1400, ultPointsNeeded:8,ultPointsGained:8, c_util:true,q_util:true, e_util:true,  weapon:'operator' },
-      { name:'Zellsis', agent:'viper',     agentName:'Viper',     team:'ORDER', health:60, maxHealth:100,armor:0, alive:true, kills:3,deaths:4,assists:5,  hasSpike:true,  credits:1200, spentCredits:2900, ultPointsNeeded:8,ultPointsGained:5, c_util:false,q_util:true,e_util:true,  weapon:'phantom' },
-      { name:'Sacy',    agent:'skye',      agentName:'Skye',      team:'ORDER', health:28, maxHealth:125,armor:1, alive:true, kills:2,deaths:2,assists:7,  hasSpike:false, credits:800,  spentCredits:900,  ultPointsNeeded:6,ultPointsGained:2, c_util:true, q_util:false,e_util:false, weapon:'ghost' },
-      { name:'Pancada', agent:'brimstone', agentName:'Brimstone', team:'ORDER', health:0,  maxHealth:100,armor:0, alive:false,kills:1,deaths:5,assists:3,  hasSpike:false, credits:900,  spentCredits:0,    ultPointsNeeded:5,ultPointsGained:0, c_util:false,q_util:false,e_util:false,weapon:'classic' },
-      { name:'Nats',    agent:'omen',      agentName:'Omen',      team:'CHAOS', health:100,maxHealth:150,armor:2, alive:true, kills:6,deaths:1,assists:2,  hasSpike:false, credits:4000, spentCredits:3900, ultPointsNeeded:7,ultPointsGained:7, c_util:true, q_util:true, e_util:true,  weapon:'vandal' },
-      { name:'Aspas',   agent:'raze',      agentName:'Raze',      team:'CHAOS', health:74, maxHealth:125,armor:1, alive:true, kills:7,deaths:4,assists:0,  hasSpike:false, credits:2000, spentCredits:1200, ultPointsNeeded:6,ultPointsGained:4, c_util:true, q_util:false,e_util:true,  weapon:'sheriff' },
-      { name:'saadhak', agent:'astra',     agentName:'Astra',     team:'CHAOS', health:55, maxHealth:100,armor:0, alive:true, kills:2,deaths:3,assists:6,  hasSpike:false, credits:600,  spentCredits:2900, ultPointsNeeded:10,ultPointsGained:6,c_util:false,q_util:true, e_util:false, weapon:'phantom' },
-      { name:'Less',    agent:'fade',      agentName:'Fade',      team:'CHAOS', health:45, maxHealth:125,armor:1, alive:true, kills:3,deaths:3,assists:4,  hasSpike:false, credits:1500, spentCredits:2000, ultPointsNeeded:8,ultPointsGained:3, c_util:true, q_util:true, e_util:false, weapon:'spectre' },
-      { name:'Heat',    agent:'phoenix',   agentName:'Phoenix',   team:'CHAOS', health:0,  maxHealth:100,armor:0, alive:false,kills:2,deaths:5,assists:1,  hasSpike:false, credits:900,  spentCredits:0,    ultPointsNeeded:6,ultPointsGained:0, c_util:false,q_util:false,e_util:false,weapon:'classic' },
+      { name:'TenZ',    agent:'jett',      agentName:'Jett',      team:'ORDER', shield:50,armor:2, alive:true, kills:8,deaths:2,assists:1,  hasSpike:false, credits:3900, ultPointsNeeded:7,ultPointsGained:3, weapon:'vandal' },
+      { name:'Johnqt',  agent:'chamber',   agentName:'Chamber',   team:'ORDER', shield:25,armor:1, alive:true, kills:5,deaths:3,assists:2,  hasSpike:false, credits:2400, ultPointsNeeded:8,ultPointsGained:8, weapon:'operator' },
+      { name:'Zellsis', agent:'viper',     agentName:'Viper',     team:'ORDER', shield:0, armor:0, alive:true, kills:3,deaths:4,assists:5,  hasSpike:true,  credits:1200, ultPointsNeeded:8,ultPointsGained:5, weapon:'phantom' },
+      { name:'Sacy',    agent:'skye',      agentName:'Skye',      team:'ORDER', shield:25,armor:1, alive:true, kills:2,deaths:2,assists:7,  hasSpike:false, credits:800,  ultPointsNeeded:6,ultPointsGained:2, weapon:'ghost' },
+      { name:'Pancada', agent:'brimstone', agentName:'Brimstone', team:'ORDER', shield:0, armor:0, alive:false,kills:1,deaths:5,assists:3,  hasSpike:false, credits:900,  ultPointsNeeded:5,ultPointsGained:0, weapon:'classic' },
+      { name:'Nats',    agent:'omen',      agentName:'Omen',      team:'CHAOS', shield:50,armor:2, alive:true, kills:6,deaths:1,assists:2,  hasSpike:false, credits:4000, ultPointsNeeded:7,ultPointsGained:7, weapon:'vandal' },
+      { name:'Aspas',   agent:'raze',      agentName:'Raze',      team:'CHAOS', shield:25,armor:1, alive:true, kills:7,deaths:4,assists:0,  hasSpike:false, credits:2000, ultPointsNeeded:6,ultPointsGained:4, weapon:'sheriff' },
+      { name:'saadhak', agent:'astra',     agentName:'Astra',     team:'CHAOS', shield:0, armor:0, alive:true, kills:2,deaths:3,assists:6,  hasSpike:false, credits:600,  ultPointsNeeded:10,ultPointsGained:6, weapon:'phantom' },
+      { name:'Less',    agent:'fade',      agentName:'Fade',      team:'CHAOS', shield:25,armor:1, alive:true, kills:3,deaths:3,assists:4,  hasSpike:false, credits:1500, ultPointsNeeded:8,ultPointsGained:3, weapon:'spectre' },
+      { name:'Heat',    agent:'phoenix',   agentName:'Phoenix',   team:'CHAOS', shield:0, armor:0, alive:false,kills:2,deaths:5,assists:1,  hasSpike:false, credits:900,  ultPointsNeeded:6,ultPointsGained:0, weapon:'classic' },
     ]
   }, overrides);
 }
@@ -1988,7 +1958,7 @@ function devAction(action) {
     devState.roundHistory.push({ round: devState.round.number, winner: atkSide === 'order' ? 'ORDER' : 'CHAOS' });
     devState.round.number = (devState.round.number || 1) + 1;
     devState.spikeState = '';
-    devState.players.forEach(p => { p.alive = true; p.health = 100; });
+    devState.players.forEach(p => { p.alive = true; });
     _devSetBuying(_curGameTime + 5);
   } else if (action === 'win-def') {
     const atkSide = atkSideForRound(devState.round.number || 1);
@@ -1998,7 +1968,7 @@ function devAction(action) {
     devState.roundHistory.push({ round: devState.round.number, winner: defSide === 'order' ? 'ORDER' : 'CHAOS' });
     devState.round.number = (devState.round.number || 1) + 1;
     devState.spikeState = '';
-    devState.players.forEach(p => { p.alive = true; p.health = 100; });
+    devState.players.forEach(p => { p.alive = true; });
     _devSetBuying(_curGameTime + 5);
   } else if (action === 'buy-phase') {
     devState.spikeState = '';
@@ -2015,14 +1985,14 @@ function devAction(action) {
     const atkSide = atkSideForRound(devState.round.number || 1);
     const team = atkSide === 'order' ? 'ORDER' : 'CHAOS';
     const p = devState.players.find(pl => pl.team === team && pl.alive);
-    if (p) { p.alive = false; p.health = 0; }
+    if (p) { p.alive = false; }
   } else if (action === 'kill-def') {
     const atkSide = atkSideForRound(devState.round.number || 1);
     const team = atkSide === 'order' ? 'CHAOS' : 'ORDER';
     const p = devState.players.find(pl => pl.team === team && pl.alive);
-    if (p) { p.alive = false; p.health = 0; }
+    if (p) { p.alive = false; }
   } else if (action === 'revive-all') {
-    devState.players.forEach(p => { p.alive = true; p.health = 100; });
+    devState.players.forEach(p => { p.alive = true; });
   } else if (action === 'spec-cycle') {
     const alive = devState.players.filter(p => p.alive);
     const curIdx = alive.findIndex(p => p.observed);

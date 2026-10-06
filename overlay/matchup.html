@@ -276,7 +276,7 @@
     .mu-city.is-empty { display: none; }
 
     .mu-teamname {
-      font-size: 88px; font-weight: 900;
+      font-size: 88px; font-weight: 900; max-width: 100%;
       letter-spacing: .03em; text-transform: uppercase; line-height: .88;
       color: #fff;
     }
@@ -373,8 +373,8 @@
       display: flex; align-items: center; gap: 14px;
       font-size: 52px; font-weight: 900; line-height: 1;
     }
-    .mu-score .sa { color: var(--team-a); }
-    .mu-score .sb { color: var(--team-b); }
+    .mu-score .sa { color: var(--team-a-ink, var(--team-a)); }
+    .mu-score .sb { color: var(--team-b-ink, var(--team-b)); }
     .mu-score .sep { color: rgba(255,255,255,.25); font-size: 34px; }
     .mu-score.is-zero { display: none; }
 
@@ -448,7 +448,28 @@
     const el = (id) => document.getElementById(id);
     const QP = new URLSearchParams(location.search);
 
-    function splitTeamName(name) {
+    // Long team names: shrink from the 88px design size until the name fits its half in at most two
+// lines. Without this a long single word ran off the screen edge and a long multi-word name grew
+// upward into the player list. At the 40px floor a word that still won't fit breaks mid-word
+// rather than leaving the screen.
+const MU_NAME_MAX = 88, MU_NAME_MIN = 40, MU_NAME_LINES = 2;
+function fitTeamName(e) {
+  if (!e) return;
+  e.style.overflowWrap = '';
+  let size = MU_NAME_MAX;
+  e.style.fontSize = size + 'px';
+  // offsetHeight, not scrollHeight: with line-height .88 the glyphs overhang the line box, so
+  // scrollHeight reads a 2-line name as too tall and over-shrinks it.
+  const fits = () => e.scrollWidth <= e.clientWidth + 1 && e.offsetHeight <= size * 0.88 * MU_NAME_LINES + 4;
+  while (size > MU_NAME_MIN && !fits()) { size -= 4; e.style.fontSize = size + 'px'; }
+  if (!fits()) e.style.overflowWrap = 'anywhere';
+}
+function fitTeamNames() { fitTeamName(document.getElementById('name1')); fitTeamName(document.getElementById('name2')); }
+window.__muFit = fitTeamNames;
+// Web fonts change the measured width once they arrive; refit then.
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitTeamNames);
+
+function splitTeamName(name) {
       const parts = (name || '').trim().split(/\s+/);
       if (parts.length < 2) return { city: '', team: (name || '').toUpperCase() };
       return {
@@ -647,6 +668,7 @@
       el('city2').textContent = bn.city;
       el('city2').classList.toggle('is-empty', !bn.city);
       el('name2').textContent = bn.team;
+      fitTeamNames();
       renderPips(el('pips2'), orange.series, winsNeeded);
       renderPlayers(el('players2'), orange.players, data.playerProfiles, showRealName);
 

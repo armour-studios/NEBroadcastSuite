@@ -73,7 +73,7 @@ html, body {
 .st-headtext { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .st-eyebrow {
   display: inline-flex; align-items: center; gap: 12px;
-  font-size: 15px; font-weight: 800; letter-spacing: 7px; text-transform: uppercase; color: var(--accent-2);
+  font-size: 15px; font-weight: 800; letter-spacing: 7px; text-transform: uppercase; color: var(--accent-2-ink, var(--accent-2));
 }
 .st-eyebrow::before { content: ''; width: 26px; height: 2px; background: currentColor; border-radius: 2px; }
 .st-title {
@@ -311,7 +311,7 @@ html, body {
   background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.09);
 }
 .st-pl-chip img { width: 24px; height: 24px; object-fit: contain; }
-.st-pl-chip b { font-family: var(--disp); font-size: 15px; font-weight: 800; color: var(--accent-2); font-variant-numeric: tabular-nums; }
+.st-pl-chip b { font-family: var(--disp); font-size: 15px; font-weight: 800; color: var(--accent-2-ink, var(--accent-2)); font-variant-numeric: tabular-nums; }
 .st-pl-chip span { font-size: 15px; font-weight: 600; color: #dfe4ee; }
 
 /* ── Empty ── */
@@ -397,9 +397,15 @@ html, body {
   function el(id) { return document.getElementById(id); }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
-  function svgFallback(letter, color) {
+  // First CHARACTER of a name, as a whole code point. `name[0]` returns HALF of an emoji (a lone surrogate) for
+  // a name like "🔥⚡🔥 | 1", and encodeURIComponent() throws URIError "URI malformed" on that — which aborted the
+  // whole render (a live start.gg event with one emoji-leading entrant kept the top 8 from ever drawing).
+  function firstGlyph(name) { const c = Array.from(String(name == null ? '' : name).trim())[0]; return c ? c.toUpperCase() : '?'; }
+  function xmlText(s) { return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+  // `name` is the entrant's whole name; the glyph is picked here so callers can't hand over half an emoji.
+  function svgFallback(name, color) {
     return 'data:image/svg+xml;utf8,' + encodeURIComponent(
-      `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160"><rect width="160" height="160" rx="24" fill="${color}"/><text x="80" y="110" font-size="88" fill="#fff" text-anchor="middle" font-family="Arial,sans-serif" font-weight="bold">${letter}</text></svg>`);
+      `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160"><rect width="160" height="160" rx="24" fill="${color}"/><text x="80" y="110" font-size="88" fill="#fff" text-anchor="middle" font-family="Arial,sans-serif" font-weight="bold">${xmlText(firstGlyph(name))}</text></svg>`);
   }
 
   // Logo/colour lookups from EVERY source we have, cheapest-first at resolve time:
@@ -422,7 +428,7 @@ html, body {
 
   function resolveTeam(entry, maps, accent) {
     const nameKey = (entry.name || '').toLowerCase();
-    const logo = entry.logo || maps.logos[nameKey] || svgFallback((entry.name || '?')[0].toUpperCase(), '#2a3050');
+    const logo = entry.logo || maps.logos[nameKey] || svgFallback(entry.name, '#2a3050');
     return {
       logo,
       isDefaultLogo: SceneBase.isDefaultGameLogo(logo),
@@ -479,7 +485,7 @@ html, body {
   }
   function buildDataRow(entry, maps, idx, showRecord, hasGames, hasPoints, accent) {
     const noResult = entry.played === false && !(entry.wins || entry.losses);
-    const rank = noResult ? '–' : (Number(entry.placement) || (idx + 1));
+    const rank = noResult ? '–' : rankLabel(entry, idx + 1);
     const t = resolveTeam(entry, maps, accent);
     const row = document.createElement('div');
     row.className = 'st-row';
@@ -573,10 +579,28 @@ html, body {
     const f = SmashFighters.resolve(entry.character);
     return f ? { url: SmashFighters.renderUrl(f.slug), name: f.name, icon: SmashFighters.stockUrl(f.slug) } : null;
   }
+  /*
+    What to PRINT as a row's rank.
+
+    Most sources hand us a single number. Challengermode models a bracket finish as a RANGE — a
+    joint 5th-8th really is "5-8", because those four entrants played for exactly the same thing —
+    and sends `placementText` alongside the sortable number. Printing the number alone would
+    invent a 5th, a 6th and a 7th place that nobody played for, so the text wins when it is there.
+
+    The sortable NUMBER still drives ordering, the hero/second/third sizing and the medal tints —
+    only the printed label changes.
+  */
+  function rankLabel(entry, fallback) {
+    const txt = entry && entry.placementText ? String(entry.placementText).trim() : '';
+    if (txt) return txt;
+    return String(Number(entry && entry.placement) || fallback);
+  }
+
   function buildPlacementCard(entry, idx, maps, accent, showRecord, delay) {
     const t = resolveTeam(entry, maps, accent);
     const art = characterArt(entry);
     const rank = Number(entry.placement) || (idx + 1);
+    const rankText = rankLabel(entry, idx + 1);
     const card = document.createElement('div');
     card.className = 'st-pl-card';
     card.dataset.rank = String(rank);
@@ -597,7 +621,7 @@ html, body {
       <div class="st-pl-art${art ? '' : ' is-logo'}">
         <img src="${art ? art.url : t.logo}"${!art && t.isDefaultLogo ? ' class="logo-on-dark"' : ''} alt="">
       </div>
-      <div class="st-pl-rank">${rank}</div>
+      <div class="st-pl-rank">${rankText}</div>
       <div class="st-pl-foot">
         <div class="st-pl-name">${flagFor(entry)}${esc(entrantTag(entry.name) || 'TBD')}</div>
         ${showRoster ? `<div class="st-pl-roster">${esc(roster.join(' · '))}</div>` : ''}
@@ -639,7 +663,7 @@ html, body {
       const art = characterArt(entry);
       const chip = document.createElement('div');
       chip.className = 'st-pl-chip';
-      chip.innerHTML = `${art ? `<img src="${art.icon}" alt="">` : ''}<b>${Number(entry.placement) || (9 + i)}</b>${flagFor(entry)}<span>${esc(entrantTag(entry.name) || 'TBD')}</span>`;
+      chip.innerHTML = `${art ? `<img src="${art.icon}" alt="">` : ''}<b>${rankLabel(entry, 9 + i)}</b>${flagFor(entry)}<span>${esc(entrantTag(entry.name) || 'TBD')}</span>`;
       restEl.appendChild(chip);
     });
     restEl.style.display = rest.length ? '' : 'none';
@@ -675,7 +699,7 @@ html, body {
         const qual = !!entry.qualified;
         if (qual) anyQual = true;
         row.className = 'st-dv-row' + (qual ? ' qual' : '') + (entry.eliminated ? ' out' : '');
-        const rank = Number(entry.placement) || (i + 1);
+        const rank = rankLabel(entry, i + 1);
         const rec = showRecord
           ? ((entry.wins != null ? entry.wins : 0) + '-' + (entry.losses != null ? entry.losses : 0))
           : (entry.points != null ? String(entry.points) : '');
@@ -783,7 +807,7 @@ html, body {
     // the board down + replayed every slide-in. Project to displayed fields so it only rebuilds when
     // something visible actually changes. (`lm` still catches logos that backfill from a later fetch.)
     const rowSig = rows.map((r) => [r.division, r.qualified,
-      r.name, r.placement, r.wins, r.losses, r.points, r.gameWins, r.gameLosses, r.color, r.played, r.character, r.countryCode,
+      r.name, r.placement, r.placementText, r.wins, r.losses, r.points, r.gameWins, r.gameLosses, r.color, r.played, r.character, r.countryCode,
       (Array.isArray(r.players) ? r.players.join('~') : ''), (r.logo ? 1 : 0)
     ].join('')).join('');
     // The placement wall is the SMASH board — it only ever draws for a game with the 'stocks'
@@ -799,7 +823,12 @@ html, body {
     // built across two conferences ranks teams against opponents they never played, which
     // states a standing that does not exist. An explicit 'podium' still forces the old board.
     const divCount = new Set(rows.map((r) => r && r.division).filter(Boolean)).size;
-    const layout = (smashGame && stState.layout !== 'podium') ? 'placement'
+    // An EXPLICIT 'placement' is honoured for any game. The wall's cards fall back to the
+    // entrant's own logo when there is no character art, so a top-8 finish board is a perfectly
+    // good graphic for a Rocket League or Valorant event — it was only ever gated because 'auto'
+    // shouldn't surprise a team game with it. 'auto' still means: fighting games get the wall.
+    const layout = (stState.layout === 'placement') ? 'placement'
+                 : (smashGame && stState.layout !== 'podium') ? 'placement'
                  : (divCount > 1 && stState.layout !== 'podium') ? 'divisions' : 'podium';
     const sig = JSON.stringify({ rowSig, title, subtitle, credit: stState.attribution || '', showRecord, hasPoints, hasGames, accent, accent2, layout,
       bl: brandLogo.slice(0, 40), f: data.fontFamily || '', sp: sponsors.map((s) => s.logo && s.logo.slice(0, 40)),

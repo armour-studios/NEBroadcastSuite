@@ -164,7 +164,7 @@ span.tertiary {
 /* Social handle icon prefixes (FontAwesome brands) */
 .socials, .twitter, .twitch, .youtube, .bluesky, .facebook, .instagram, .x-twitter, .tiktok, .discord, .tumblr, .meta {
   font-family: 'Rajdhani'; font-weight: normal; text-transform: none; font-size: 2em; position: relative;
-  color: var(--accent);
+  color: var(--accent-ink, var(--accent));
 }
 .socials:before, .twitter:before, .twitch:before, .youtube:before, .bluesky:before, .facebook:before,
 .instagram:before, .x-twitter:before, .tiktok:before, .discord:before, .tumblr:before, .meta:before {

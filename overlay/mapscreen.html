@@ -5,8 +5,19 @@
   Driven by full_state.veto:
     { visible, title, maps: [{ name, mode, image, action:'ban'|'pick'|'decider', by:'a'|'b', winner:'a'|'b', score:{a,b} }] }
   Team a = full_state.teams.blue, team b = full_state.teams.orange (name + colour).
-  Cards build dynamically (1–7 maps). Bans dim + strike; picks carry a team-tinted chip;
-  completed maps show the score and tint to the winner.
+  Cards build dynamically (1–7 maps). Bans dim + strike; picks/wins carry a small hex team badge;
+  completed maps show the badge + score.
+
+  Header is ONE slim scorecard bar (hex team badge + tag either side of the running series record),
+  Overwatch-World-Cup style, instead of a two-band plate — it was the single biggest source of
+  "bulky" on this board.
+
+  Per-map hero bans (only real for Overwatch, where hero bans are actually tracked per map) ride
+  along on state.owMatch.bansByMap, indexed by PLAY order — not the veto array index, since the
+  veto array also holds eliminated map-veto bans that were never played. Every 'pick'/'decider'
+  entry counts as one played map in order; that running count is the index into bansByMap. Any
+  other game (or an empty bansByMap entry) just renders no ban row — same silent-fallback pattern
+  the rest of this board already uses for missing map art/logos.
 -->
 <head>
   <meta charset="UTF-8">
@@ -20,137 +31,136 @@
     body { position: relative; }
     #veto-stage {
       position: absolute; inset: 0;
-      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 56px;
-      padding-top: 200px;   /* clears the scorecard header plate */
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 46px;
+      padding-top: 130px;   /* clears the scorecard header bar */
       opacity: 0; transition: opacity 0.35s ease;
     }
     #veto-stage.show { opacity: 1; }
 
-    /* ── Header plate ──────────────────────────────────────────────────────────
-       Two stacked bands inside one plate: an event/title strip on top (brand logo +
-       veto title) and the matchup scorecard below it. Team colours are pushed in as
-       --team-a / --team-b by render() and drive the end washes, the name underlines
-       and the base bar, so the header reads as "this match" at a glance rather than
-       as a generic dark box. Fixed logo TILES (not free-floating <img>) keep a tall
-       photo-ish logo and a wide banner logo the same visual weight. */
+    /* ── Hexagon team badge ────────────────────────────────────────────────────
+       Shared by the header bar and every map card. Outer element is clipped to a hex and filled
+       with the team colour — that visible sliver around the (separately clipped, inset) inner
+       element is the "ring". filter:drop-shadow (not box-shadow, which ignores clip-path) is what
+       gives the whole badge a shadow that follows the hex outline instead of a phantom rectangle. */
+    .hexbadge {
+      --hex: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+      position: relative; flex: 0 0 auto; box-sizing: border-box; padding: 3px;
+      clip-path: var(--hex);
+      background: linear-gradient(160deg, color-mix(in srgb, var(--tc, var(--accent)) 88%, #fff 12%),
+        color-mix(in srgb, var(--tc, var(--accent)) 55%, #000 30%));
+      filter: drop-shadow(0 5px 14px rgba(0,0,0,.5));
+    }
+    .hexbadge-in { width: 100%; height: 100%; clip-path: var(--hex); background: #0c0e13;
+      display: grid; place-items: center; overflow: hidden; }
+    .hexbadge-in img { width: 72%; height: 72%; object-fit: contain; }
+    .hexbadge-in .init { font-family: 'Rajdhani', var(--main-font); font-weight: 700; color: #fff; letter-spacing: 0.02em; }
+    .hexbadge.lg { width: 62px; height: 62px; }
+    .hexbadge.lg .init { font-size: 1.3em; }
+    .hexbadge.md { width: 54px; height: 54px; }
+    .hexbadge.md .init { font-size: 1.05em; }
+
+    /* ── Header bar — one slim scorecard: hex badge + tag flank the running series record,
+       the veto title sits centred underneath it as a small caption. Team colours are pushed in
+       as --team-a / --team-b by render() and drive the badge rings + name underline + base bar,
+       so the bar reads as "this match" without needing a second band underneath it. */
     .veto-head {
       position: absolute; top: 26px; left: 50%; transform: translateX(-50%); z-index: 2;
-      width: min(1180px, 90vw);
-      display: flex; flex-direction: column; align-items: stretch;
-      border-radius: 16px; overflow: hidden;
+      width: min(1100px, 90vw);
+      display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 22px;
+      padding: 14px 30px; border-radius: 14px; overflow: hidden;
       background: linear-gradient(180deg, rgba(21,24,32,.95), rgba(9,11,15,.975));
       border: 1px solid rgba(255,255,255,.09);
-      box-shadow: 0 18px 50px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.07);
+      box-shadow: 0 16px 44px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.07);
       animation: veto-drop 0.6s backwards cubic-bezier(0,0,0,1);
       --team-a: var(--accent); --team-b: var(--accent);
     }
-    /* Team-colour wash bleeding in from each end of the plate. */
     .veto-head::before {
       content: ''; position: absolute; inset: 0; pointer-events: none;
       background:
-        linear-gradient(90deg,  color-mix(in srgb, var(--team-a) 26%, transparent), transparent 30%),
-        linear-gradient(270deg, color-mix(in srgb, var(--team-b) 26%, transparent), transparent 30%);
+        linear-gradient(90deg,  color-mix(in srgb, var(--team-a) 22%, transparent), transparent 34%),
+        linear-gradient(270deg, color-mix(in srgb, var(--team-b) 22%, transparent), transparent 34%);
     }
-    /* Base bar: solid team colour at each end, fading out toward the centre. */
     .veto-head::after {
-      content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 4px;
+      content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
       background: linear-gradient(90deg,
         var(--team-a), color-mix(in srgb, var(--team-a) 25%, transparent) 34%,
         rgba(255,255,255,.10) 50%,
         color-mix(in srgb, var(--team-b) 25%, transparent) 66%, var(--team-b));
     }
+    @keyframes veto-drop { 0% { opacity: 0; transform: translate(-50%, -34px); } 100% { opacity: 1; transform: translate(-50%, 0); } }
 
-    /* Event strip */
-    .veto-head-top {
-      position: relative; z-index: 1;
-      display: flex; align-items: center; justify-content: center; gap: 14px;
-      padding: 11px 28px 10px;
-      background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.012));
-      border-bottom: 1px solid rgba(255,255,255,.08);
-    }
-    .veto-brand { height: 30px; max-width: 96px; object-fit: contain; flex: 0 0 auto;
-      filter: drop-shadow(0 3px 10px rgba(0,0,0,.6)); }
-    .veto-title { font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: 1.15em; color: #e9edf4;
-      letter-spacing: 0.30em; text-transform: uppercase; text-shadow: 0 2px 10px rgba(0,0,0,.6);
-      white-space: nowrap; max-width: 950px; overflow: hidden; text-overflow: ellipsis; }
+    .vh-team { position: relative; z-index: 1; display: flex; align-items: center; gap: 16px; min-width: 0; }
+    .vh-team.vh-b { justify-content: flex-end; }
+    .vh-team.vh-a { --tc: var(--team-a); }
+    .vh-team.vh-b { --tc: var(--team-b); }
+    .vh-tag { position: relative; font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: 1.7em; color: #fff;
+      letter-spacing: 0.08em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-bottom: 6px;
+      text-shadow: 0 2px 10px rgba(0,0,0,.6); }
+    .vh-tag::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; border-radius: 2px;
+      background: var(--tc, var(--accent)); box-shadow: 0 0 10px color-mix(in srgb, var(--tc, var(--accent)) 55%, transparent); }
+    .vh-tag:empty::after { display: none; }
 
-    /* Scorecard — each team's logo + name flanks the running series record (maps won so far).
-       A 3-column grid with EQUAL team columns (1fr) keeps the score dead-centre and the two teams
-       symmetric no matter how long/short each name is (a flex min-width let a long name push the
-       score off-centre). */
-    .veto-score { position: relative; z-index: 1;
-      display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 30px; padding: 16px 34px 18px; }
-    /* space-between (not flex-end/-start) pushes each name to the outer edge of the plate and
-       keeps the two logo tiles flanking the score, instead of leaving dead plate at both ends. */
-    .vs-team { display: flex; align-items: center; gap: 18px; min-width: 0; justify-content: space-between; }
-    .vs-team.vs-a { --tc: var(--team-a); }
-    .vs-team.vs-b { --tc: var(--team-b); }
-    /* Fixed-size tile: any logo aspect ratio lands in the same box, so the two sides stay level. */
-    .vs-logo-tile { flex: 0 0 auto; width: 74px; height: 74px; display: grid; place-items: center;
-      border-radius: 12px; background: rgba(255,255,255,.05);
-      border: 1px solid color-mix(in srgb, var(--tc, #fff) 30%, rgba(255,255,255,.10));
-      box-shadow: inset 0 1px 0 rgba(255,255,255,.07), 0 4px 14px rgba(0,0,0,.4); }
-    .vs-logo-tile.is-empty { display: none; }
-    .vs-logo { max-width: 60px; max-height: 60px; object-fit: contain; filter: drop-shadow(0 3px 8px rgba(0,0,0,.5)); }
-    .vs-logo.on-dark { filter: brightness(0) invert(1) drop-shadow(0 3px 8px rgba(0,0,0,.5)); }
-    .vs-name { position: relative; font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: 1.95em; color: #fff;
-      letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      padding-bottom: 7px; text-shadow: 0 2px 12px rgba(0,0,0,.6); }
-    .vs-name::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; border-radius: 2px;
-      background: var(--tc, var(--accent)); box-shadow: 0 0 12px color-mix(in srgb, var(--tc, var(--accent)) 55%, transparent); }
-    .vs-name:empty::after { display: none; }
-    .vs-record { display: flex; align-items: center; gap: 14px; padding: 8px 24px; border-radius: 14px;
-      background: linear-gradient(180deg, rgba(0,0,0,.45), rgba(0,0,0,.72));
-      border: 1px solid rgba(255,255,255,.10);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 6px 18px rgba(0,0,0,.45); }
-    .vs-record .vs-w { font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: 2.9em; line-height: 1; color: #fff;
-      min-width: 42px; text-align: center; font-variant-numeric: tabular-nums;
-      text-shadow: 0 0 22px color-mix(in srgb, currentColor 45%, transparent); }
-    .vs-record .vs-dash { font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: 1.5em; color: rgba(255,255,255,.32); }
-    @keyframes veto-drop { 0% { opacity: 0; transform: translate(-50%, -40px); } 100% { opacity: 1; transform: translate(-50%, 0); } }
+    .vh-mid { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .vh-score { display: flex; align-items: center; gap: 14px; }
+    .vh-w { font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: 2.6em; line-height: 1; color: #fff;
+      min-width: 40px; text-align: center; font-variant-numeric: tabular-nums;
+      text-shadow: 0 0 20px color-mix(in srgb, currentColor 45%, transparent); }
+    .vh-dash { font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: 1.3em; color: rgba(255,255,255,.32); }
+    .vh-title { font-family: 'Rajdhani', var(--main-font); font-weight: 600; font-size: 0.82em; color: #9aa2b1;
+      letter-spacing: 0.28em; text-transform: uppercase; white-space: nowrap; max-width: 460px;
+      overflow: hidden; text-overflow: ellipsis; }
+    .vh-brand { height: 22px; max-width: 70px; object-fit: contain; margin-bottom: 2px; filter: drop-shadow(0 2px 8px rgba(0,0,0,.6)); }
 
     .veto-row { display: flex; gap: 26px; justify-content: center; align-items: stretch; padding: 0 60px; max-width: 1920px; }
 
     .map-card {
       position: relative; width: 300px; height: 620px; border-radius: 6px; overflow: hidden;
-      background: var(--scene-bg); border-bottom: 7px solid var(--accent);
+      background: var(--scene-bg); border-bottom: 5px solid var(--accent);
       box-shadow: 0 10px 40px rgba(0,0,0,.5);
       animation: card-rise 0.6s backwards cubic-bezier(0,0,0,1);
     }
     @keyframes card-rise { 0% { opacity: 0; transform: translateY(60px); } 100% { opacity: 1; transform: translateY(0); } }
     .map-card .img { position: absolute; inset: 0; background-size: cover; background-position: center; }
-    .map-card .shade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.55) 0%, rgba(0,0,0,.05) 30%, rgba(0,0,0,.15) 60%, rgba(0,0,0,.85) 100%); }
-    .map-card .mode { position: absolute; top: 18px; left: 0; right: 0; text-align: center; font-family: 'Rajdhani', var(--main-font); font-weight: 600; font-size: 1.3em; color: #dfe4ea; letter-spacing: 0.18em; }
-    .map-card .mode.mode-icon { display: flex; align-items: center; justify-content: center; gap: 8px; }
-    .map-card .mode.mode-icon img { height: 26px; width: 26px; object-fit: contain; filter: drop-shadow(0 2px 6px rgba(0,0,0,.6)); }
-    .map-card .mode.mode-icon span { font-size: .82em; }
-    .map-card .name { position: absolute; bottom: 96px; left: 0; right: 0; text-align: center; font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: 2.3em; color: #fff; text-transform: uppercase; }
-    .map-card .chip {
-      /* Full-width ribbon across the bottom of the map card (was a floating centered pill). */
-      position: absolute; bottom: 0; left: 0; right: 0;
-      padding: 10px 12px; text-align: center;
-      font-family: 'Rajdhani', var(--main-font); font-weight: 700;
-      font-size: 1.25em; letter-spacing: 0.12em; color: var(--chip-fg, #fff); text-transform: uppercase;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      box-shadow: 0 -4px 18px rgba(0,0,0,.45);
-    }
-    /* Completed map: image desaturates, and the result (winning team's logo + score) sits as
-       one block centered — both horizontally AND vertically — over the card, independent of
-       where the map name/mode labels are. */
-    .map-card.completed .img { filter: grayscale(100%) brightness(.55); }
-    .map-card .result {
-      position: absolute; top: 50%; left: 0; right: 0; transform: translateY(-50%);
-      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
-    }
-    .map-card .result-logo { width: 88px; height: 88px; object-fit: contain; filter: drop-shadow(0 8px 20px rgba(0,0,0,.65)); }
-    .map-card .result-logo.on-dark { filter: brightness(0) invert(1) drop-shadow(0 8px 20px rgba(0,0,0,.65)); }
-    .map-card .result-score { display: flex; align-items: center; gap: 12px; font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: 2.8em; color: #fff; -webkit-text-stroke: 2px rgba(0,0,0,.6); paint-order: stroke fill; }
-    .map-card .result-score .sep { font-weight: 700; font-size: .6em; color: rgba(255,255,255,.5); -webkit-text-stroke: 0; }
+    .map-card .shade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.6) 0%, rgba(0,0,0,.08) 26%, rgba(0,0,0,.12) 55%, rgba(0,0,0,.82) 100%); }
+    .map-card .mode { position: absolute; top: 14px; left: 0; right: 0; text-align: center; font-family: 'Rajdhani', var(--main-font); font-weight: 600; font-size: 1.05em; color: #c6cbd4; letter-spacing: 0.16em; }
+    .map-card .mode.mode-icon { display: flex; align-items: center; justify-content: center; gap: 7px; }
+    .map-card .mode.mode-icon img { height: 20px; width: 20px; object-fit: contain; filter: drop-shadow(0 2px 6px rgba(0,0,0,.6)); }
+    .map-card .mode.mode-icon span { font-size: .8em; }
+    /* Map name now sits right under the mode row (was floating mid-card) — that frees the card's
+       vertical centre for the hex badge, same spot the reference board reserves for its flag. */
+    .map-card .name { position: absolute; top: 42px; left: 0; right: 0; text-align: center; font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: 1.5em; color: #fff; text-transform: uppercase; text-shadow: 0 2px 8px rgba(0,0,0,.6); }
 
-    .map-card.ban .img  { filter: grayscale(100%) brightness(0.45); }
-    .map-card.ban { border-bottom-color: #555; }
-    .map-card.ban .name { color: #9aa0a8; text-decoration: line-through; text-decoration-thickness: 4px; }
-    .map-card.decider .chip { background: var(--accent); color: var(--on-accent, #fff); }
+    /* Winner / picking-team hex badge, roughly where the reference board's flag sits. */
+    .card-hex { position: absolute; top: 56%; left: 50%; transform: translate(-50%, -50%); z-index: 1;
+      display: flex; flex-direction: column; align-items: center; gap: 10px; }
+    .card-score { font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: 1.15em; color: #fff;
+      -webkit-text-stroke: 1.5px rgba(0,0,0,.55); paint-order: stroke fill; letter-spacing: 0.02em; }
+    .card-decider { position: absolute; top: 56%; left: 50%; transform: translate(-50%, -50%); z-index: 1;
+      padding: 7px 18px; border-radius: 8px; background: var(--accent); color: var(--on-accent, #fff);
+      font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: 1.05em; letter-spacing: 0.16em; }
+
+    /* Completed map: image desaturates (result now reads from the hex badge + score, not a
+       separate overlay block). */
+    .map-card.completed .img { filter: grayscale(100%) brightness(.55); }
+
+    .map-card.ban .img  { filter: grayscale(100%) brightness(0.4); }
+    .map-card.ban { border-bottom-color: #444; }
+    .map-card.ban .name { color: #888e97; text-decoration: line-through; text-decoration-thickness: 3px; }
+
+    /* Per-map hero-ban strip — small circular portraits grouped by side, team-colour ring.
+       Only ever populated for a game that actually tracks per-map hero bans (Overwatch today);
+       every other game/empty map just never gets this element. */
+    .ban-row { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1;
+      display: flex; justify-content: space-between; align-items: flex-end; gap: 10px;
+      padding: 12px 16px 14px; background: linear-gradient(0deg, rgba(0,0,0,.88), rgba(0,0,0,0) 100%); }
+    .ban-group { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+    .ban-group.side-b { align-items: flex-end; }
+    .ban-lbl { font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: .68em; letter-spacing: 0.18em;
+      color: rgba(255,255,255,.6); text-transform: uppercase; }
+    .ban-chips { display: flex; gap: 6px; }
+    .ban-chip { width: 34px; height: 34px; border-radius: 50%; overflow: hidden; background: #111;
+      border: 2px solid var(--tc, rgba(255,255,255,.4)); box-shadow: 0 3px 8px rgba(0,0,0,.55); }
+    .ban-chip img { width: 100%; height: 100%; object-fit: cover; }
 
     /* Sponsor rail — pinned bottom, active brand kit (desk placement first). */
     .veto-sponsors { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); z-index: 2;
@@ -166,24 +176,22 @@
 <body>
   <div id="veto-stage">
     <div class="veto-head">
-      <div class="veto-head-top">
-        <img class="veto-brand" id="veto-brand" alt="" style="display:none;">
-        <div class="veto-title" id="veto-title">MAP POOL</div>
+      <div class="vh-team vh-a">
+        <span class="hexbadge lg" id="vh-hex-a"><span class="hexbadge-in"></span></span>
+        <span class="vh-tag" id="vh-tag-a"></span>
       </div>
-      <div class="veto-score" id="veto-score">
-        <div class="vs-team vs-a">
-          <span class="vs-name" id="vs-name-a"></span>
-          <span class="vs-logo-tile is-empty" id="vs-tile-a"><img class="vs-logo" id="vs-logo-a" alt=""></span>
+      <div class="vh-mid">
+        <img class="vh-brand" id="veto-brand" alt="" style="display:none;">
+        <div class="vh-score">
+          <span class="vh-w" id="vh-w-a">0</span>
+          <span class="vh-dash">–</span>
+          <span class="vh-w" id="vh-w-b">0</span>
         </div>
-        <div class="vs-record">
-          <span class="vs-w" id="vs-w-a">0</span>
-          <span class="vs-dash">–</span>
-          <span class="vs-w" id="vs-w-b">0</span>
-        </div>
-        <div class="vs-team vs-b">
-          <span class="vs-logo-tile is-empty" id="vs-tile-b"><img class="vs-logo" id="vs-logo-b" alt=""></span>
-          <span class="vs-name" id="vs-name-b"></span>
-        </div>
+        <div class="vh-title" id="veto-title"></div>
+      </div>
+      <div class="vh-team vh-b">
+        <span class="vh-tag" id="vh-tag-b"></span>
+        <span class="hexbadge lg" id="vh-hex-b"><span class="hexbadge-in"></span></span>
       </div>
     </div>
     <div class="veto-row" id="veto-row"></div>
@@ -229,21 +237,92 @@
       return mode;
     }
 
+    // Short tag for the header/card hex badges — team's own Abbreviation (Match > Teams) first,
+    // else derived initials, same rule rl-worlds.html's shortTag() uses.
+    function shortTag(t) {
+      if (t.abbr) return t.abbr.toUpperCase();
+      const n = (t.name || '').toUpperCase().trim();
+      if (!n) return '';
+      if (n.length <= 5) return n;
+      const w = n.split(/\s+/).filter(Boolean);
+      return w.length > 1 ? w.map((x) => x[0]).join('').slice(0, 4) : n.slice(0, 4);
+    }
+    // Hex badges are small — cap the no-logo fallback text tighter than the header tag.
+    function hexInitials(t) { return shortTag(t).slice(0, 3) || '?'; }
+
+    function fillHex(el, t) {
+      if (!el) return;
+      const inner = el.querySelector('.hexbadge-in');
+      el.style.setProperty('--tc', t.color || 'var(--accent)');
+      inner.innerHTML = '';
+      if (t.logo) {
+        const img = document.createElement('img'); img.src = t.logo; img.alt = '';
+        if (SceneBase.isDefaultGameLogo(t.logo)) img.style.filter = 'brightness(0) invert(1)';
+        inner.appendChild(img);
+      } else {
+        const span = document.createElement('span'); span.className = 'init'; span.textContent = hexInitials(t);
+        inner.appendChild(span);
+      }
+    }
+    function buildHex(t, sizeClass) {
+      const wrap = document.createElement('span'); wrap.className = 'hexbadge ' + sizeClass;
+      const inner = document.createElement('span'); inner.className = 'hexbadge-in';
+      wrap.appendChild(inner);
+      fillHex(wrap, t);
+      return wrap;
+    }
+
+    // Overwatch hero art — same slug/URL rule overlay/overwatch.html uses for the in-game HUD.
+    function heroSlug(n) {
+      return (n || '').toLowerCase().replace(/ö/g, 'o').replace(/ú/g, 'u').replace(/[.']/g, '')
+        .replace(/:\s*/g, '-').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    }
+    function heroImgUrl(n) { const s = heroSlug(n); return s ? `/assets/overwatch/heroes/${s}.png` : ''; }
+    function banNamesFrom(entrySide) {
+      if (Array.isArray(entrySide)) return entrySide.map((x) => x && x.hero).filter(Boolean);
+      if (entrySide && entrySide.hero) return [entrySide.hero];
+      return [];
+    }
+    // playedIdx = this map's position among PLAYED maps only (pick/decider), which is what
+    // owMatch.bansByMap is indexed by — see the file header comment.
+    function heroBansFor(data, playedIdx) {
+      if (playedIdx < 0 || (data.activeGame || '') !== 'overwatch') return null;
+      const bansByMap = (data.owMatch && Array.isArray(data.owMatch.bansByMap)) ? data.owMatch.bansByMap : [];
+      const entry = bansByMap[playedIdx] || {};
+      const a = banNamesFrom(entry.a).slice(0, 2), b = banNamesFrom(entry.b).slice(0, 2);
+      if (!a.length && !b.length) return null;
+      return { a, b };
+    }
+    function buildBanRow(bans, blue, orange) {
+      if (!bans) return null;
+      const group = (heroes, team, side) => {
+        if (!heroes.length) return null;
+        const g = document.createElement('div'); g.className = 'ban-group side-' + side;
+        const lbl = document.createElement('span'); lbl.className = 'ban-lbl';
+        lbl.textContent = heroes.length > 1 ? 'BANS' : 'BAN';
+        const chips = document.createElement('div'); chips.className = 'ban-chips';
+        heroes.forEach((h) => {
+          const chip = document.createElement('span'); chip.className = 'ban-chip';
+          chip.style.setProperty('--tc', team.color || 'var(--accent)'); chip.title = h;
+          const img = document.createElement('img'); img.src = heroImgUrl(h); img.alt = '';
+          img.onerror = () => chip.remove();
+          chip.appendChild(img); chips.appendChild(chip);
+        });
+        g.appendChild(lbl); g.appendChild(chips);
+        return g;
+      };
+      const a = group(bans.a, blue, 'a'), b = group(bans.b, orange, 'b');
+      if (!a && !b) return null;
+      const row = document.createElement('div'); row.className = 'ban-row';
+      row.appendChild(a || document.createElement('span'));
+      row.appendChild(b || document.createElement('span'));
+      return row;
+    }
+
     function teamFor(by, data) {
       if (by === 'a') return SceneBase.teamSide(data, 'blue');
       if (by === 'b') return SceneBase.teamSide(data, 'orange');
       return null;
-    }
-    function chipText(m, data) {
-      if (m.action === 'decider') return 'DECIDER';
-      const t = teamFor(m.by, data);
-      const who = t ? t.name : '';
-      // Per-game vocabulary: veto.banWord is 'Strike' for Smash, 'Ban' everywhere else
-      // (backend/veto.js VETO_META). Hardcoding "BAN" mislabelled every Smash stage strike.
-      const banWord = String(((data.veto || {}).banWord) || 'Ban').toUpperCase();
-      if (m.action === 'ban')  return who ? `${who} ${banWord}` : banWord;
-      if (m.action === 'pick') return who ? `${who} PICK` : 'PICK';
-      return '';
     }
 
     function render(data) {
@@ -251,7 +330,7 @@
       stage.classList.add('show');
 
       titleEl.textContent = (v.title || 'MAP POOL').toUpperCase();
-      // Active brand kit's logo on the header plate (hidden when no kit is active).
+      // Active brand kit's logo on the header bar (hidden when no kit is active).
       const brandEl = document.getElementById('veto-brand');
       if (brandEl) {
         const logo = SceneBase.brandLogo(data);
@@ -275,29 +354,21 @@
         .filter((s) => s && s.logo);
 
       // Rebuild only when the data changes (avoid restarting card animations each tick).
-      const sig = JSON.stringify({ maps, t: v.title,
-        a: { n: blue.name, c: blue.color, l: (blue.logo || '').slice(0, 40), w: aWins },
-        o: { n: orange.name, c: orange.color, l: (orange.logo || '').slice(0, 40), w: bWins },
+      const owBans = (data.activeGame === 'overwatch' && data.owMatch && data.owMatch.bansByMap) || [];
+      const sig = JSON.stringify({ maps, t: v.title, ow: owBans,
+        a: { n: blue.name, c: blue.color, l: (blue.logo || '').slice(0, 40), tag: blue.abbr, w: aWins },
+        o: { n: orange.name, c: orange.color, l: (orange.logo || '').slice(0, 40), tag: orange.abbr, w: bWins },
         sp: sponsors.map((s) => s.logo.slice(0, 40)) });
       if (sig === _sig) return;
       _sig = sig;
 
-      // ── Scorecard header (team logo + name flanking the series record) ──
-      const setName = (id, t) => { const e = document.getElementById(id); if (e) e.textContent = (t.name || '').toUpperCase(); };
-      // The tile (not the <img>) is what hides when a team has no logo, so an empty
-      // frame never sits next to the name.
-      const setLogo = (id, tileId, t) => {
-        const e = document.getElementById(id), tile = document.getElementById(tileId); if (!e || !tile) return;
-        if (t.logo) {
-          if (e.getAttribute('src') !== t.logo) e.src = t.logo;
-          e.classList.toggle('on-dark', SceneBase.isDefaultGameLogo(t.logo));
-          tile.classList.remove('is-empty');
-        } else { e.removeAttribute('src'); tile.classList.add('is-empty'); }
-      };
-      setName('vs-name-a', blue); setName('vs-name-b', orange);
-      setLogo('vs-logo-a', 'vs-tile-a', blue); setLogo('vs-logo-b', 'vs-tile-b', orange);
-      // Team colours drive the header's end washes, name underlines, logo-tile frames and base bar.
-      // The decider chip is filled with the raw brand accent — measure its text against it.
+      // ── Scorecard header (hex badge + tag flanking the series record) ──
+      document.getElementById('vh-tag-a').textContent = shortTag(blue);
+      document.getElementById('vh-tag-b').textContent = shortTag(orange);
+      fillHex(document.getElementById('vh-hex-a'), blue);
+      fillHex(document.getElementById('vh-hex-b'), orange);
+      // Team colours drive the header's end washes, hex rings, tag underlines and base bar.
+      // The decider badge is filled with the raw brand accent — measure its text against it.
       const accNow = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
       if (accNow) document.documentElement.style.setProperty('--on-accent', SceneBase.onColor(accNow));
       const headEl = document.querySelector('.veto-head');
@@ -305,7 +376,7 @@
         headEl.style.setProperty('--team-a', blue.color || 'var(--accent)');
         headEl.style.setProperty('--team-b', orange.color || 'var(--accent)');
       }
-      const wa = document.getElementById('vs-w-a'), wb = document.getElementById('vs-w-b');
+      const wa = document.getElementById('vh-w-a'), wb = document.getElementById('vh-w-b');
       if (wa) { wa.textContent = aWins; wa.style.color = blue.color || '#fff'; }
       if (wb) { wb.textContent = bWins; wb.style.color = orange.color || '#fff'; }
 
@@ -321,6 +392,14 @@
       // Scale card width to fit the row.
       const n = Math.max(1, maps.length);
       const w = Math.min(300, Math.floor((1920 - 120 - (n - 1) * 26) / n));
+
+      // Played-map index per veto-row entry — only 'pick'/'decider' entries were actually played,
+      // and only those line up with owMatch.bansByMap's play-order indexing (see file header).
+      let playedIdx = -1;
+      const playedIdxByMap = maps.map((m) => {
+        if (m.action === 'pick' || m.action === 'decider') playedIdx += 1;
+        return playedIdx;
+      });
 
       rowEl.innerHTML = '';
       maps.forEach((m, i) => {
@@ -348,34 +427,28 @@
         if (m.winner === 'a') card.style.borderBottomColor = blue.color;
         if (m.winner === 'b') card.style.borderBottomColor = orange.color;
 
-        if (completed) {
-          // One centered block: the WINNING team's logo above the score. No logo shown for a
-          // draw/no-winner-yet score (score still displays either way).
-          const result = document.createElement('div'); result.className = 'result';
-          const winnerTeam = m.winner === 'a' ? blue : m.winner === 'b' ? orange : null;
-          if (winnerTeam && winnerTeam.logo) {
-            const logo = document.createElement('img'); logo.className = 'result-logo'; logo.src = winnerTeam.logo;
-            if (SceneBase.isDefaultGameLogo(winnerTeam.logo)) logo.classList.add('on-dark');
-            result.appendChild(logo);
+        // Hex badge: the winner once the map's decided, else whoever picked it, else nothing
+        // (a banned map, or a decider still waiting to be played).
+        const hexTeam = completed ? (m.winner === 'a' ? blue : m.winner === 'b' ? orange : null)
+          : (m.action === 'pick' ? t : null);
+        if (hexTeam) {
+          const wrap = document.createElement('div'); wrap.className = 'card-hex';
+          wrap.appendChild(buildHex(hexTeam, 'md'));
+          if (completed) {
+            const a = (m.score && m.score.a) || 0, b = (m.score && m.score.b) || 0;
+            const sc = document.createElement('div'); sc.className = 'card-score'; sc.textContent = `${a}–${b}`;
+            wrap.appendChild(sc);
           }
-          const a = (m.score && m.score.a) || 0, b = (m.score && m.score.b) || 0;
-          const sc = document.createElement('div'); sc.className = 'result-score';
-          sc.innerHTML = `<span>${a}</span><span class="sep">–</span><span>${b}</span>`;
-          result.appendChild(sc);
-          card.appendChild(result);
-        } else {
-          const chip = document.createElement('div'); chip.className = 'chip';
-          chip.textContent = chipText(m, data);
-          // The chip is filled with the TEAM's own colour, so its text has to be measured against
-          // that colour — a team on white or bright yellow had an invisible chip label.
-          if (m.action === 'pick' && t) {
-            chip.style.background = t.color;
-            chip.style.setProperty('--chip-fg', SceneBase.onColor(t.color));
-          }
-          else if (m.action === 'ban') chip.style.background = '#444';
-          if (!chip.textContent) chip.style.display = 'none';
-          card.appendChild(chip);
+          card.appendChild(wrap);
+        } else if (m.action === 'decider' && !completed) {
+          const dec = document.createElement('div'); dec.className = 'card-decider'; dec.textContent = 'DECIDER';
+          card.appendChild(dec);
         }
+
+        // Per-map hero bans (Overwatch only — see heroBansFor).
+        const banRow = buildBanRow(heroBansFor(data, playedIdxByMap[i]), blue, orange);
+        if (banRow) card.appendChild(banRow);
+
         rowEl.appendChild(card);
       });
     }

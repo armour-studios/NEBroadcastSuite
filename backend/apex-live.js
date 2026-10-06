@@ -434,7 +434,10 @@ function toBroadcast(state, opts = {}) {
 // Returns { server, close() }. onFrame(parsedFrame) fires per message; onStatus fires
 // on connect/disconnect so server.js can flip state.apex.connected and log analytics.
 function createServer({ port = 7777, host = '127.0.0.1', onFrame, onStatus, onRaw } = {}) {
-  const wss = new WebSocket.Server({ host, port });
+  // The Apex client connects with no Origin header; a browser page always sends one, so refuse
+  // foreign pages (they could otherwise feed fake match data into the overlay).
+  const { isAllowedOrigin } = require('./origin-guard');
+  const wss = new WebSocket.Server({ host, port, verifyClient: (info) => isAllowedOrigin(info.req.headers.origin, info.req.headers.host) });
   let rawLogged = 0;
   wss.on('connection', (ws) => {
     if (onStatus) onStatus('connected');

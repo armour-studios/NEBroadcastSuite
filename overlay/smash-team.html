@@ -555,14 +555,17 @@
       return '';
     }
 
+    const EMPTY_FRAME = '<div class="sub-frame"></div>';
     function buildFrameSet(a, b, ctxA, ctxB) {
       const out = { a: [], b: [] };
       FRAME_KINDS.forEach((kind) => {
         const fa = frameFor(kind, a.side, a.record, ctxA);
         const fb = frameFor(kind, b.side, b.record, ctxB);
         if (!fa && !fb) return;
-        out.a.push(fa || frameFor('context', a.side, a.record, ctxA));
-        out.b.push(fb || frameFor('context', b.side, b.record, ctxB));
+        // Always push ONE element per side: an empty string here left a bar with fewer frames than
+        // the other (or none — applyFrameSet then threw and aborted the whole render).
+        out.a.push(fa || frameFor('context', a.side, a.record, ctxA) || EMPTY_FRAME);
+        out.b.push(fb || frameFor('context', b.side, b.record, ctxB) || EMPTY_FRAME);
       });
       return out;
     }
@@ -581,8 +584,8 @@
       wrapA.classList.toggle('is-hidden', !SHOW_INFO || !n);
       wrapB.classList.toggle('is-hidden', !SHOW_INFO || !n);
       if (!n) return;
-      wrapA.firstElementChild.classList.add('on');
-      wrapB.firstElementChild.classList.add('on');
+      if (wrapA.firstElementChild) wrapA.firstElementChild.classList.add('on');
+      if (wrapB.firstElementChild) wrapB.firstElementChild.classList.add('on');
       if (n < 2 || FLIP_MS <= 0) return;
       let i = 0;
       _subTimer = setInterval(() => {

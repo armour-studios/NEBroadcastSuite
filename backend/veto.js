@@ -32,11 +32,22 @@ const MAP_POOLS = {
     { id: 'palais',   name: 'Palais',   tier: 'Reserve',     image: '/assets/csgo/maps/de_palais.png' },
     { id: 'whistle',  name: 'Whistle',  tier: 'Reserve',     image: '/assets/csgo/maps/de_whistle.png' }
   ],
+  // Valorant — `tier` works like CS2's: the guided veto bans from the 7-map Active Pool by default
+  // (STD7 is authored for 7), the producer can pick Reserve or all maps; Map Pool / Series list all.
+  // Maps with no image fall back to the generated /assets/valorant/maps/<id>.svg placeholder.
   valorant: [
-    { id: 'ascent', name: 'Ascent', image: '' }, { id: 'bind', name: 'Bind', image: '' },
-    { id: 'haven', name: 'Haven', image: '' },   { id: 'lotus', name: 'Lotus', image: '' },
-    { id: 'split', name: 'Split', image: '' },   { id: 'sunset', name: 'Sunset', image: '' },
-    { id: 'abyss', name: 'Abyss', image: '' }
+    { id: 'ascent',   name: 'Ascent',   tier: 'Active Pool', image: '' },
+    { id: 'bind',     name: 'Bind',     tier: 'Active Pool', image: '' },
+    { id: 'haven',    name: 'Haven',    tier: 'Active Pool', image: '' },
+    { id: 'lotus',    name: 'Lotus',    tier: 'Active Pool', image: '' },
+    { id: 'split',    name: 'Split',    tier: 'Active Pool', image: '' },
+    { id: 'sunset',   name: 'Sunset',   tier: 'Active Pool', image: '' },
+    { id: 'abyss',    name: 'Abyss',    tier: 'Active Pool', image: '/assets/valorant/maps/abyss.webp' },
+    { id: 'breeze',   name: 'Breeze',   tier: 'Reserve',     image: '/assets/valorant/maps/breeze.webp' },
+    { id: 'corrode',  name: 'Corrode',  tier: 'Reserve',     image: '/assets/valorant/maps/corrode.webp' },
+    { id: 'fracture', name: 'Fracture', tier: 'Reserve',     image: '/assets/valorant/maps/fracture.webp' },
+    { id: 'pearl',    name: 'Pearl',    tier: 'Reserve',     image: '/assets/valorant/maps/pearl.webp' },
+    { id: 'summit',   name: 'Summit',   tier: 'Reserve',     image: '/assets/valorant/maps/summit.webp' }
   ],
   rainbow6: [
     { id: 'bank', name: 'Bank', image: '' },         { id: 'border', name: 'Border', image: '' },
@@ -64,7 +75,7 @@ const MAP_POOLS = {
     { id: 'kalos-pokemon-league', name: 'Kalos Pokémon League', tier: 'Counterpick', image: '/assets/smash/maps/kalos-pokemon-league.png' },
     { id: 'yoshis-story',       name: "Yoshi's Story",        tier: 'Counterpick', image: '/assets/smash/maps/yoshis-story.png' }
   ],
-  // Overwatch 2 — OWCS 2025 competitive map pool. type field drives the center display in overwatch.html.
+  // Overwatch — full standard-mode map list (synced via scripts/download-ow-heroes.js). type field drives the center display in overwatch.html.
   // Map images sourced from Liquipedia (liquipedia.net/overwatch/Maps) and hosted locally.
   overwatch: [
     // Control
@@ -74,25 +85,48 @@ const MAP_POOLS = {
     { id: 'nepal',               name: 'Nepal',                type: 'Control',   image: '/assets/overwatch/maps/nepal.jpg' },
     { id: 'samoa',               name: 'Samoa',                type: 'Control',   image: '/assets/overwatch/maps/samoa.jpg' },
     { id: 'antarctic-peninsula', name: 'Antarctic Peninsula',  type: 'Control',   image: '/assets/overwatch/maps/antarctic-peninsula.jpg' },
+    { id: 'busan', name: "Busan", type: 'Control', image: '/assets/overwatch/maps/busan.jpg' },
+    { id: 'gogadoro', name: "Gogadoro", type: 'Control', image: '/assets/overwatch/maps/gogadoro.jpg' },
+    { id: 'wuxing-university', name: "Wuxing University", type: 'Control', image: '/assets/overwatch/maps/wuxing-university.jpg' },
     // Hybrid
     { id: 'kings-row',           name: "King's Row",           type: 'Hybrid',    image: '/assets/overwatch/maps/kings-row.jpg' },
     { id: 'numbani',             name: 'Numbani',              type: 'Hybrid',    image: '/assets/overwatch/maps/numbani.jpg' },
     { id: 'midtown',             name: 'Midtown',              type: 'Hybrid',    image: '/assets/overwatch/maps/midtown.jpg' },
     { id: 'paraiso',             name: 'Paraíso',              type: 'Hybrid',    image: '/assets/overwatch/maps/paraiso.png' },
     { id: 'blizzard-world',      name: 'Blizzard World',       type: 'Hybrid',    image: '/assets/overwatch/maps/blizzard-world.jpg' },
+    { id: 'eichenwalde', name: "Eichenwalde", type: 'Hybrid', image: '/assets/overwatch/maps/eichenwalde.jpg' },
+    { id: 'hollywood', name: "Hollywood", type: 'Hybrid', image: '/assets/overwatch/maps/hollywood.jpg' },
+    { id: 'neon-junction', name: "Neon Junction", type: 'Hybrid', image: '/assets/overwatch/maps/neon-junction.png' },
     // Escort
     { id: 'dorado',              name: 'Dorado',               type: 'Escort',    image: '/assets/overwatch/maps/dorado.jpg' },
     { id: 'circuit-royal',       name: 'Circuit Royal',        type: 'Escort',    image: '/assets/overwatch/maps/circuit-royal.png' },
     { id: 'havana',              name: 'Havana',               type: 'Escort',    image: '/assets/overwatch/maps/havana.jpg' },
     { id: 'junkertown',          name: 'Junkertown',           type: 'Escort',    image: '/assets/overwatch/maps/junkertown.jpg' },
+    { id: 'rialto', name: "Rialto", type: 'Escort', image: '/assets/overwatch/maps/rialto.jpg' },
+    { id: 'route-66', name: "Route 66", type: 'Escort', image: '/assets/overwatch/maps/route-66.jpg' },
+    { id: 'shambali-monastery', name: "Shambali Monastery", type: 'Escort', image: '/assets/overwatch/maps/shambali-monastery.jpg' },
+    { id: 'watchpoint-gibraltar', name: "Watchpoint: Gibraltar", type: 'Escort', image: '/assets/overwatch/maps/watchpoint-gibraltar.jpg' },
+    { id: 'watchpoint-grimsvotn', name: "Watchpoint: Grimsvotn", type: 'Escort', image: '/assets/overwatch/maps/watchpoint-grimsvotn.webp' },
     // Push
     { id: 'new-queen-street',    name: 'New Queen Street',     type: 'Push',      image: '/assets/overwatch/maps/new-queen-street.jpg' },
     { id: 'esperanca',           name: 'Esperança',            type: 'Push',      image: '/assets/overwatch/maps/esperanca.jpg' },
     { id: 'colosseo',            name: 'Colosseo',             type: 'Push',      image: '/assets/overwatch/maps/colosseo.jpg' },
     { id: 'runasapi',            name: 'Runasapi',             type: 'Push',      image: '/assets/overwatch/maps/runasapi.jpg' },
+    { id: 'place-lacroix', name: "Place Lacroix", type: 'Push', image: '/assets/overwatch/maps/place-lacroix.jpg' },
+    { id: 'redwood-dam', name: "Redwood Dam", type: 'Push', image: '/assets/overwatch/maps/redwood-dam.jpg' },
     // Flashpoint
     { id: 'suravasa',            name: 'Suravasa',             type: 'Flashpoint', image: '/assets/overwatch/maps/suravasa.jpg' },
-    { id: 'new-junk-city',       name: 'New Junk City',        type: 'Flashpoint', image: '/assets/overwatch/maps/new-junk-city.jpg' }
+    { id: 'new-junk-city',       name: 'New Junk City',        type: 'Flashpoint', image: '/assets/overwatch/maps/new-junk-city.jpg' },
+    { id: 'aatlis', name: "Aatlis", type: 'Flashpoint', image: '/assets/overwatch/maps/aatlis.jpg' },
+    // Clash
+    { id: 'hanaoka', name: "Hanaoka", type: 'Clash', image: '/assets/overwatch/maps/hanaoka.jpg' },
+    { id: 'throne-of-anubis', name: "Throne of Anubis", type: 'Clash', image: '/assets/overwatch/maps/throne-of-anubis.jpg' },
+    // Assault (legacy 2CP — still played in custom/scrim pools)
+    { id: 'anubis', name: "Temple of Anubis", type: 'Assault', image: '/assets/overwatch/maps/anubis.jpg' },
+    { id: 'hanamura', name: "Hanamura", type: 'Assault', image: '/assets/overwatch/maps/hanamura.jpg' },
+    { id: 'horizon', name: "Horizon Lunar Colony", type: 'Assault', image: '/assets/overwatch/maps/horizon.jpg' },
+    { id: 'paris', name: "Paris", type: 'Assault', image: '/assets/overwatch/maps/paris.jpg' },
+    { id: 'volskaya', name: "Volskaya Industries", type: 'Assault', image: '/assets/overwatch/maps/volskaya.jpg' }
   ],
   // Marvel Rivals — verified Ignite 2026 / MRC S7 competitive pool (14 maps, syncs with the
   // in-game Competitive pool each season — see docs/marvel-rivals-production.md). Map 1 of a
@@ -157,7 +191,7 @@ const MODE_OPTIONS = {
 // Per-game terminology so the UI/board read correctly per selection type.
 const VETO_META = {
   csgo:            { kind: 'map',   banWord: 'Ban',    unit: 'map', strikeFrom: 'Active Duty' },
-  valorant:        { kind: 'map',   banWord: 'Ban',    unit: 'map' },
+  valorant:        { kind: 'map',   banWord: 'Ban',    unit: 'map', strikeFrom: 'Active Pool' },
   rainbow6:        { kind: 'map',   banWord: 'Ban',    unit: 'map' },
   overwatch:       { kind: 'map',   banWord: 'Ban',    unit: 'map', hasBans: true, modes: MODE_OPTIONS.overwatch },
   'marvel-rivals': { kind: 'map',   banWord: 'Ban',    unit: 'map', modes: MODE_OPTIONS['marvel-rivals'] },
@@ -235,7 +269,7 @@ function mergedMapPools(gameConfigs) {
     if (!custom.length) { out[game] = built; return; }
     const byId = {};
     built.forEach((m) => { byId[m.id] = m; });
-    custom.forEach((m) => { if (m && m.id) byId[m.id] = { ...byId[m.id], ...m }; });
+    custom.forEach((m) => { if (m && m.id) byId[m.id] = byId[m.id] ? { ...byId[m.id], ...m } : { ...m, custom: true }; });
     out[game] = Object.values(byId);
   });
   return out;

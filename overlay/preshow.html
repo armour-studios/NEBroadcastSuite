@@ -601,7 +601,7 @@
       pres.classList.toggle('hidden', !hasTitleSponsor);
       if (hasTitleSponsor) {
         el('pf-presented-logo').src = sponsor.logo;
-        el('pf-presented-lbl').textContent = (sponsor.label || 'Presented by');
+        el('pf-presented-lbl').textContent = ((data.brand && data.brand.presentedLabel) || sponsor.label || 'Presented by');
       }
       // The whole bug hides only when there's neither a brand logo nor a title sponsor.
       wrap.classList.toggle('is-empty', !logo && !hasTitleSponsor);

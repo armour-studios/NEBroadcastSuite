@@ -50,7 +50,7 @@
     .match-name { flex: 1 1 0; min-width: 0; position: relative; z-index: 1; font-size: 24px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; line-height: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #fff; }
     .match-team--b .match-name { text-align: right; }
     .match-score { flex: 0 0 auto; position: relative; z-index: 1; font-size: 44px; font-weight: 900; font-variant-numeric: tabular-nums; line-height: 1; min-width: 24px; text-align: center; }
-    .match-team--a .match-score { color: var(--team-a); } .match-team--b .match-score { color: var(--team-b); }
+    .match-team--a .match-score { color: var(--team-a-ink, var(--team-a)); } .match-team--b .match-score { color: var(--team-b-ink, var(--team-b)); }
     .match-center { flex: 0 0 104px; display: flex; align-items: center; justify-content: center; position: relative; z-index: 2; background: rgba(6,8,12,.97); border-left: 1px solid rgba(255,255,255,.1); border-right: 1px solid rgba(255,255,255,.1); }
     .match-vs { font-size: 36px; font-weight: 900; letter-spacing: .08em; color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,.85); }
 
@@ -166,7 +166,7 @@
         ? { label: (data.scoreboardAd || {}).label, logo: (_pbBrand.spots && _pbBrand.spots.title) || '' }
         : (data.scoreboardAd || {});
       const wrap = el('presented-by'), label = el('pb-label'), logo = el('pb-logo');
-      if (slot.logo) { label.textContent = (slot.label || 'PRESENTED BY').toString().trim(); logo.src = slot.logo; logo.style.display = ''; wrap.classList.remove('is-empty'); }
+      if (slot.logo) { label.textContent = (_pbBrand.presentedLabel || slot.label || 'PRESENTED BY').toString().trim(); logo.src = slot.logo; logo.style.display = ''; wrap.classList.remove('is-empty'); }
       else { logo.style.display = 'none'; logo.removeAttribute('src'); wrap.classList.add('is-empty'); }
     }
     function renderDeckStrip(data) {

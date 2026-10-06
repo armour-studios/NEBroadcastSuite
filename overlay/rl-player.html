@@ -258,7 +258,7 @@ img{display:block;}
 <!-- OCCASIONAL SPONSOR ROLL-OUT — tucked BEHIND the card (earlier in DOM + lower z-index), rolls out
      from the card's left edge every so often. -->
 <div id="spon-roll" class="spon-roll empty" aria-hidden="true">
-  <span class="sr-lbl">Presented by</span>
+  <span id="sr-lbl" class="sr-lbl">Presented by</span>
   <img id="spon-roll-logo" alt="">
 </div>
 
@@ -322,9 +322,10 @@ function applyColors(teams){
   if(o){ ORANGE=o; document.documentElement.style.setProperty('--orange',o); }
 }
 function setText(id,v){ const e=el(id); if(e) e.textContent=(v==null?'':v); }
-function setImg(id,src,fb){ const e=el(id); if(!e) return; e.src=src||fb||'/assets/rl.png'; }
+function setImg(id,src,fb){ const e=el(id); if(!e) return; const want=src||fb||'/assets/rl.png'; if(e.getAttribute('src')!==want) e.src=want; }
 function renderPips(id,wins,bestOf,side){
-  const c=el(id); if(!c) return; const need=Math.max(1,Math.ceil((bestOf||5)/2)); c.innerHTML='';
+  const c=el(id); if(!c) return; const need=Math.max(1,Math.ceil((bestOf||5)/2));
+  const sig=need+':'+(wins||0)+':'+side; if(c._sig===sig) return; c._sig=sig; c.innerHTML='';
   for(let i=0;i<need;i++){ const d=document.createElement('div');
     d.className='pip'+(i<(wins||0)?(side==='blue'?' win-blue':' win-orange'):''); c.appendChild(d); }
 }
@@ -359,7 +360,7 @@ function render(data){
   renderPips('pips-orange', ser.orange, data.bestOf||5, 'orange');
   const isOT = !!(game.isOT);
   el('center').classList.toggle('ot', isOT);
-  setText('timer', data.formattedTime || game.formattedTime || fmtTime(game.time));
+  setText('timer', game.formattedTime || data.formattedTime || fmtTime(game.time));   // per-tick value first (top-level one is stale between full_states)
 
   // EVENT title under the bar — only when one is configured in the app
   const ev = (data.eventName || '').trim();
@@ -375,7 +376,12 @@ function render(data){
   document.documentElement.style.setProperty('--me', meColor);
 
   const card = el('pcard');
-  if(!me){ card.classList.add('gone'); drawBoost(0, meColor); return; }
+  if(!me){
+    card.classList.add('gone'); drawBoost(0, meColor);
+    // the retracted sponsor tab is only hidden BEHIND the opaque card — with the card gone it would sit exposed
+    const roll=el('spon-roll'); if(roll){ roll.classList.remove('out'); roll.classList.add('empty'); clearTimeout(sponHideTimer); }
+    return;
+  }
   card.classList.remove('gone');
 
   // ME
@@ -387,7 +393,9 @@ function render(data){
 
   // TEAMMATES (my team, minus me) — stats always; boost only when the feed carries it
   const mates = (data.players||[]).filter(p => teamOf(p)===myTeamNum && p.name!==me.name);
-  const wrap = el('mates'); wrap.innerHTML='';
+  const wrap = el('mates');
+  const matesSig = mates.map(p => [p.name,p.score,p.goals,p.saves,p.isDemolished?1:0,p.boost==null?'-':Math.round(p.boost)].join(',')).join(';');
+  if(wrap._sig !== matesSig){ wrap._sig = matesSig; wrap.innerHTML='';
   mates.forEach(p => {
     const row=document.createElement('div'); row.className='mate'+(p.isDemolished?' demoed':'');
     const nm=document.createElement('div'); nm.className='mate-name'; nm.textContent=p.name;
@@ -401,6 +409,7 @@ function render(data){
     row.appendChild(nm); row.appendChild(mini); row.appendChild(bst);
     wrap.appendChild(row);
   });
+  }
 
   // keep the sponsor roll-out's logo current (the title-tagged brand-kit sponsor)
   updateSponsorRoll();
@@ -410,12 +419,14 @@ function render(data){
    The title sponsor tab rolls out from behind the card every SPON_EVERY_MS for SPON_HOLD_MS, then
    rolls back. Only fires when a title sponsor is set and the card is on screen, and never over a
    goal replay. */
-const SPON_EVERY_MS = 32000, SPON_HOLD_MS = 5200;
+const SPON_EVERY_MS = 32000, SPON_HOLD_MS = 10000;
 let sponCycleTimer = null, sponHideTimer = null;
 function sponsorLogo(){ const b = currentState.brand || {}; return (b.spots && b.spots.title) || ''; }
 function updateSponsorRoll(){
   const roll = el('spon-roll'); if(!roll) return;
   if(!currentState.rlSponsorRoll){ roll.classList.add('empty'); roll.classList.remove('out'); return; }   // producer toggle off
+  const _b = currentState.brand || {}, _ad = currentState.scoreboardAd || {};
+  const _lbl = el('sr-lbl'); if(_lbl) _lbl.textContent = _b.presentedLabel || _ad.label || 'PRESENTED BY';
   const logo = sponsorLogo(), img = el('spon-roll-logo');
   if(logo){ if(img.getAttribute('src')!==logo) img.src = logo; roll.classList.remove('empty'); }
   else { roll.classList.add('empty'); roll.classList.remove('out'); }
@@ -473,9 +484,9 @@ function goalEvent(side){
   fireIntroSwipe();          // the replay is starting → play the REPLAY slam now
   scheduleReplayOutro();     // arm the safety-net outro
 }
-function endGoalCycle(){
+function endGoalCycle(skipOutro){
   clearTimeout(goalCycleTimer); clearTimeout(outroSchedTimer);
-  if(goalCycleActive && !outroPlayed) playReplayOutro();   // replay ended → make sure the outro fires
+  if(goalCycleActive && !outroPlayed && !skipOutro) playReplayOutro();   // replay ended → make sure the outro fires
   goalCycleActive=false; introPlayed=false; outroPlayed=false;
 }
 
@@ -483,6 +494,18 @@ function endGoalCycle(){
 function dispatch(msg){
   if(!msg || !msg.type) return;
   switch(msg.type){
+    // Overlay code changed on disk — this overlay is standalone (no scene-base.js), so it never
+    // picked up the server's reload broadcast; a producer had to manually clear the OBS browser
+    // source cache to see any edit. Reload only when the changed file IS this page (or no file
+    // list was given — an explicit "reload all").
+    case 'reload_overlays': {
+      const files = Array.isArray(msg.files)
+        ? msg.files.map(f => String(f).replace(/\\/g, '/').toLowerCase().split('/').pop()).filter(Boolean)
+        : null;
+      const page = (location.pathname.split('/').pop() || '').toLowerCase();
+      if (!files || !files.length || files.indexOf(page) !== -1) { try { location.reload(); } catch (e) {} }
+      break;
+    }
     case 'full_state': currentState={...currentState,...msg.data}; render(currentState); break;
     case 'state_update':
       currentState={...currentState, game:msg.data.game, players:msg.data.players, spectatedPlayer:msg.data.spectatedPlayer};
@@ -490,9 +513,10 @@ function dispatch(msg){
     case 'view_change':
       if(msg.data.view==='goal'){ currentState._goal=msg.data.goal; goalEvent(msg.data.goal?Number(msg.data.goal.team):0); }
       else if(msg.data.view==='hud'){ endGoalCycle(); }
+      else if(msg.data.view==='scoreboard'){ endGoalCycle(true); }   // game over: no kickoff follows, so no logo outro (rl-hud does the same)
       break;
     case 'replay_will_end': scheduleOutroAfterWillEnd(); break;
-    case 'game_reset': endGoalCycle(); render(currentState); break;
+    case 'game_reset': endGoalCycle(true); render(currentState); break;   // fresh game: never slam an outro at kickoff
   }
 }
 
@@ -501,7 +525,7 @@ const HTTP_BASE='http://'+(location.hostname||'localhost')+':3000';
 const WS_URL='ws://'+(location.hostname||'localhost')+':3001';
 let _wsToken=null;
 async function connect(){
-  if(_wsToken==null){ try{ _wsToken=(await (await fetch(HTTP_BASE+'/api/ws-token')).json()).token||''; }catch(e){ _wsToken=''; } }
+  if(!_wsToken){ try{ _wsToken=(await (await fetch(HTTP_BASE+'/api/ws-token')).json()).token||''; }catch(e){ _wsToken=''; } }
   const ws=new WebSocket(WS_URL+(_wsToken?('?token='+encodeURIComponent(_wsToken)):''));
   ws.onopen=()=>{ try{ ws.send(JSON.stringify({type:'register',role:'overlay',page:location.pathname})); ws.send(JSON.stringify({type:'request_state'})); }catch(e){} };
   // Contain render throws so the source keeps updating instead of freezing (see rl-hud.html).

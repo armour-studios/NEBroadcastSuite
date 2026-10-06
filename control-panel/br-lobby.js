@@ -363,7 +363,7 @@
     ['compare', 'Comparison',      '/fn-compare.html',                 'Head-to-head stat card'],
     ['victory', 'Victory Royale',  '/fn-victory.html',                 'The #1 slam']
   ];
-  function packBase() { return (window.SCENE_BASE_URL || 'http://127.0.0.1:3000').replace(/\/+$/, ''); }
+  function packBase() { return (window.SCENE_BASE_URL || 'http://localhost:3000').replace(/\/+$/, ''); }
   function renderPack() {
     const host = el('mlb-pack-rows');
     if (!host || host.dataset.built) return;

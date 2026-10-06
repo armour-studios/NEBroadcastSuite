@@ -1908,7 +1908,7 @@ function lgRenderScheduleTab() {
   }));
   wrap.querySelectorAll('.lg2-match-record').forEach((btn) => btn.addEventListener('click', () => {
     const c = (currentState && currentState.leagueCapture) || {};
-    if (c.active && c.matchId === btn.dataset.mid) { send('league_capture_stop', {}); return; }   // toggle off
+    if (c.active && c.matchId === btn.dataset.mid) { lgStopCapture(); return; }   // toggle off
     const m = findM(btn.dataset.mid); if (!m) return;
     if (!m.teamA || !m.teamB) { lgStatus('Both teams must be assigned before recording.', false); return; }
     send('league_capture_arm', { leagueId: lg.id, matchId: m.id });
@@ -1935,6 +1935,14 @@ el('lg-sch-add-toggle')?.addEventListener('click', () => {
   card.hidden = !card.hidden;
   if (!card.hidden) el('lg-sch-a')?.focus();
 });
+// Stop recording WITHOUT saving. Recorded games are thrown away, so ask when there are any (a stray
+// click on the record toggle used to drop a whole series' captured scores).
+async function lgStopCapture() {
+  const cap = (currentState && currentState.leagueCapture) || {};
+  const n = (cap.games || []).length;
+  if (n && !await customConfirm('Stop recording', `Stop recording ${cap.teamA || 'Team A'} vs ${cap.teamB || 'Team B'}? The ${n} recorded game${n === 1 ? '' : 's'} will not be saved. Use "Save now" first to keep them.`, 'Stop without saving')) return;
+  send('league_capture_stop', {});
+}
 // Live status of the producer-armed spectated-match capture (state.leagueCapture). Re-rendered on
 // every full_state (see app.js hook) so it ticks up as games finish.
 function lgRenderCaptureBar() {
@@ -1951,7 +1959,7 @@ function lgRenderCaptureBar() {
     <button class="btn btn-primary btn-xs" id="lg-cap-save" title="Write the current games into the match now">Save now</button>
     <button class="btn btn-ghost btn-xs" id="lg-cap-stop" title="Stop recording without saving">Stop</button>`;
   el('lg-cap-save')?.addEventListener('click', () => send('league_capture_save', {}));
-  el('lg-cap-stop')?.addEventListener('click', () => send('league_capture_stop', {}));
+  el('lg-cap-stop')?.addEventListener('click', () => lgStopCapture());
 }
 function lgAddMatch() {
   const lg = lgActive(); if (!lg) return;

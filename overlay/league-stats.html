@@ -30,7 +30,7 @@
   .ls-header { display: flex; align-items: center; gap: 22px; }
   .ls-brand { height: 76px; max-width: 300px; object-fit: contain; filter: drop-shadow(0 4px 14px rgba(0,0,0,.5)); }
   .ls-headtext { display: flex; flex-direction: column; gap: 4px; }
-  .ls-eyebrow { font-size: 15px; font-weight: 800; letter-spacing: .34em; text-transform: uppercase; color: var(--accent); }
+  .ls-eyebrow { font-size: 15px; font-weight: 800; letter-spacing: .34em; text-transform: uppercase; color: var(--accent-ink, var(--accent)); }
   .ls-title { font-size: 52px; font-weight: 900; letter-spacing: .01em; line-height: .98; color: #fff; text-transform: uppercase; }
   .ls-subtitle { font-size: 19px; font-weight: 600; color: #aeb4c4; letter-spacing: .02em; }
   .ls-count { margin-left: auto; display: flex; flex-direction: column; align-items: center; line-height: 1;
@@ -45,8 +45,8 @@
   .ls-grouprow th { padding: 14px 16px 8px; font-size: 14px; font-weight: 900; letter-spacing: .16em; text-transform: uppercase; }
   .ls-grp { border-bottom: 3px solid currentColor; }
   .ls-grp-0 { color: #8792a8; }
-  .ls-grp-1 { color: var(--accent); }
-  .ls-grp-2 { color: var(--accent-2); }
+  .ls-grp-1 { color: var(--accent-ink, var(--accent)); }
+  .ls-grp-2 { color: var(--accent-2-ink, var(--accent-2)); }
   .ls-colrow th { padding: 8px 16px 12px; font-size: 15px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: #8b93a6;
     border-bottom: 1px solid rgba(255,255,255,.1); }
   .ls-th-team { text-align: left !important; }
@@ -59,7 +59,9 @@
   .ls-logo { width: 42px; height: 42px; object-fit: contain; border-radius: 8px; flex: 0 0 auto; }
   .ls-name { font-size: 25px; font-weight: 800; color: #fff; letter-spacing: .01em; }
 
-  .ls-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #6a7080; font-size: 22px; }
+  /* In flow, under the header. It used to be absolutely centred on the stage — which is exactly where
+     the (also centred) header sits when there is no table, so the two printed on top of each other. */
+  .ls-empty { margin-top: 28px; text-align: center; color: #6a7080; font-size: 22px; }
 
   /* Sponsor rail (bottom) — same shape as standings.html */
   .ls-sponsors { position: absolute; left: 0; right: 0; bottom: 26px; display: flex; align-items: center; justify-content: center; gap: 26px; }
@@ -92,7 +94,13 @@
 (function () {
   function el(id) { return document.getElementById(id); }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
-  function svgFallback(letter, color) {
+  // First CHARACTER of a name, as a whole code point. `name[0]` returns HALF of an emoji (a lone surrogate) for
+  // a name like "🔥⚡🔥 | 1", and encodeURIComponent() throws URIError "URI malformed" on that — which aborted the
+  // whole render (a live start.gg event with one emoji-leading entrant kept the top 8 from ever drawing).
+  function firstGlyph(name) { const c = Array.from(String(name == null ? '' : name).trim())[0]; return c ? c.toUpperCase() : '?'; }
+  function xmlText(s) { return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+  function svgFallback(name, color) {
+    const letter = xmlText(firstGlyph(name));
     return 'data:image/svg+xml;utf8,' + encodeURIComponent(
       `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120"><rect width="120" height="120" rx="18" fill="${color}"/><text x="60" y="82" font-size="64" fill="#fff" text-anchor="middle" font-family="Arial,sans-serif" font-weight="bold">${letter}</text></svg>`);
   }
@@ -169,7 +177,7 @@
     const colHtml = '<th class="ls-th-team">Team</th>' + columns.map((c) => `<th title="${esc(c.label)}">${esc(c.label)}</th>`).join('');
     const bodyHtml = rows.map((r) => {
       const color = r.color || accent;
-      const logo = r.logo || svgFallback((r.name || '?').charAt(0).toUpperCase(), color);
+      const logo = r.logo || svgFallback(r.name, color);
       const cells = columns.map((c) => { const v = r.values && r.values[c.key]; return `<td>${v == null || v === '' ? '—' : esc(v)}</td>`; }).join('');
       return `<tr style="--row:${esc(color)}"><td class="ls-td-team"><img class="ls-logo" src="${logo}" alt=""><span class="ls-name">${esc(r.name || 'TBD')}</span></td>${cells}</tr>`;
     }).join('');

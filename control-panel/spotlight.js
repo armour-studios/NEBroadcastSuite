@@ -236,12 +236,12 @@ el('wl-logo-file')?.addEventListener('change', async function () {
   try { const b64 = await fileToBase64(f, 400); wlSend({ logo: b64 }); } catch (e) { evStatus('Could not load logo.', 'err'); }
 });
 el('wl-copy-url')?.addEventListener('click', (e) => {
-  const url = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://127.0.0.1:3000') + '/watchlist.html';
+  const url = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://localhost:3000') + '/watchlist.html';
   if (typeof copyText === 'function') copyText(url, e.currentTarget);
   else if (navigator.clipboard) navigator.clipboard.writeText(url);
   evStatus('Copied the Teams to Watch overlay URL.', 'ok');
 });
-{ const pv = el('wl-preview'); if (pv) pv.href = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://127.0.0.1:3000') + '/watchlist.html?preview=1'; }
+{ const pv = el('wl-preview'); if (pv) pv.href = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://localhost:3000') + '/watchlist.html?preview=1'; }
 
 // ── Single-team spotlight (start.gg deep-dive) ───────────────────────────────
 function tsOrdinal(n) { if (!n) return ''; const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); }
@@ -270,11 +270,11 @@ function renderTeamSpotlightBar() {
 el('ts-golive')?.addEventListener('click', () => { const ts = currentState.teamSpotlight || {}; if (!ts.name) return; send('set_team_spotlight', { visible: !ts.visible, fetch: false }); });
 el('ts-refresh')?.addEventListener('click', () => { const ts = currentState.teamSpotlight || {}; if (!ts.name) return; send('set_team_spotlight', { name: ts.name, eventSlug: ts.eventSlug, entrantId: ts.entrantId }); evStatus('Refreshing spotlight from start.gg…'); });
 el('ts-copy-url')?.addEventListener('click', (e) => {
-  const url = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://127.0.0.1:3000') + '/team-spotlight.html';
+  const url = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://localhost:3000') + '/team-spotlight.html';
   if (typeof copyText === 'function') copyText(url, e.currentTarget); else if (navigator.clipboard) navigator.clipboard.writeText(url);
   evStatus('Copied the Team Spotlight overlay URL.', 'ok');
 });
-{ const pv = el('ts-preview'); if (pv) pv.href = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://127.0.0.1:3000') + '/team-spotlight.html?preview=1'; }
+{ const pv = el('ts-preview'); if (pv) pv.href = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://localhost:3000') + '/team-spotlight.html?preview=1'; }
 
 // ── Spotlight studio: mode toggle + in-page team picker + live WYSIWYG preview ──
 let _spMode = 'watch';
@@ -282,7 +282,7 @@ let _spFramesInit = false;
 // The control panel is loaded over file:// — point the preview iframes at the overlay server.
 function spInitFrames() {
   if (_spFramesInit) return; _spFramesInit = true;
-  const base = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://127.0.0.1:3000');
+  const base = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://localhost:3000');
   const fw = el('sp-frame-watch'); if (fw) fw.src = base + '/watchlist.html?embed=1';
   const fs = el('sp-frame-solo'); if (fs) fs.src = base + '/team-spotlight.html?embed=1';
 }
@@ -486,7 +486,7 @@ document.addEventListener('click', (e) => {
   if (!dd.contains(e.target)) spAddDdClose();
 });
 function spRefreshPreviewBar() {
-  const base = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://127.0.0.1:3000');
+  const base = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://localhost:3000');
   const open = el('sp-open'); if (open) open.href = base + (_spMode === 'solo' ? '/team-spotlight.html' : '/watchlist.html') + '?preview=1';
   const gl = el('sp-golive'), foot = el('sp-preview-foot');
   if (_spMode === 'solo') {
@@ -504,7 +504,7 @@ el('sp-golive')?.addEventListener('click', () => {
   else { const w = currentState.watchlist || {}; if (!(w.teams || []).length) return; send('set_watchlist', { visible: !w.visible }); }
 });
 el('sp-copy-url')?.addEventListener('click', (e) => {
-  const base = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://127.0.0.1:3000');
+  const base = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://localhost:3000');
   const url = base + (_spMode === 'solo' ? '/team-spotlight.html' : '/watchlist.html');
   if (typeof copyText === 'function') copyText(url, e.currentTarget); else if (navigator.clipboard) navigator.clipboard.writeText(url);
   evStatus('Copied the overlay URL.', 'ok');

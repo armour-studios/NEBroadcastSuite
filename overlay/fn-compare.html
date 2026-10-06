@@ -114,7 +114,7 @@ body { font-family: var(--main-font); color: var(--ink); }
   color: var(--ink); transition: color .2s ease; }
 .row .v.a { text-align: right; }  .row .v.b { text-align: left; }
 .row .v.win { color: var(--accent-2); }
-body.dark .row .v.win { color: var(--accent); }
+body.dark .row .v.win { color: var(--accent-ink, var(--accent)); }
 .row .lbl { font-size: 15px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase;
   color: var(--ink-mute); white-space: nowrap; text-align: center; min-width: 200px; }
 
@@ -176,7 +176,7 @@ body.dark #foot { background: rgba(255,255,255,.06); }
 
   function fillSide(hostId, plateId, side) {
     const host = el(hostId);
-    const initial = (side.name || '?').trim().charAt(0).toUpperCase() || '?';
+    const initial = (Array.from((side.name || '?').trim())[0] || '?').toUpperCase();   // whole code point, not half an emoji
     host.innerHTML = side.image
       ? '<img class="photo" src="' + esc(side.image) + '" alt="" onerror="this.outerHTML=&quot;<div class=\\&quot;nophoto\\&quot;>' + esc(initial) + '</div>&quot;">'
       : '<div class="nophoto">' + esc(initial) + '</div>';

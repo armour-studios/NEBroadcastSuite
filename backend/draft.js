@@ -116,14 +116,14 @@ try {
 // Overwatch role by portrait id — drives the front-panel role filter chips and the
 // 2-per-role ban cap enforced in roleLimitOk() below.
 const OW_ROLES = {
-  dva: 'Tank', doomfist: 'Tank', hazard: 'Tank', 'junker-queen': 'Tank', mauga: 'Tank',
+  dva: 'Tank', dmon: 'Tank', domina: 'Tank', doomfist: 'Tank', hazard: 'Tank', 'junker-queen': 'Tank', mauga: 'Tank',
   orisa: 'Tank', ramattra: 'Tank', reinhardt: 'Tank', roadhog: 'Tank', sigma: 'Tank',
   winston: 'Tank', 'wrecking-ball': 'Tank', zarya: 'Tank',
-  ashe: 'Damage', bastion: 'Damage', cassidy: 'Damage', echo: 'Damage', freja: 'Damage',
+  anran: 'Damage', ashe: 'Damage', emre: 'Damage', shion: 'Damage', sierra: 'Damage', vendetta: 'Damage', bastion: 'Damage', cassidy: 'Damage', echo: 'Damage', freja: 'Damage',
   genji: 'Damage', hanzo: 'Damage', junkrat: 'Damage', mei: 'Damage', pharah: 'Damage',
   reaper: 'Damage', sojourn: 'Damage', 'soldier-76': 'Damage', sombra: 'Damage',
   symmetra: 'Damage', torbjorn: 'Damage', tracer: 'Damage', venture: 'Damage', widowmaker: 'Damage',
-  ana: 'Support', baptiste: 'Support', brigitte: 'Support', illari: 'Support', juno: 'Support',
+  ana: 'Support', 'jetpack-cat': 'Support', mizuki: 'Support', wuyang: 'Support', baptiste: 'Support', brigitte: 'Support', illari: 'Support', juno: 'Support',
   kiriko: 'Support', lifeweaver: 'Support', lucio: 'Support', mercy: 'Support', moira: 'Support',
   zenyatta: 'Support'
 };
@@ -137,10 +137,9 @@ function rosterFromDirWithRoles(rel, urlBase, roleMap) {
 const ROSTERS = {
   league:           LOL_ROSTER,
   dota2:            rosterFromDir('assets/heroes/dota2',          '/assets/heroes/dota2/'),
-  // Use the CLEAN, canonical OW hero portraits (assets/overwatch/heroes) — the same folder the
-  // Overwatch overlay + hero-ban manager use. assets/heroes/overwatch was polluted with wrong-game
-  // heroes (anran/domina/jetpack-cat…) and mangled names (l-cio/torbj-rn), so the draft board showed
-  // bogus/missing characters.
+  // Canonical OW hero portraits (assets/overwatch/heroes) — the same folder the Overwatch overlay +
+  // hero-ban manager use, kept current by scripts/download-ow-heroes.js. Not assets/heroes/overwatch:
+  // that folder has mangled file names (l-cio/torbj-rn) that break the id → name/role lookups.
   overwatch:        rosterFromDirWithRoles('assets/overwatch/heroes', '/assets/overwatch/heroes/', OW_ROLES),
   'marvel-rivals':  rosterFromDir('assets/heroes/marvel-rivals',  '/assets/heroes/marvel-rivals/'),
   valorant:         rosterFromDir('assets/heroes/valorant',       '/assets/heroes/valorant/'),
@@ -178,7 +177,7 @@ function mergedRosters(gameConfigs) {
     if (!custom.length) { out[game] = built; return; }
     const byId = {};
     built.forEach((c) => { byId[c.id] = c; });
-    custom.forEach((c) => { if (c && c.id) byId[c.id] = { ...byId[c.id], ...c }; });
+    custom.forEach((c) => { if (c && c.id) byId[c.id] = byId[c.id] ? { ...byId[c.id], ...c } : { ...c, custom: true }; });
     out[game] = Object.values(byId);
   });
   return out;

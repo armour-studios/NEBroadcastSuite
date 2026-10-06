@@ -125,7 +125,7 @@
     .vb-label {
       display: flex; align-items: center; gap: 16px;
       font-size: 28px; font-weight: 900; letter-spacing: .42em; text-transform: uppercase;
-      color: var(--accent); line-height: 1;
+      color: var(--accent-ink, var(--accent)); line-height: 1;
       text-shadow: 0 3px 18px rgba(0,0,0,.95), 0 0 46px color-mix(in srgb, var(--accent) 70%, transparent);
     }
     .vb-label::before {
@@ -297,7 +297,7 @@
         : (data.scoreboardAd || {});
       const wrap = el('presented-by');
       if (slot.logo) {
-        el('pb-label').textContent = (slot.label || 'PRESENTED BY').toString().trim();
+        el('pb-label').textContent = (brand.presentedLabel || slot.label || 'PRESENTED BY').toString().trim();
         const logo = el('pb-logo'); logo.src = slot.logo; logo.style.display = '';
         wrap.classList.remove('is-empty');
       } else {

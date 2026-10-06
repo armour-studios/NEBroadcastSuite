@@ -122,7 +122,10 @@ body.anim-start #casterContainer[data-anim] {
 }
 #topText {
   order: -1 !important; flex: 0 0 100% !important; width: 100% !important;
-  height: 22px !important; font-weight: 800; font-size: 18px !important; line-height: 1 !important;
+  height: 22px !important; font-weight: 800; line-height: 1 !important;
+  /* One line, sized by fgc-adapter.js (fitTopText) through --fgc-top-fs. A variable rather than an
+     inline style because each skin's own text-fit keeps rewriting the inline font-size. */
+  font-size: var(--fgc-top-fs, 18px) !important; white-space: nowrap !important;
 }
 /* Brand logo, left of the event name (adapter sets --fgc-brand-logo + .fgc-has-logo). It's a
    ::before so the template's `#topText.textContent = event` doesn't wipe it; #topText is a centred

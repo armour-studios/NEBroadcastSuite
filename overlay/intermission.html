@@ -171,7 +171,7 @@
 
     .im-label {
       font-size: 20px; font-weight: 800; letter-spacing: .42em; text-transform: uppercase;
-      color: var(--accent); line-height: 1;
+      color: var(--accent-ink, var(--accent)); line-height: 1;
       display: flex; align-items: center; gap: 12px;
     }
     .im-label::before {
@@ -243,7 +243,7 @@
     }
     .im-next.hidden { display: none; }
     .im-next-tag {
-      flex-shrink: 0; font-size: 13px; font-weight: 800; letter-spacing: .3em; color: var(--accent);
+      flex-shrink: 0; font-size: 13px; font-weight: 800; letter-spacing: .3em; color: var(--accent-ink, var(--accent));
       padding-right: 22px; border-right: 1px solid rgba(255,255,255,.12); line-height: 1.2;
     }
     .im-next-tag.live { color: #22e06a; }
@@ -377,7 +377,7 @@
         : (data.scoreboardAd || {});
       const pbWrap = el('presented-by');
       if (slot.logo) {
-        el('pb-label').textContent = (slot.label || 'PRESENTED BY').toString().trim();
+        el('pb-label').textContent = (_pbBrand.presentedLabel || slot.label || 'PRESENTED BY').toString().trim();
         const pbLogo = el('pb-logo'); pbLogo.src = slot.logo; pbLogo.style.display = '';
         pbWrap.classList.remove('is-empty');
       } else {

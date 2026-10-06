@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
-<!-- NE Broadcast Suite — Overwolf GEP relay for Overwatch (game id 10844) and
-     Marvel Rivals (game id 24890).
+<!-- NE Broadcast Suite — Overwolf GEP relay for Overwatch (game id 10844),
+     Marvel Rivals (game id 24890) and Valorant (game id 21640).
      Load as an unpacked extension in the Overwolf client on the PC running the game:
      Overwolf settings > About > Development options > Load unpacked extension.
      Set SUITE_BASE below to the PC running NE Broadcast Suite.
@@ -22,6 +22,10 @@ var GAMES = {
   24890: {  // Marvel Rivals
     url: SUITE_BASE + '/api/mr-gep',
     features: ['gep_internal', 'match_info', 'game_info']
+  },
+  21640: {  // Valorant — feature names taken from Overwolf's Valorant GEP docs, not guessed.
+    url: SUITE_BASE + '/api/val-gep',
+    features: ['gep_internal', 'me', 'game_info', 'match_info', 'kill', 'death']
   }
   // R6_TODO — Rainbow Six Siege. The suite side is built and live at /api/r6-gep; this entry is all
   // that remains. Two values must be confirmed against Overwolf's own docs rather than guessed:
@@ -48,7 +52,10 @@ function freshBuf() {
   return { roster: {}, map: null, game_mode: null, game_type: null, game_state: null,
            match_id: null, scene: null, match_outcome: null,
            banned_characters: [], selected_character: null,
-           player_stats: null, objective_progress: null };
+           player_stats: null, objective_progress: null,
+           // Valorant
+           scoreboard: {}, round_number: null, round_phase: null, match_score: null,
+           team: null, observing: null, pseudo_match_id: null };
 }
 var stateBuf = freshBuf();
 
@@ -64,7 +71,16 @@ function post() {
   if (!activeGame || (!dirty && !pendingEvents.length)) return;
   var roster = Object.keys(stateBuf.roster).map(function (k) { return stateBuf.roster[k]; });
   var body;
-  if (activeGame === 10844) {
+  if (activeGame === 21640) {
+    // Valorant: the suite wants `scoreboard` (live) and `roster` (agent select) as arrays, plus
+    // the raw match_info values it normalises in backend/integrations/valorant-gep.js.
+    var board = Object.keys(stateBuf.scoreboard).map(function (k) { return stateBuf.scoreboard[k]; });
+    body = { scoreboard: board, roster: roster, map: stateBuf.map,
+      round_number: stateBuf.round_number, round_phase: stateBuf.round_phase,
+      match_score: stateBuf.match_score, team: stateBuf.team, observing: stateBuf.observing,
+      game_mode: stateBuf.game_mode, match_outcome: stateBuf.match_outcome,
+      pseudo_match_id: stateBuf.pseudo_match_id, events: pendingEvents };
+  } else if (activeGame === 10844) {
     body = { roster: roster, map: stateBuf.map, game_mode: stateBuf.game_mode,
       game_state: stateBuf.game_state, match_outcome: stateBuf.match_outcome, events: pendingEvents };
   } else {
@@ -92,6 +108,36 @@ function takeRosterKey(k, v) {
 function onInfo(info) {
   try {
     var d = info && (info.info || info);
+    if (activeGame === 21640) {
+      // Valorant: everything useful rides under match_info. Key names are documented at
+      // overwolf.github.io/api/live-game-data/supported-games/valorant — scoreboard_N, roster_N
+      // and match_score all arrive as JSON strings.
+      var vmi = d.match_info || {};
+      Object.keys(vmi).forEach(function (k) {
+        if (/^scoreboard_[0-9]+$/.test(k)) {
+          var sp = parseMaybeJson(vmi[k]);
+          if (sp && typeof sp === 'object' && sp.name) { stateBuf.scoreboard[k] = sp; dirty = true; }
+          return;
+        }
+        if (/^roster_[0-9]+$/.test(k)) return takeRosterKey(k, vmi[k]);
+        var vv = vmi[k];
+        switch (k) {
+          case 'map':             stateBuf.map = String(vv); dirty = true; break;
+          case 'round_number':    stateBuf.round_number = parseInt(vv, 10) || 0; dirty = true; break;
+          case 'round_phase':     stateBuf.round_phase = String(vv); dirty = true; break;
+          case 'match_score':     stateBuf.match_score = parseMaybeJson(vv); dirty = true; break;
+          case 'team':            stateBuf.team = String(vv); dirty = true; break;
+          case 'observing':       stateBuf.observing = String(vv); dirty = true; break;
+          case 'game_mode':       stateBuf.game_mode = String(vv); dirty = true; break;
+          case 'match_outcome':   stateBuf.match_outcome = String(vv); dirty = true; break;
+          case 'pseudo_match_id': stateBuf.pseudo_match_id = String(vv); dirty = true; break;
+          // `score` is {won,lost} from the LOCAL player's point of view; match_score carries the
+          // same rounds per team index, which is what a scoreboard needs. Not relayed.
+        }
+      });
+      if (d.game_info && d.game_info.scene) { stateBuf.scene = String(d.game_info.scene); dirty = true; }
+      return;
+    }
     if (activeGame === 24890) {
       // Marvel Rivals: everything rides under match_info / game_info.
       var mi = d.match_info || {};
@@ -142,10 +188,16 @@ function onEvents(e) {
         if (n === 'match_start' || n === 'round_start') stateBuf.match_outcome = null;
         if (n === 'match_end' || n === 'match_start') {   // fresh lobby next map
           stateBuf.roster = {};
+          stateBuf.scoreboard = {};
           // bans are drafted pre-map (BEFORE match_start fires) — only clear once the map ends
           if (n === 'match_end') stateBuf.banned_characters = [];
         }
         pendingEvents.push(n); dirty = true;
+      } else if (activeGame === 21640 && ['spike_planted', 'spike_defused', 'spike_detonated'].indexOf(n) > -1) {
+        pendingEvents.push(n); dirty = true;
+      } else if (n === 'kill_feed' && activeGame === 21640) {
+        pendingEvents.push({ name: 'kill_feed', data: parseMaybeJson(ev.data) || {} });
+        dirty = true;
       } else if (n === 'kill_feed' && activeGame === 24890) {
         var kf = parseMaybeJson(ev.data) || {};
         pendingEvents.push({ name: 'kill_feed', data: { attacker: kf.attacker || null, victim: kf.victim || null } });

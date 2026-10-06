@@ -57,6 +57,7 @@
   .feedbox{ position:relative; width:100%; height:100%; border-radius:14px; overflow:hidden; border:1px solid var(--line);
     background:#04060c; box-shadow:0 24px 70px -30px rgba(0,0,0,.9); }
   .feedbox iframe{ position:absolute; inset:0; width:100%; height:100%; border:0; }
+  html.pulse-demo-hidden body{ visibility:hidden; }
   /* demo feed (only when a tile has no real viewUrl) */
   .field{ position:absolute; inset:0; opacity:.94;
     background:
@@ -202,6 +203,12 @@
   ];
   let games = DEMO.map(g => ({...g}));
   let usingDemo = true;
+  // The demo slate is made-up matches with real-sounding teams. Fine for setting up in a browser or a
+  // ?preview=1 thumbnail; on air (OBS, or an over-game window, both expose window.obsstudio) show
+  // nothing until the org has real live games.
+  const HIDE_DEMO = !!window.obsstudio && !/[?&]preview=1\b/.test(location.search);
+  function syncDemoVisibility(){ document.documentElement.classList.toggle('pulse-demo-hidden', HIDE_DEMO && usingDemo); }
+  syncDemoVisibility();
   let cur = 0, nextHot = -1;
   const prevScore = {};   // key -> "sa-sb", to detect a score change between polls
 
@@ -307,6 +314,7 @@
         // real endpoint but no games right now → keep last; if we were demo, stay demo
       }
     } catch(e){ /* keep demo / last-known */ }
+    syncDemoVisibility();
     noteScoresAndMaybeSwitch();
   }
 

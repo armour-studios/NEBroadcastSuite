@@ -595,6 +595,9 @@
     opacity: 0; transition: opacity 0.25s ease; pointer-events: none; }
   .focus-cam iframe.active { opacity: 1; }
 
+  /* On air (OBS, or an over-game window — both expose window.obsstudio) the DEMO preview is fake
+     players: show nothing until GSI is live. A normal browser and ?preview=1 keep the preview. */
+  html.ne-over-game.cs-demo body, html.cs-onair.cs-demo body { display: none !important; }
   .preview-badge { position: absolute; bottom: 130px; left: 50%; transform: translateX(-50%);
     background: rgba(0,0,0,0.7); color: #fff; border: 1px solid var(--accent-2); font-size: 15px; font-weight: 700; letter-spacing: 2px; padding: 6px 16px; border-radius: 999px; }
 
@@ -1286,7 +1289,7 @@ function updateRow(entry, p, activeId, number){
   entry.wasAlive = p.alive;
 
   setText(refs.hpbox, dead ? '☠' : p.health);
-  setText(refs.pnum, (p.slot != null && p.slot < 99) ? String(p.slot) : '');   // 0–9, matches the map
+  setText(refs.pnum, slotKey(p.slot));   // the spectator hotkey, same number as on the map
   setText(refs.name, p.name);
   setText(refs.prk, (p.roundKills || 0) > 0 ? p.roundKills + 'K' : '');
   setText(refs.money, '$' + p.money);
@@ -1598,11 +1601,28 @@ function radarViewportTarget(players, bomb, cal){
 const grenReg = new Map();   // radar grenade markers by key (see renderRadar)
 const dotReg = new Map(); // steamid (or '__bomb__') -> dot element
 
+// The spectator hotkey for an observer slot. CS2's observer_slot counts from 0, while the keys run
+// 1-9 then 0, so slot 0 is key 1 and slot 9 is key 0. Printing the raw slot showed every number one
+// lower than the key the observer presses.
+function slotKey(slot){ return (slot != null && slot < 99) ? String((Number(slot) + 1) % 10) : ''; }
+
+// Death X = where the player DIED. After death CS2 keeps sending a moving position (it follows the
+// dead player's spectator view), so drawing the live position made the X jump around the map. Keep
+// each player's last living position and pin the X there until they are alive again.
+const lastAlivePos = new Map();   // steamid -> {x, y, z}
+function radarPlayers(players){
+  return (players || []).map((p) => {
+    if (p.alive){ if (p.pos) lastAlivePos.set(p.steamid, p.pos); return p; }
+    const pinned = lastAlivePos.get(p.steamid);
+    return pinned ? Object.assign({}, p, { pos: pinned }) : p;
+  });
+}
+
 function renderRadar(cs){
   const box = el('cs-radar');
   // Built-in radar off → boltobserv (or another external radar source) owns the top-left.
   if (!builtinRadar){ box.classList.add('hidden'); return; }
-  const all = cs.players || [];
+  const all = radarPlayers(cs.players);
   const cal = CS_MAPS[cs.map && cs.map.name];
   // Show the map whenever we know which map it is. Player dots need observer/spectator
   // GSI (positions) — but the map + A/B labels render regardless so it's never blank.
@@ -1673,7 +1693,7 @@ function renderRadar(cs){
     }
     // Player number (observer_slot 0–9); blank when unknown or dead.
     const num = d.lastChild;
-    num.textContent = (p.alive && p.slot != null && p.slot < 99) ? String(p.slot) : '';
+    num.textContent = p.alive ? slotKey(p.slot) : '';
     const low = p.alive && (p.health || 0) <= 30;
     d.className = 'rdot ' + (p.team === 'CT' ? 'ct' : 't')
       + (p.alive && p.steamid === activeId ? ' me' : '')
@@ -2070,6 +2090,10 @@ function render(cs){
   const live = !!(cs && cs.connected);
   cs = live ? cs : DEMO;
   el('preview-badge').classList.toggle('hidden', live);
+  // Over the producer's own game (html.ne-over-game) the DEMO preview is just fake players on top of
+  // a real match: show nothing until GSI is live.
+  document.documentElement.classList.toggle('cs-demo', !live);
+  document.documentElement.classList.toggle('cs-onair', !!window.obsstudio && !/[?&]preview=1\b/.test(location.search));
 
   // Event title bar
   const evBar = el('cs-event');
@@ -2095,11 +2119,11 @@ function render(cs){
   renderEcon(cs.players);
 
   const activeId = (cs.observed && cs.observed.steamid) || '';
-  // Order each column by scoreboard standing (score, then kills, then fewest deaths).
-  const byLeaderboard = (a, b) =>
-    (b.score || 0) - (a.score || 0) || (b.kills || 0) - (a.kills || 0) || (a.deaths || 0) - (b.deaths || 0);
-  const ct = (cs.players || []).filter(p => p.team === 'CT').sort(byLeaderboard);
-  const t  = (cs.players || []).filter(p => p.team === 'T').sort(byLeaderboard);
+  // Order each column by spectator slot, so the line-ups read 1-5 and 6-0 like the hotkeys and the
+  // radar numbers. (Sorting by score shuffled the rows mid-match and the numbers ran out of order.)
+  const bySlot = (a, b) => (a.slot ?? 99) - (b.slot ?? 99);
+  const ct = (cs.players || []).filter(p => p.team === 'CT').sort(bySlot);
+  const t  = (cs.players || []).filter(p => p.team === 'T').sort(bySlot);
   syncColumn(el('players-ct'), ct, 'ct', activeId);
   syncColumn(el('players-t'),  t,  't',  activeId);
   // Drop rows for players who left the server / match.

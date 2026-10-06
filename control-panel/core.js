@@ -218,6 +218,16 @@ function customConfirm(title, message, confirmText = 'Confirm') {
   return appConfirm(combined, confirmText);
 }
 
+// Manual "reset series" buttons (scoreboard, Smash strip). Mid-series a mis-click zeroed the score
+// on air with no way back; ask only when there is a score to lose. Pushing a NEW match from a
+// league or bracket still resets without asking — that is a new series by definition.
+async function confirmResetSeries() {
+  const s = (typeof currentState !== 'undefined' && currentState && currentState.series) || {};
+  const b = Number(s.blue) || 0, o = Number(s.orange) || 0;
+  if ((b || o) && !await customConfirm('Reset series', `Reset the series score (currently ${b}-${o}) to 0-0?`, 'Reset')) return;
+  send('reset_series', {});
+}
+
 function closeModal(result) {
   el('modal-container').classList.remove('active');
   if (modalResolve) modalResolve(result);

@@ -28,12 +28,16 @@ events for the current session, sends data only to the address the producer conf
 ## Category
 Utilities / Broadcasting (or closest available: Esports Tools)
 
-## Game
-Overwatch 2 (game ID 10844)
+## Games
+- Overwatch 2 (game ID 10844)
+- Marvel Rivals (game ID 24890)
+- Valorant (game ID 21640)
 
 ## Permissions used and why
-- GameInfo / game events (required): reading the Overwatch GEP features — game_info,
-  match_info, roster, kill, death, assist — which are the entire purpose of the app.
+- GameInfo / game events (required): reading each title's GEP features — game_info,
+  match_info, roster, kill, death, assist for Overwatch; match_info/game_info for Marvel
+  Rivals; gep_internal, me, game_info, match_info, kill, death for Valorant — which are the
+  entire purpose of the app.
 - No hotkeys UI, no overlays drawn in-game, no ads, no external services: data goes only
   to the user's own broadcast software on their LAN.
 

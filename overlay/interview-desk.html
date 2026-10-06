@@ -27,7 +27,7 @@
     .id-header { flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
       gap: 16px; margin-bottom: 18px; min-height: 40px; }
     .id-eyebrow { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 18px;
-      letter-spacing: .42em; text-transform: uppercase; color: var(--duo-accent); }
+      letter-spacing: .42em; text-transform: uppercase; color: var(--duo-accent-ink, var(--duo-accent)); }
     .id-title { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 40px;
       letter-spacing: .02em; text-transform: uppercase; color: #fff; white-space: nowrap;
       overflow: hidden; text-overflow: ellipsis; max-width: 1400px; }
@@ -67,7 +67,7 @@
       padding: 0 18px; background: linear-gradient(180deg, var(--duo-surface2), var(--duo-surface));
       border-top: 1px solid var(--duo-border); }
     .host-label { font-size: 11px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase;
-      color: var(--duo-accent); flex: 0 0 auto; }
+      color: var(--duo-accent-ink, var(--duo-accent)); flex: 0 0 auto; }
     .host-name { font-size: 22px; font-weight: 800; text-transform: uppercase; color: #fff;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1 1 0; }
     .host-handle { font-size: 13px; font-weight: 600; color: var(--duo-muted); flex: 0 0 auto; }
@@ -118,6 +118,8 @@
 
     /* ── Preview mode (file:// open directly) ─────────────────────────────── */
     .preview .cam-hole { background: repeating-linear-gradient(45deg, #181b22, #181b22 16px, #20242e 16px, #20242e 32px); }
+    /* Preview prints the slot label in the hole; the live empty-state text would sit on top of it. */
+    .preview .guest-empty { visibility: hidden; }
     .preview .cam-hole::after { content: attr(data-label); position: absolute; inset: 0;
       display: flex; align-items: center; justify-content: center; font-size: 22px;
       font-weight: 800; letter-spacing: .25em; color: #4a5162; }

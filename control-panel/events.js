@@ -89,6 +89,52 @@ async function evLoadChallongeTournaments() {
     evStatus(e.message || 'Failed to load. Check your Challonge API key in Settings.', 'err');
   } finally { if (btn) btn.disabled = false; }
 }
+/*
+  Challengermode tournaments for the grid.
+
+  Unlike Challonge/start.gg there is no "everything I can see" endpoint — tournaments are listed
+  per SPACE (the organisation) or per game. So this needs the Space id from Settings, and says so
+  rather than showing an empty grid: the producer can always still paste a link on the Dashboard.
+*/
+async function evLoadChallengermodeTournaments() {
+  const btn = el('ev-load'); if (btn) btn.disabled = true;
+  evStatus('Loading your Challengermode tournaments…');
+  try {
+    const spaceId = ((currentState.challengermode || {}).spaceId || '').trim();
+    if (!spaceId) {
+      _evTournaments = [];
+      evSetMode('Challengermode');
+      applyEventsView();
+      evStatus('Add your Space id in Marketplace → Integrations → Challengermode to list your tournaments here (or paste a tournament link on the Dashboard).');
+      return;
+    }
+    // Two calls: Challengermode splits open and completed behind a one-of filter, and a producer
+    // browsing for an event to run wants to see both.
+    const fetchList = async (completed) => {
+      const r = await fetch('http://127.0.0.1:3000/api/challengermode/tournaments', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ spaceId, completed })
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      return d.tournaments || [];
+    };
+    const [open, done] = await Promise.all([fetchList(false), fetchList(true).catch(() => [])]);
+    const seen = new Set();
+    _evTournaments = [...open, ...done].filter((x) => !seen.has(x.id) && seen.add(x.id)).map((x) => ({
+      platform: 'challengermode', slug: x.id, name: x.name,
+      // Challengermode's list query carries no start time, so these sort by name under the
+      // "upcoming" filter rather than pretending to a date we do not have.
+      startAt: null,
+      numAttendees: x.entrants || 0, eventCount: 1, image: '', game: x.gameName || '',
+    }));
+    evSetMode('Challengermode — my tournaments');
+    applyEventsView();
+    evStatus(_evTournaments.length ? '' : 'No tournaments found in that Space.');
+  } catch (e) {
+    evStatus(e.message || 'Failed to load. Check your Challengermode refresh key in Settings.', 'err');
+  } finally { if (btn) btn.disabled = false; }
+}
 async function evLoadNxgenTournaments() {
   const btn = el('ev-load'); if (btn) btn.disabled = true;
   evStatus('Loading your NXGEN events…');
@@ -135,15 +181,18 @@ async function evLoadFaceitCompetitions() {
 }
 // Switch which platform the Tournaments grid is showing.
 function evSetSource(src) {
-  _evSource = ['challonge', 'nxgen', 'faceit'].includes(src) ? src : 'startgg';
+  _evSource = ['challonge', 'challengermode', 'nxgen', 'faceit'].includes(src) ? src : 'startgg';
   document.querySelectorAll('#ev-src-seg .ev-seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.src === _evSource));
   const searchbar = el('ev-searchbar'); if (searchbar) searchbar.style.display = _evSource === 'startgg' ? '' : 'none';
   const loadBtn = el('ev-load');
-  if (loadBtn) loadBtn.textContent = _evSource === 'challonge' ? 'My Challonge tournaments' : _evSource === 'nxgen' ? 'My NXGEN events' : _evSource === 'faceit' ? 'My FACEIT competitions' : 'My tournaments';
+  if (loadBtn) loadBtn.textContent = _evSource === 'challonge' ? 'My Challonge tournaments'
+    : _evSource === 'challengermode' ? 'My Challengermode tournaments'
+    : _evSource === 'nxgen' ? 'My NXGEN events' : _evSource === 'faceit' ? 'My FACEIT competitions' : 'My tournaments';
   _evTournaments = []; _evDetail = null;
   const sec = el('ev-detail-section'); if (sec) sec.style.display = 'none';
   const toolbar = el('ev-toolbar'); if (toolbar) toolbar.style.display = '';
   if (_evSource === 'challonge') evLoadChallongeTournaments();
+  else if (_evSource === 'challengermode') evLoadChallengermodeTournaments();
   else if (_evSource === 'nxgen') evLoadNxgenTournaments();
   else if (_evSource === 'faceit') evLoadFaceitCompetitions();
   else evLoadTournaments();
@@ -226,6 +275,8 @@ function renderEventsGrid(list, now) {
       card.querySelector('.ev-card-live')?.addEventListener('click', (e) => {
         e.stopPropagation();
         if (platform === 'faceit') send('load_faceit_event', { id: t.slug, competitionType: t.competitionType || 'championship' });
+        // Challengermode is keyed by tournament ID, not a slug — different payload field.
+        else if (platform === 'challengermode') send('load_challengermode_tournament', { id: t.slug });
         else send(platform === 'challonge' ? 'load_challonge_tournament' : 'load_nxgen_event', { slug: t.slug });
         evStatus(`Loading "${t.name}" live…`);
       });
@@ -535,11 +586,12 @@ function renderMyEvents() {
     const rosterN = Array.isArray(ev.roster) ? ev.roster.length : (ev.numEntrants || 0);
     const sub = [ev.game, rosterN ? rosterN + ' teams' : '', ev.tournamentName].filter(Boolean).join(' · ');
     const isLive = platform === 'challonge' ? (currentState.challonge && currentState.challonge.tournamentSlug) === ev.platformSlug
+      : platform === 'challengermode' ? (currentState.challengermode && currentState.challengermode.tournamentId) === ev.platformSlug
       : platform === 'nxgen' ? (currentState.nxgen && currentState.nxgen.eventSlug) === ev.platformSlug
       : platform === 'faceit' ? (currentState.faceit && currentState.faceit.competitionId) === ev.platformSlug
       : platform === 'manual' ? false
       : (currentState.startgg && currentState.startgg.eventSlug) === ev.eventSlug;
-    const ME_SRC = { challonge: 'Challonge', nxgen: 'NXGEN', faceit: 'FACEIT', manual: 'Manual' };
+    const ME_SRC = { challonge: 'Challonge', challengermode: 'Challengermode', nxgen: 'NXGEN', faceit: 'FACEIT', manual: 'Manual' };
     const srcBadge = platform !== 'startgg' ? ` <span class="me-src-badge">${ME_SRC[platform] || 'Manual'}</span>` : '';
     const metaText = platform === 'startgg' ? evSyncBadge(ev) : platform === 'manual' ? 'Manual entry — no platform to sync from.' : 'No auto-sync for this platform yet — refresh manually as needed.';
     card.innerHTML = evCardLogo(ev) + `<div class="me-info"><div class="me-name">${esc(ev.name || 'Event')}${srcBadge}${isLive ? ' <span class="me-live">LIVE</span>' : ''}</div>`
@@ -550,6 +602,7 @@ function renderMyEvents() {
     if (platform !== 'manual') {
       acts.appendChild(mk('btn btn-primary btn-sm', isLive ? 'Reload' : 'Set live', () => {
         if (platform === 'challonge') send('load_challonge_tournament', { slug: ev.platformSlug });
+        else if (platform === 'challengermode') send('load_challengermode_tournament', { id: ev.platformSlug });
         else if (platform === 'nxgen') send('load_nxgen_event', { slug: ev.platformSlug });
         else if (platform === 'faceit') send('load_faceit_event', { id: ev.platformSlug, competitionType: ev.competitionType || 'championship' });
         else send('activate_startgg_event', { eventSlug: ev.eventSlug, tournamentSlug: ev.tournamentSlug });
@@ -567,6 +620,8 @@ function renderMyEvents() {
     } else if (platform === 'challonge') {
       acts.appendChild(mk('btn btn-secondary btn-sm', 'Pre-load teams', () => send('import_challonge_teams', { slug: ev.platformSlug }), 'Import this tournament\'s participants into your team library'));
       acts.appendChild(mk('btn btn-ghost btn-sm', 'View event ↗', () => window.open('https://challonge.com/' + ev.platformSlug, '_blank', 'noopener'), 'Open on platform'));
+    } else if (platform === 'challengermode') {
+      acts.appendChild(mk('btn btn-ghost btn-sm', 'View event ↗', () => window.open('https://www.challengermode.com/tournaments/' + ev.platformSlug, '_blank', 'noopener'), 'Open on platform'));
     } else if (platform === 'faceit') {
       acts.appendChild(mk('btn btn-ghost btn-sm', 'View event ↗', () => window.open(
         (ev.competitionType === 'hub' ? 'https://www.faceit.com/en/hub/' : 'https://www.faceit.com/en/championship/') + ev.platformSlug,

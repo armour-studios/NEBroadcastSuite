@@ -23,7 +23,7 @@
     /* Header */
     .d-head { text-align:center; margin-top:48px; }
     .d-title { font-weight:700; font-size:3.2em; color:#fff; letter-spacing:.04em; line-height:1; text-shadow:0 2px 18px rgba(0,0,0,.6); }
-    .d-sub { font-weight:600; font-size:1.15em; color:var(--accent); letter-spacing:.42em; margin-top:8px; text-transform:uppercase; }
+    .d-sub { font-weight:600; font-size:1.15em; color:var(--accent-ink, var(--accent)); letter-spacing:.42em; margin-top:8px; text-transform:uppercase; }
 
     /* Phase / turn banner + timer */
     .d-phase { display:flex; align-items:center; justify-content:center; gap:18px; margin-top:18px; height:54px; }
@@ -82,40 +82,83 @@
     .active { animation:dpulse 1.15s ease-in-out infinite; }
     @keyframes dpulse { 0%,100% { box-shadow:0 0 0 0 rgba(255,255,255,0); } 50% { box-shadow:0 0 0 3px rgba(255,255,255,.85); } }
 
-    /* ── Ban-only clean layout (Overwatch / Marvel Rivals — a few bans, no picks) ──
-       Vertically & horizontally centred; adapts to 2 bans (1 per team) or 4 (2 per team). */
+    /* ── Ban-only layout (Overwatch / Marvel Rivals — a few bans, no picks) ──
+       Map art band + map name across the top, then two team sides of tall portrait ban cards
+       flanking VS + the series score. Adapts to 1 or 2 bans per team. */
+    .d-maphero { position:absolute; left:0; right:0; top:0; height:470px; background-size:cover; background-position:center 38%;
+      opacity:0; transition:opacity .4s ease; pointer-events:none;
+      -webkit-mask-image:linear-gradient(180deg, rgba(0,0,0,.95) 0%, rgba(0,0,0,.55) 52%, transparent 100%);
+      mask-image:linear-gradient(180deg, rgba(0,0,0,.95) 0%, rgba(0,0,0,.55) 52%, transparent 100%); }
+    .d-maphero::after { content:''; position:absolute; inset:0; background:linear-gradient(180deg, rgba(6,8,13,.35), rgba(6,8,13,.75)); }
+    #draft-stage.ban-mode.has-map .d-maphero { opacity:.7; }
+    .d-eyebrow { display:none; align-items:center; gap:14px; margin-bottom:16px; padding:8px 20px; border-radius:6px;
+      background:rgba(8,10,16,.78); border:1px solid rgba(255,255,255,.14);
+      font-weight:700; font-size:1.05em; letter-spacing:.3em; color:#fff; text-transform:uppercase; }
+    .d-eyebrow .d-eb-sep { width:6px; height:6px; border-radius:50%; background:var(--accent); }
+    .d-eyebrow .d-eb-mode { color:var(--accent-ink, var(--accent)); }
+    #draft-stage.ban-mode .d-eyebrow.on { display:inline-flex; }
     #draft-stage.ban-mode { justify-content:center; }
-    #draft-stage.ban-mode .d-head { margin-top:0; }
-    #draft-stage.ban-mode .d-phase { margin-top:14px; }
-    .d-cols.ban-only { justify-content:center; margin-top:44px; }
-    .d-banboard { display:flex; align-items:center; justify-content:center; gap:clamp(56px, 7vw, 128px); }
-    .d-bo-team { display:flex; flex-direction:column; align-items:center; gap:16px; max-width:660px; }
-    .d-bo-logo { height:112px; max-width:230px; object-fit:contain; filter:drop-shadow(0 6px 20px rgba(0,0,0,.55)); }
-    .d-bo-name { font-weight:700; font-size:2.7em; text-transform:uppercase; letter-spacing:.03em; line-height:1;
-      text-align:center; text-shadow:0 3px 16px rgba(0,0,0,.6); }
-    .d-bo-tag { font-size:.62em; font-weight:700; letter-spacing:.34em; color:#8a919c; text-transform:uppercase; margin-top:2px; }
-    .d-bo-bans { display:flex; gap:26px; margin-top:10px; }
-    .d-bo-ban { width:200px; height:200px; border-radius:18px; overflow:hidden; position:relative; flex-shrink:0;
-      background:var(--scene-bg,#171b22); border:2px solid rgba(255,255,255,.12); box-shadow:0 14px 38px rgba(0,0,0,.5); }
-    .d-bo-bans.solo .d-bo-ban { width:250px; height:250px; }
-    .d-bo-ban img { width:100%; height:100%; object-fit:cover; object-position:center 20%; filter:grayscale(1) brightness(.5); }
-    .d-bo-ban::after { content:''; position:absolute; left:14px; right:14px; top:50%; height:7px; border-radius:4px; background:#ff4d57;
-      transform:rotate(-20deg) translateY(-50%); box-shadow:0 0 14px rgba(255,77,87,.9); opacity:0; }
-    .d-bo-ban.filled::after { opacity:1; }
-    .d-bo-ban-name { position:absolute; left:0; right:0; bottom:10px; text-align:center; font-weight:700; font-size:1.15em; color:#fff;
-      text-transform:uppercase; letter-spacing:.02em; text-shadow:0 2px 10px rgba(0,0,0,.9); padding:0 8px; }
-    .d-bo-ban.empty { background:rgba(255,255,255,.03); border-style:dashed; box-shadow:none; }
-    .d-bo-ban.empty .d-bo-ban-name { color:#4a5162; font-size:.95em; letter-spacing:.14em; }
-    .d-bo-ban.active { border-color:rgba(255,255,255,.95); }
-    .d-bo-mid { display:flex; flex-direction:column; align-items:center; gap:14px; align-self:center; }
-    .d-bo-vs { font-weight:800; font-size:2.9em; color:rgba(255,255,255,.34); letter-spacing:.14em; }
-    .d-bo-score { font-weight:700; font-size:2em; color:#fff; padding:5px 20px; border-radius:10px;
-      background:rgba(12,16,24,.72); border:1px solid rgba(255,255,255,.14); font-variant-numeric:tabular-nums; }
+    #draft-stage.ban-mode .d-head { margin-top:0; position:relative; z-index:1; }
+    #draft-stage.ban-mode .d-title { font-size:4em; letter-spacing:.08em; }
+    #draft-stage.ban-mode .d-phase { margin-top:16px; position:relative; z-index:1; }
+    .d-cols.ban-only { justify-content:center; margin-top:46px; position:relative; z-index:1; }
+
+    .d-bb { display:flex; align-items:center; justify-content:center; gap:80px; }
+    /* Sides size to their content (one tall card or two) and the cards hug the VS column, so a
+       one-ban-per-team board doesn't leave a hole in the middle of the screen. */
+    .d-bb-team { min-width:560px; max-width:700px; display:flex; flex-direction:column; gap:22px; }
+    .d-bb-head { display:flex; align-items:center; gap:18px; width:100%; padding-bottom:16px;
+      border-bottom:3px solid var(--tc); }
+    .d-bb-team.b .d-bb-head { flex-direction:row-reverse; text-align:right; }
+    .d-bb-logo { width:92px; height:92px; object-fit:contain; flex-shrink:0; filter:drop-shadow(0 6px 18px rgba(0,0,0,.6)); }
+    .d-bb-id { min-width:0; flex:1; }
+    .d-bb-name { font-weight:700; font-size:2.6em; line-height:1; color:var(--tink); text-transform:uppercase; letter-spacing:.03em;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-shadow:0 3px 16px rgba(0,0,0,.6); }
+    .d-bb-sub { margin-top:6px; font-weight:700; font-size:1em; letter-spacing:.32em; color:#ff5a63; text-transform:uppercase; }
+    .d-bb-cards { display:flex; gap:24px; justify-content:flex-end; }
+    .d-bb-team.b .d-bb-cards { flex-direction:row-reverse; }
+
+    .d-bc { width:250px; height:330px; border-radius:16px; overflow:hidden; position:relative; flex-shrink:0;
+      background:linear-gradient(180deg, #1a1f2b, #0d1017); border:2px solid rgba(255,255,255,.10);
+      box-shadow:0 18px 44px rgba(0,0,0,.55); }
+    .d-bb-cards.solo .d-bc { width:300px; height:390px; }
+    .d-bc::before { content:''; position:absolute; left:0; right:0; top:0; height:6px; background:var(--tc); z-index:3; }
+    .d-bc img { position:absolute; left:0; right:0; top:0; width:100%; height:80%; object-fit:cover; object-position:center 18%;
+      filter:grayscale(1) contrast(1.05) brightness(.62); }
+    .d-bc.filled::after { content:''; position:absolute; left:-10%; right:-10%; top:40%; height:8px; border-radius:4px; background:#ff4d57;
+      transform:rotate(-24deg); box-shadow:0 0 18px rgba(255,77,87,.95); z-index:2; }
+    .d-bc-foot { position:absolute; left:0; right:0; bottom:0; z-index:3; padding:46px 16px 16px;
+      background:linear-gradient(180deg, transparent, rgba(6,8,12,.94) 45%); }
+    .d-bc-flag { display:inline-flex; align-items:center; gap:7px; padding:4px 10px 4px 8px; border-radius:5px; background:#ff4d57; color:#fff;
+      font-weight:800; font-size:.85em; letter-spacing:.2em; line-height:1; text-transform:uppercase; margin-bottom:9px; }
+    .d-bc-flag svg { width:14px; height:14px; display:block; }
+    .d-bc-name { font-weight:700; font-size:1.85em; line-height:1; color:#fff; text-transform:uppercase; letter-spacing:.02em;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .d-bc-role { margin-top:5px; font-weight:600; font-size:.9em; letter-spacing:.24em; color:#9aa3b5; text-transform:uppercase; }
+    .d-bc.empty { background:rgba(255,255,255,.03); border:2px dashed rgba(255,255,255,.16); box-shadow:none; }
+    .d-bc.empty::before { opacity:.35; }
+    .d-bc-wait { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; text-align:center;
+      font-weight:700; font-size:1.25em; letter-spacing:.24em; color:#6b7383; text-transform:uppercase; }
+    .d-bc.active { border:2px solid var(--tc); animation:dbcPulse 1.3s ease-in-out infinite; }
+    .d-bc.active .d-bc-wait { color:var(--tink); }
+    @keyframes dbcPulse { 0%,100% { box-shadow:0 0 0 0 rgba(255,255,255,0), 0 18px 44px rgba(0,0,0,.5); }
+      50% { box-shadow:0 0 0 6px rgba(255,255,255,.10), 0 0 34px var(--tc); } }
+    /* A ban that just landed slams in. */
+    .d-bc.is-new { animation:dbcIn .55s cubic-bezier(.2,1.4,.4,1) both; }
+    @keyframes dbcIn { 0% { transform:scale(1.18); opacity:0; filter:brightness(2.2); } 60% { opacity:1; } 100% { transform:scale(1); filter:none; } }
+
+    .d-bb-mid { display:flex; flex-direction:column; align-items:center; gap:16px; padding-top:60px; }
+    .d-bb-vs { font-weight:800; font-size:3.2em; color:rgba(255,255,255,.32); letter-spacing:.14em; line-height:1; }
+    .d-bb-score { display:flex; align-items:center; gap:14px; font-weight:700; font-size:2.3em; color:#fff; padding:6px 22px; border-radius:10px;
+      background:rgba(10,13,20,.8); border:1px solid rgba(255,255,255,.14); font-variant-numeric:tabular-nums; line-height:1.1; }
+    .d-bb-score span:nth-child(2) { color:rgba(255,255,255,.35); }
+    .d-bb-score-lbl { font-size:.8em; font-weight:700; letter-spacing:.3em; color:#7b818c; text-transform:uppercase; margin-top:-8px; }
   </style>
 </head>
 <body>
   <div id="draft-stage">
-    <div class="d-head"><div class="d-title" id="d-title">PICK &amp; BAN</div><div class="d-sub" id="d-sub"></div></div>
+    <div class="d-maphero" id="d-maphero"></div>
+    <div class="d-head"><div class="d-eyebrow" id="d-eyebrow"></div><div class="d-title" id="d-title">PICK &amp; BAN</div><div class="d-sub" id="d-sub"></div></div>
     <div class="d-phase">
       <div class="d-phase-pill" id="d-phase-pill"><span class="d-phase-dot" id="d-phase-dot"></span><span class="d-phase-txt" id="d-phase-txt">—</span></div>
       <div class="d-timer" id="d-timer">0:30</div>
@@ -197,52 +240,96 @@
       return col;
     }
 
-    // Clean centred layout for ban-only games (Overwatch, Marvel Rivals): two team groups of
-    // large banned-hero tiles flanking a VS / series score — no empty pick columns to fill the screen.
+    // Ban-only board (Overwatch, Marvel Rivals): two team sides of tall portrait ban cards flanking
+    // VS + the series score. Cards that just landed get .is-new so they slam in once, not every render.
+    let _seenBans = new Set();
     function buildBanBoard(data, d) {
-      const board = document.createElement('div'); board.className = 'd-banboard';
+      const board = document.createElement('div'); board.className = 'd-bb';
+      const nowSeen = new Set();
       const group = (side) => {
         const t = SceneBase.teamSide(data, side === 'a' ? 'blue' : 'orange');
-        const nBans = countsFor(d.sequence, side).bans;
-        const bans = (d.ops || []).filter((o) => o.by === side && o.action === 'ban');
-        const isTurn = !!(d.turn && d.turn.team === side && d.turn.action === 'ban');
-        const g = document.createElement('div'); g.className = 'd-bo-team';
-        if (t.customLogo) { const lg = document.createElement('img'); lg.className = 'd-bo-logo'; lg.src = t.customLogo; lg.alt = ''; g.appendChild(lg); }
-        const nm = document.createElement('div'); nm.className = 'd-bo-name';
-        nm.textContent = t.name || (side === 'a' ? 'BLUE' : 'RED'); nm.style.color = t.color; g.appendChild(nm);
-        const tag = document.createElement('div'); tag.className = 'd-bo-tag';
-        tag.textContent = nBans === 1 ? 'HERO BAN' : 'HERO BANS'; g.appendChild(tag);
-        const row = document.createElement('div'); row.className = 'd-bo-bans' + (nBans === 1 ? ' solo' : '');
-        for (let i = 0; i < nBans; i++) {
-          const op = bans[i];
-          const b = document.createElement('div'); b.className = 'd-bo-ban' + (op ? ' filled' : ' empty');
-          if (op) b.style.borderColor = t.color;
-          if (op && op.image) { const im = document.createElement('img'); im.src = op.image; im.alt = op.name; b.appendChild(im); }
-          const bn = document.createElement('div'); bn.className = 'd-bo-ban-name';
-          bn.textContent = op ? op.name : (isTurn && i === bans.length ? 'Banning…' : 'Ban ' + (i + 1));
-          b.appendChild(bn);
-          if (!op && isTurn && i === bans.length) b.classList.add('active');
-          row.appendChild(b);
+        const steps = (d.sequence || []).map((s, i) => ({ s, i })).filter((x) => x.s.by === side && x.s.action === 'ban');
+        const ops = d.ops || [];
+        const g = document.createElement('div'); g.className = 'd-bb-team ' + side;
+        g.style.setProperty('--tc', t.color);
+        g.style.setProperty('--tink', SceneBase.liftForDark(t.color, 0.12));   // a navy/black team colour is unreadable as type
+        const head = document.createElement('div'); head.className = 'd-bb-head';
+        if (t.logo) {
+          const lg = document.createElement('img'); lg.className = 'd-bb-logo'; lg.src = t.logo; lg.alt = '';
+          lg.onerror = () => { lg.style.display = 'none'; }; head.appendChild(lg);
         }
+        const id = document.createElement('div'); id.className = 'd-bb-id';
+        const nm = document.createElement('div'); nm.className = 'd-bb-name'; nm.textContent = t.name || (side === 'a' ? 'BLUE' : 'RED');
+        const sub = document.createElement('div'); sub.className = 'd-bb-sub'; sub.textContent = steps.length === 1 ? 'Hero ban' : 'Hero bans';
+        id.appendChild(nm); id.appendChild(sub); head.appendChild(id); g.appendChild(head);
+        const row = document.createElement('div'); row.className = 'd-bb-cards' + (steps.length === 1 ? ' solo' : '');
+        steps.forEach(({ i }, k) => {
+          const op = ops[i];
+          const isActive = !op && !!d.turn && ops.length === i;
+          const c = document.createElement('div'); c.className = 'd-bc' + (op ? ' filled' : ' empty') + (isActive ? ' active' : '');
+          if (op) {
+            const key = side + i + ':' + op.name; nowSeen.add(key);
+            if (!_seenBans.has(key)) c.classList.add('is-new');
+            if (op.image) { const im = document.createElement('img'); im.src = op.image; im.alt = ''; c.appendChild(im); }
+            const foot = document.createElement('div'); foot.className = 'd-bc-foot';
+            foot.innerHTML = '<div class="d-bc-flag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><line x1="5.6" y1="5.6" x2="18.4" y2="18.4"/></svg><span>Banned</span></div>';
+            const n = document.createElement('div'); n.className = 'd-bc-name'; n.textContent = op.name; foot.appendChild(n);
+            if (op.role) { const r = document.createElement('div'); r.className = 'd-bc-role'; r.textContent = op.role; foot.appendChild(r); }
+            c.appendChild(foot);
+          } else {
+            const w = document.createElement('div'); w.className = 'd-bc-wait';
+            // One ban per team is a real format — its single slot is just "Ban", not "Ban 1".
+            w.textContent = isActive ? 'Banning…' : (steps.length === 1 ? 'Ban' : 'Ban ' + (k + 1));
+            c.appendChild(w);
+          }
+          row.appendChild(c);
+        });
         g.appendChild(row);
         return g;
       };
-      const mid = document.createElement('div'); mid.className = 'd-bo-mid';
-      const vs = document.createElement('div'); vs.className = 'd-bo-vs'; vs.textContent = 'VS'; mid.appendChild(vs);
-      const sa = data && data.match && data.match.score && data.match.score.a;
-      const sb = data && data.match && data.match.score && data.match.score.b;
-      if (typeof sa === 'number' && typeof sb === 'number') {
-        const sc = document.createElement('div'); sc.className = 'd-bo-score'; sc.textContent = sa + ' – ' + sb; mid.appendChild(sc);
+      const mid = document.createElement('div'); mid.className = 'd-bb-mid';
+      const vs = document.createElement('div'); vs.className = 'd-bb-vs'; vs.textContent = 'VS'; mid.appendChild(vs);
+      const ser = data && data.series;
+      if (ser && (typeof ser.blue === 'number' || typeof ser.orange === 'number')) {
+        const sc = document.createElement('div'); sc.className = 'd-bb-score';
+        sc.innerHTML = '<span></span><span>–</span><span></span>';
+        sc.children[0].textContent = ser.blue || 0; sc.children[2].textContent = ser.orange || 0;
+        mid.appendChild(sc);
+        const lbl = document.createElement('div'); lbl.className = 'd-bb-score-lbl'; lbl.textContent = 'Series'; mid.appendChild(lbl);
       }
       board.appendChild(group('a')); board.appendChild(mid); board.appendChild(group('b'));
+      _seenBans = nowSeen;
       return board;
+    }
+
+    // Current map (from the Map Pool, game N = maps[N-1]) for the ban board's header band.
+    function currentMap(data) {
+      const idx = Math.max(0, ((data && data.game && data.game.number) || 1) - 1);
+      const maps = (data && data.veto && Array.isArray(data.veto.maps)) ? data.veto.maps : [];
+      const m = maps[idx] || {};
+      const modes = (data && data.owMatch && Array.isArray(data.owMatch.mapModes)) ? data.owMatch.mapModes : [];
+      return { num: idx + 1, name: m.name || '', image: m.image || '', mode: m.mode || m.type || modes[idx] || '' };
+    }
+    function setMapHeader(data, banOnly) {
+      const eb = document.getElementById('d-eyebrow'), art = document.getElementById('d-maphero');
+      const m = currentMap(data);
+      const on = banOnly && !!m.name;
+      stage.classList.toggle('has-map', on && !!m.image);
+      art.style.backgroundImage = on && m.image ? 'url("' + m.image.replace(/"/g, '%22') + '")' : '';
+      eb.classList.toggle('on', on);
+      eb.innerHTML = '';
+      if (!on) return;
+      const add = (txt, cls) => { const s = document.createElement('span'); if (cls) s.className = cls; s.textContent = txt; eb.appendChild(s); };
+      add('Map ' + m.num); add('', 'd-eb-sep'); add(m.name);
+      if (m.mode) { add('', 'd-eb-sep'); add(m.mode, 'd-eb-mode'); }
     }
 
     function setPhase(d, data) {
       const pill = document.getElementById('d-phase-pill');
       const dot = document.getElementById('d-phase-dot');
       const txt = document.getElementById('d-phase-txt');
-      if (d.complete) { pill.style.display = ''; dot.style.background = '#46d17a'; dot.style.color = '#46d17a'; txt.textContent = 'Draft Complete'; return; }
+      if (d.complete) { pill.style.display = ''; dot.style.background = '#46d17a'; dot.style.color = '#46d17a';
+        txt.textContent = (d.sequence || []).some((s) => s.action === 'pick') ? 'Draft Complete' : 'Bans Locked'; return; }
       if (!d.turn) { pill.style.display = 'none'; return; }
       pill.style.display = '';
       const t = SceneBase.teamSide(data, d.turn.team === 'a' ? 'blue' : 'orange');
@@ -252,7 +339,8 @@
 
     function tickTimer(d) {
       const el = document.getElementById('d-timer');
-      if (!_timerGame || !d || !d.turn || d.complete) { el.style.display = 'none'; return; }
+      // Ban boards drop the shot clock: nobody enforces it for a couple of bans, and a red 0:00 on air reads as a fault.
+      if (!_timerGame || !d || !d.turn || d.complete || stage.classList.contains('ban-mode')) { el.style.display = 'none'; return; }
       el.style.display = '';
       let rem = Math.max(0, Math.round((_deadline - Date.now()) / 1000));
       const m = Math.floor(rem / 60), s = rem % 60;
@@ -260,8 +348,20 @@
       el.classList.toggle('low', rem <= 10);
     }
 
+    // Sample board for ?preview=1 / ?embed=1 / file:// — an Overwatch-style ban board, two bans a side.
+    const DEMO_DRAFT = { visible: true, title: 'Grand Final — Hero Bans', game: 'overwatch', teamStart: 'a', complete: false, owBanCount: 4,
+      turn: { team: 'b', action: 'ban' },
+      sequence: [{ action: 'ban', by: 'a' }, { action: 'ban', by: 'b' }, { action: 'ban', by: 'b' }, { action: 'ban', by: 'a' }],
+      ops: [
+        { name: 'Sombra', action: 'ban', by: 'a', image: '/assets/overwatch/heroes/sombra.png' },
+        { name: 'Widowmaker', action: 'ban', by: 'b', image: '/assets/overwatch/heroes/widowmaker.png' }
+      ] };
+
     function render(data) {
-      const d = data.draft || {};
+      let d = data.draft || {};
+      // Preview with no draft running: show the sample board, so the Scenes launcher thumbnail and
+      // the Preview window aren't a blank page (the live state's empty draft used to win).
+      if (SceneBase.preview && !(Array.isArray(d.sequence) && d.sequence.length)) d = DEMO_DRAFT;
       _lastDraft = d;
       // Nothing pushed live yet (or the board was reset/cleared) — hide the whole stage instead
       // of showing an empty/stale board of heroes.
@@ -276,22 +376,23 @@
 
       const sig = JSON.stringify({ ops: d.ops, turn: d.turn, t: d.title, sub: d.subtitle, seq: d.sequence,
         c: [data.teams?.blue?.color, data.teams?.orange?.color, data.teams?.blue?.name, data.teams?.orange?.name],
-        sc: data?.match?.score });
+        sc: data?.match?.score, ser: data?.series, map: currentMap(data), lg: [data.teams?.blue?.logo, data.teams?.orange?.logo] });
       if (sig === _sig) { tickTimer(d); return; }
       _sig = sig;
 
       document.documentElement.style.setProperty('--accent', SceneBase.brandAccent(data));
-      document.getElementById('d-title').textContent = (d.title || 'CHAMPION DRAFT').toUpperCase();
       const blue = SceneBase.teamSide(data, 'blue'), orange = SceneBase.teamSide(data, 'orange');
       // Ban-only games (Overwatch / Marvel Rivals) get the clean centred ban board; everything with
       // picks (LoL / Dota / Valorant) keeps the two-column pick-ban layout.
       const banOnly = !(d.sequence || []).some((s) => s.action === 'pick');
+      document.getElementById('d-title').textContent = (d.title || (banOnly ? 'HERO BANS' : 'PICK & BAN')).toUpperCase();
       // Custom subtext when set. Ban-only boards show the team names on the board itself, so we skip
       // the "BLUE · RED" fallback line (no bullet); pick/ban layouts keep it.
       document.getElementById('d-sub').textContent = (d.subtitle && d.subtitle.trim())
         ? d.subtitle.trim()
         : (banOnly ? '' : ((blue.name || 'BLUE') + '  ·  ' + (orange.name || 'RED')));
       setPhase(d, data);
+      setMapHeader(data, banOnly);
       tickTimer(d);
 
       const cols = document.querySelector('.d-cols');
@@ -311,17 +412,7 @@
 
     if (EMBED || location.protocol === 'file:') {
       render({ teams: { blue: { name: 'FROST', color: '#3b82f6' }, orange: { name: 'EMBER', color: '#f97316' } },
-        match: { score: { a: 1, b: 0 } },
-        // Overwatch-style ban board (2 bans per team). Change owBanCount/sequence length to preview the 2-ban layout.
-        draft: { visible: true, title: 'Grand Final — Hero Bans', game: 'overwatch', teamStart: 'a', complete: false, owBanCount: 4,
-          turn: { team: 'b', action: 'ban' },
-          sequence: [
-            { action: 'ban', by: 'a' }, { action: 'ban', by: 'b' }, { action: 'ban', by: 'b' }, { action: 'ban', by: 'a' }
-          ],
-          ops: [
-            { name: 'Sombra', action: 'ban', by: 'a', image: '/assets/overwatch/heroes/sombra.png' },
-            { name: 'Widowmaker', action: 'ban', by: 'b', image: '/assets/overwatch/heroes/widowmaker.png' }
-          ] } });
+        match: { score: { a: 1, b: 0 } }, draft: DEMO_DRAFT });
     }
   })();
   </script>

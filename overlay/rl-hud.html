@@ -8,8 +8,9 @@
 /* ════════════════════════════════════════════════════════════════════════
    RL "modern" HUD — standalone browser source.
    Connects to the same WS bridge (:3001) and consumes the SAME full_state /
-   state_update / view_change / game_reset payloads as the classic overlay
-   (overlay/index.html). Alternate design, not a replacement.
+   state_update / view_change / game_reset payloads the retired Classic overlay
+   (overlay/index.html) did, and replaced it in 2026-10: http://localhost:3000/ now
+   redirects here, so old OBS sources on the bare address land on this HUD.
    Inspired by github.com/lexogrine/rl-react-hud.
    ════════════════════════════════════════════════════════════════════════ */
 :root{
@@ -45,6 +46,7 @@ body{
 body.ui-hidden #scorebar,
 body.ui-hidden #event-name,
 body.ui-hidden #game-sub,
+body.ui-hidden #game-sub-logo,
 body.ui-hidden #ot-subbar,
 body.ui-hidden #ot-swipe,
 body.ui-hidden #players-blue,
@@ -57,7 +59,12 @@ body.ui-hidden #sponsor{display:none !important;}
    only the inline #sb), the main HUD's live scorebar stayed up and sat on top of / beside the scorecard
    — a double layer. Applies in every mode (inline board is opaque, so hiding the chrome under it is a
    no-op there). #sb is intentionally NOT in this list. */
-body.on-board :is(#scorebar,#event-name,#game-sub,#ot-subbar,#ot-swipe,#players-blue,#players-orange,#br,#tk,#sponsor){display:none !important;}
+/* Popped out OVER the producer's own game (backend/game-overlay-preload.js adds html.ne-over-game):
+   no post-game board. It is a broadcast layer, and over a live game it covered RL's own post-game UI
+   (Ready / Exit / stats) until the next kickoff. With on-board hiding the chrome too, the screen is
+   simply clear after a match. OBS sources never get this class. */
+html.ne-over-game:not(.sb-only) #sb{display:none !important;}
+body.on-board :is(#scorebar,#event-name,#game-sub,#game-sub-logo,#ot-subbar,#ot-swipe,#players-blue,#players-orange,#br,#tk,#sponsor){display:none !important;}
 img{display:block;}
 
 /* ───────────────────── TOP SCOREBOARD (CS2 header style) ─────────────────── */
@@ -76,12 +83,12 @@ img{display:block;}
    traced the top cluster. The blue side fades in --blue from its outer edge, the orange side fades
    in --orange from its outer edge. Set as the .team background so it sits under the logo/name/score
    and over the scorebar panel; --blue/--orange are each team's live colour. */
-.team.blue{background:linear-gradient(90deg, color-mix(in srgb, var(--blue) 40%, transparent) 0%,
-  color-mix(in srgb, var(--blue) 12%, transparent) 46%, transparent 84%);}
+.team.blue{background:linear-gradient(90deg, rgba(var(--blue-rgb),.40) 0%,
+  rgba(var(--blue-rgb),.12) 46%, transparent 84%);}
 /* orange is a warmer/brighter hue than blue, so it "glows" more at the same opacity — dial it back so
    the two sides read at a balanced intensity. */
-.team.orange{background:linear-gradient(270deg, color-mix(in srgb, var(--orange) 28%, transparent) 0%,
-  color-mix(in srgb, var(--orange) 8%, transparent) 46%, transparent 84%);}
+.team.orange{background:linear-gradient(270deg, rgba(var(--orange-rgb),.28) 0%,
+  rgba(var(--orange-rgb),.08) 46%, transparent 84%);}
 
 /* slanted event banner — seats ON TOP of the bar, angled top corners over the feed */
 .event-name{
@@ -150,9 +157,9 @@ img{display:block;}
 /* fill AND glow both follow the themed team colour (--blue/--orange, resolved from team/brand/etc mode)
    — the glow was hardcoded to the in-game blue/orange, so pills kept an in-game halo regardless of theme. */
 .pip.win-blue{background:var(--blue);
-  box-shadow:inset 0 0 0 1px rgba(0,0,0,.35), 0 0 11px color-mix(in srgb, var(--blue) 88%, transparent);}
+  box-shadow:inset 0 0 0 1px rgba(0,0,0,.35), 0 0 11px rgba(var(--blue-rgb),.88);}
 .pip.win-orange{background:var(--orange);
-  box-shadow:inset 0 0 0 1px rgba(0,0,0,.35), 0 0 11px color-mix(in srgb, var(--orange) 88%, transparent);}
+  box-shadow:inset 0 0 0 1px rgba(0,0,0,.35), 0 0 11px rgba(var(--orange-rgb),.88);}
 
 .score{font-weight:700;font-size:40px;font-variant-numeric:tabular-nums;min-width:46px;
   text-align:center;flex-shrink:0;transition:transform .2s;}
@@ -1144,7 +1151,7 @@ body.sb-external #sb{display:none !important;}
 .scene.show{opacity:1;}
 .break-title{font-size:60px;font-weight:900;letter-spacing:.05em;text-transform:uppercase;}
 .break-count{font-size:120px;font-weight:900;font-variant-numeric:tabular-nums;line-height:1;
-  color:var(--accent);text-shadow:0 0 44px color-mix(in srgb,var(--accent) 45%,transparent);}
+  color:var(--accent-ink, var(--accent));text-shadow:0 0 44px color-mix(in srgb,var(--accent) 45%,transparent);}
 .break-count.hidden{display:none;}
 .break-msg{font-size:19px;letter-spacing:.12em;color:var(--muted);text-transform:uppercase;}
 .break-msg:empty{display:none;}
@@ -1275,7 +1282,7 @@ body.sb-external #sb{display:none !important;}
 <div id="br" class="br">
   <!-- OCCASIONAL SPONSOR ROLL-OUT — part of the statcard; slides out from under the bar's left edge -->
   <div id="spon-roll" class="spon-roll empty" aria-hidden="true">
-    <div class="sr-head"><span class="sr-lbl">Presented by</span></div>
+    <div class="sr-head"><span id="sr-lbl" class="sr-lbl">Presented by</span></div>
     <div class="sr-body"><img id="spon-roll-logo" alt=""></div>
   </div>
   <div class="br-bar">
@@ -1560,7 +1567,8 @@ function applyTeamColors(teams){
 
 let currentState = {};
 const el = id => document.getElementById(id);
-const safeId = n => n ? n.replace(/[^a-zA-Z0-9]/g,'-') : 'unknown';
+// non-alphanumerics keep their char code so distinct names never collapse to the same id (non-Latin names all became '-----')
+const safeId = n => n ? String(n).replace(/[^a-zA-Z0-9]/g, c=>'-'+c.charCodeAt(0).toString(16)+'-') : 'unknown';
 function setText(id,v){ const e=el(id); if(e) e.textContent = (v ?? ''); }
 function setImg(id,src,fb){ const e=el(id); if(e) e.src = src || fb || '/assets/rl.png'; }
 function setStat(id,v){
@@ -1771,7 +1779,8 @@ function syncFacecams(players, facecams){
   players.forEach(p=>{
     const fc=findFacecam(p,facecams); if(!fc || !fc.link) return;
     const cid='cam-'+safeId(p.name); want.add(cid);
-    if(document.getElementById(cid)) return;       // already created (in #cam, or borrowed by the grid mid-replay)
+    const _ex=document.getElementById(cid);
+    if(_ex){ if(_ex.getAttribute('src')!==fc.link) _ex.src=fc.link; return; }   // already created (in #cam, or borrowed by the grid mid-replay); follow an edited link
     const fr=document.createElement('iframe');
     fr.id=cid; fr.src=fc.link; fr.allow='autoplay; encrypted-media'; fr.frameBorder='0';
     cam.appendChild(fr);                            // permanent home → switching never reparents (no reload/flash)
@@ -1899,9 +1908,13 @@ function renderStatcard(players, spectated, facecams){
   syncSponsorToStatcard();
   // after a replay the HUD is cleared; restore it once we're back in normal play (NOT the replay
   // 'goal' view). During the post-replay kickoff hold we WAIT for the clock to tick (ball touched,
-  // handled in applyGame) so the sidebars animate in at kickoff instead of popping back immediately;
-  // an 8s backstop in hudClearForKickoff still guarantees the HUD can never get stuck hidden.
-  if(!hudArmed && !kickoffHold && activeView!=='goal') hudShow();
+  // handled in applyGame) so the sidebars animate in at kickoff instead of popping back immediately.
+  // SELF-HEAL: also re-show if the card is still hidden (r-hide) while we're clearly in live play —
+  // hudHideForReplay hides without disarming, so a missed replay-end used to leave it stuck hidden.
+  if(activeView!=='goal' && !kickoffHold){
+    if(!hudArmed) hudShow();
+    else if(mod && mod.classList.contains('r-hide')) hudShow();
+  }
 
   // spectated statcard uses the team colour — or flag-blue during the Brazil 7-1 moment
   const side=teamOf(p);
@@ -1923,12 +1936,15 @@ function renderStatcard(players, spectated, facecams){
    The title-sponsor tab rolls out from behind the bottom-right statcard every SPON_EVERY_MS for
    SPON_HOLD_MS, then rolls back. Producer-gated (state.rlSponsorRoll); only fires when a title
    sponsor is set and the statcard is up, and never over a goal replay. */
-const SPON_EVERY_MS = 32000, SPON_HOLD_MS = 5200;
+const SPON_EVERY_MS = 32000, SPON_HOLD_MS = 10000;
 let sponCycleTimer = null, sponHideTimer = null;
 function sponsorLogo(){ const b = currentState.brand || {}; return (b.spots && b.spots.title) || ''; }
 function updateSponsorRoll(){
   const roll = el('spon-roll'); if(!roll) return;
   if(!currentState.rlSponsorRoll){ roll.classList.add('empty'); roll.classList.remove('out'); return; }   // producer toggle off
+  // "Presented by" wording: brand-kit label → post-game ad label → default (drives every overlay)
+  const _b = currentState.brand || {}, _ad = currentState.scoreboardAd || {};
+  setText('sr-lbl', _b.presentedLabel || _ad.label || 'PRESENTED BY');
   const logo = sponsorLogo(), img = el('spon-roll-logo');
   if(logo){ if(img.getAttribute('src')!==logo){ img.onload = () => roll.classList.toggle('sr-light', logoIsDark(img)); img.src = logo; } roll.classList.remove('empty'); }
   else { roll.classList.add('empty'); roll.classList.remove('out'); }
@@ -1978,12 +1994,19 @@ function syncSponsorToStatcard(){   // partners rail rides with the statcard —
   const rail=el('sponsor'); if(!rail) return;
   rail.classList.toggle('hidden', !(_sponsorHasContent && statcardVisible()));
 }
+let _srFullSig='';
 function renderSponsorRail(brand){
   const rail=el('sponsor'); if(!rail) return;
   const sp=(brand && (brand.railSponsors || brand.sponsors))||[];
-  if(srTimer){ clearInterval(srTimer); srTimer=null; }
   _sponsorHasContent = sp.length>0;
-  if(!sp.length){ _srSig=''; syncSponsorToStatcard(); return; }
+  if(!sp.length){ if(srTimer){ clearInterval(srTimer); srTimer=null; } _srSig=''; _srFullSig=''; syncSponsorToStatcard(); return; }
+  // Unchanged config + rotation already running → leave it alone. full_state arrives faster than the 6s
+  // interval on a busy show, and re-arming the timer here meant the rotation never advanced (and static
+  // mode re-created every logo each time).
+  const _fullSig=sp.map(s=>(s.name||'')+':'+(s.logo||'').length+':'+(s.logo||'').slice(-24)).join('|')+'#'+(brand.sponsorMode||'cycle')+'#'+(brand.sponsorInterval||6)+'#'+String(brand.sponsorLabel);
+  if(_fullSig===_srFullSig && (srTimer || sp.length<2 || (brand.sponsorMode||'cycle')==='static')){ syncSponsorToStatcard(); return; }
+  _srFullSig=_fullSig;
+  if(srTimer){ clearInterval(srTimer); srTimer=null; }
   syncSponsorToStatcard();
   // Explicit empty brand-kit label hides the heading; only a MISSING label defaults to 'PARTNERS'.
   const _srLabel = brand.sponsorLabel==null ? 'PARTNERS' : String(brand.sponsorLabel).trim();
@@ -2299,7 +2322,7 @@ function goalEvent(side){
   clearTimeout(outroSchedTimer); replayStartAt=0;   // reset the synthesized-outro schedule for this goal
   brazilGoal = isBrazilGoal(side);   // a 7-1 goal plays ONLY the Brazil flag swipe (normal swipe + outro suppressed)
   // safety: if the ReplayEnd signal is ever missed, force the end sequence after 15s
-  clearTimeout(goalCycleTimer); goalCycleTimer=setTimeout(endGoalCycle, 15000);
+  clearTimeout(goalCycleTimer); goalCycleTimer=setTimeout(endGoalCycle, 10000);   // no replay by then → close the cycle (showView re-arms the long safety when one starts)
   { const roll=el('spon-roll'); if(roll){ roll.classList.remove('out'); clearTimeout(sponHideTimer); } }   // pull the sponsor tab back for the replay
   triggerGoalName(side);
   currentState._goal = Object.assign({}, currentState._goal, {team:side});
@@ -2414,7 +2437,9 @@ function renderReplaySlot(replay){
   const logo  = replay.logo || null;
   setText('replay-text', label);
   setText('rt-label', label);
-  [['replay-logo',logo],['replay-tag-logo',logo]].forEach(([id,src])=>{
+  // NOT #replay-logo: showReplay() owns it (full vs outro logo, skin-aware). Touching it here on every
+  // full_state swapped/hid the logo mid-wipe.
+  [['replay-tag-logo',logo]].forEach(([id,src])=>{
     const im=el(id); if(!im) return;
     if(src){ im.src=src; im.classList.remove('hidden'); } else im.classList.add('hidden');
   });
@@ -2507,7 +2532,10 @@ function renderScoreboard(playerCache, state, series, isLive){
   const all=Object.values(playerCache||{});
   const A=all.filter(p=>teamOf(p)===0).sort((a,b)=>b.score-a.score);   // team A (left)
   const B=all.filter(p=>teamOf(p)===1).sort((a,b)=>b.score-a.score);   // team B (right)
-  const mvp=[...all].sort((a,b)=>b.score-a.score)[0]?.name;
+  const _bs0=game.blueScore ?? 0, _os0=game.orangeScore ?? 0;
+  // MVP is the top scorer of the WINNING side (RL awards it that way); live/tied boards fall back to the overall top scorer
+  const _mvpPool=(!isLive && _bs0>_os0) ? A : (!isLive && _os0>_bs0) ? B : all;
+  const mvp=[..._mvpPool].sort((a,b)=>b.score-a.score)[0]?.name;
   const nameA=teamDisplay(teams.blue?.name), nameB=teamDisplay(teams.orange?.name);
   const logoA=teams.blue?.logo || '/assets/rl.png', logoB=teams.orange?.logo || '/assets/rl.png';
   const bs=game.blueScore ?? 0, os=game.orangeScore ?? 0;
@@ -2590,8 +2618,10 @@ function renderScoreboard(playerCache, state, series, isLive){
 
   // scoreboard sponsor slot (top, beside the brand logo) + uploaded scene background
   const ad=state.scoreboardAd||{}; const sp=el('sb-sponsor');
-  if(sp){ const logo=ad.logo||null;
-    setText('sb-sponsor-lbl', ad.label||'PRESENTED BY');
+  // Falls back to the brand kit's TITLE sponsor when no scoreboard-specific sponsor is picked, so the
+  // always-on title partner is on the post-game board (every design, incl. Compare) by default.
+  if(sp){ const logo=ad.logo||(state.brand&&state.brand.spots&&state.brand.spots.title)||null;
+    setText('sb-sponsor-lbl', (state.brand&&state.brand.presentedLabel)||ad.label||'PRESENTED BY');
     const im=el('sb-sponsor-logo'); if(im){ im.src=logo||''; }
     sp.classList.toggle('empty', !logo);
   }
@@ -2836,6 +2866,7 @@ function showView(name){
       clearTimeout(introTimer); fireIntroSwipe();   // make sure TRANSITION 1 has shown by the time the replay starts
       resumeIntroReveal();                          // the REAL cut is now → peel a held intro cover to reveal the replay
       replayStartAt=Date.now();                     // start the clock for the synthesized outro cue
+      clearTimeout(goalCycleTimer); goalCycleTimer=setTimeout(endGoalCycle, REPLAY_MAX_MS+2000);   // safety measured from replay START, beyond the longest replay
       if(!brazilGoal) scheduleReplayOutro();         // fire the outro at a consistent point before the kickoff
     }
   } else if(name==='scoreboard'){
@@ -2857,7 +2888,9 @@ function showView(name){
 }
 
 /* ── apply state ──────────────────────────────────────────────────────────── */
+let _sbTickSig='';   // last LIVE ?only=scoreboard paint (see applyStateUpdate)
 function applyFullState(data){
+  _sbTickSig='';
   // Run FIRST and unconditionally so the signature is primed during play — otherwise the first
   // post-game full_state would read as "changed" and re-render the board over the winner intro.
   const ssChanged = _ssSigChanged(data);
@@ -2865,7 +2898,9 @@ function applyFullState(data){
   // they actually change (see server _flushFullState). Carry them forward so a plain state update
   // doesn't wipe the brand logo (which the scorecard, replay LT and statcard all read from here).
   if(currentState){
-    if(data.brand==null && currentState.brand) data.brand=currentState.brand;
+    // brand===null is a REAL value (no kit active) — only carry forward when the key was omitted.
+    if(data.brand===undefined && currentState.brand) data.brand=currentState.brand;
+    if(currentState._goal && !data._goal) data._goal=currentState._goal;   // scoring team/logo for the replay accent lives here
     if(data.banner==null && currentState.banner) data.banner=currentState.banner;
     if(data.mainBanner==null && currentState.mainBanner) data.mainBanner=currentState.mainBanner;
     // replay ad slot (label/logo/outroLogo/skin) rides libraryData — sent only on change — so carry
@@ -2877,11 +2912,16 @@ function applyFullState(data){
   // MAIN HUD hides its inline board when the producer routes it to the separate ?only=scoreboard source.
   // (The scoreboard-only source itself ignores this — it must always show the board.)
   if(!SB_ONLY && data.rlScoreboardSeparate!=null) document.body.classList.toggle('sb-external', !!data.rlScoreboardSeparate);
-  if(data.fontFamily) document.documentElement.style.setProperty('--main-font', `'${data.fontFamily}', sans-serif`);
+  // BUG that was causing "letters bigger than others": --main-font IS the font-family here (no
+  // outer fallback chain), so setting it to '<font>, sans-serif' threw away the bundled 'Bourgeois'
+  // fallback — any glyph the custom font doesn't cover (an unbundled/partially-installed font, e.g.
+  // "Industry") jumped straight to the OS default instead of Bourgeois, mixing a visibly different
+  // size/design into the same word. Keep the bundled fallback IN the chain, ahead of the generic.
+  if(data.fontFamily) document.documentElement.style.setProperty('--main-font', `'${data.fontFamily}', 'Bourgeois', 'Segoe UI', sans-serif`);
   if(data.brand){
     if(data.brand.color)  document.documentElement.style.setProperty('--accent', data.brand.color);
     if(data.brand.accent) document.documentElement.style.setProperty('--accent-2', data.brand.accent);
-    if(data.brand.font)   document.documentElement.style.setProperty('--main-font', `'${data.brand.font}', sans-serif`);
+    if(data.brand.font)   document.documentElement.style.setProperty('--main-font', `'${data.brand.font}', 'Bourgeois', 'Segoe UI', sans-serif`);
   }
   renderSponsorRail(data.brand);
   renderTicker(data);   // live-scores / sponsor ticker (matches overlay/ticker.html)
@@ -2983,7 +3023,10 @@ function applyGame(game, bestOf, fmt){
   // Bottom bar segments: ROUND · [OVERTIME] · GAME n OF X. The OVERTIME chip (overtime-slot colour)
   // sits in the MIDDLE and only shows in OT; BRAZIL replaces the whole line at a 7-1 scoreline.
   const label=el('game-sub-label'), gsCard=el('game-sub');
-  if(label){
+  const _tsl=titleSponsorLogo()||'';
+  const _gsSig=[brz71?1:0, isOT?1:0, round, gameLine, _tsl.length+':'+_tsl.slice(-24)].join('|');
+  if(label && label._gsSig!==_gsSig){
+    label._gsSig=_gsSig;
     label.innerHTML='';
     const seg=(txt,cls)=>{ const s=document.createElement('span'); if(cls) s.className=cls; s.textContent=txt; return s; };
     const sepEl=()=>{ const s=document.createElement('span'); s.className='gs-sep'; s.textContent=String.fromCharCode(0xB7); return s; };
@@ -3012,7 +3055,7 @@ function applyGame(game, bestOf, fmt){
   // it never sits over the OVERTIME swipe/card.
   const tLogo=titleSponsorLogo();
   const gsl=el('game-sub-logo');
-  if(gsl){ if(tLogo && !isOT){ gsl.src=tLogo; gsl.classList.remove('hidden'); } else { gsl.classList.add('hidden'); } }
+  if(gsl){ if(tLogo && !isOT){ if(gsl.getAttribute('src')!==tLogo) gsl.src=tLogo; gsl.classList.remove('hidden'); } else { gsl.classList.add('hidden'); } }
 
   // OT = the plugin's authoritative overtime flag ONLY. Rocket League sets isOT exactly
   // when overtime actually begins — i.e. the ball touched the ground at 0:00 while tied.
@@ -3135,17 +3178,38 @@ function applyStateUpdate(d){
   // Separate scoreboard source: tick the LIVE board on each partial update (scores/stats) while the
   // game is in play (not while the FINAL post-game board is held).
   if(SB_ONLY && currentState.view!=='scoreboard'){
-    const pc={}; (players||[]).forEach(p=>{ if(p&&p.name) pc[p.name]=p; });
-    renderScoreboard(pc, currentState, currentState.series, true);
+    // renderScoreboard rebuilds tables/logos and re-assigns a (possibly multi-MB) background — only repaint on change
+    const g=currentState.game||{};
+    const sig=(players||[]).map(p=>p&&[p.name,p.team,p.score,p.goals,p.assists,p.saves,p.shots,p.demos].join(',')).join(';')+'|'+g.blueScore+'-'+g.orangeScore;
+    if(sig!==_sbTickSig){
+      _sbTickSig=sig;
+      const pc={}; (players||[]).forEach(p=>{ if(p&&p.name) pc[p.name]=p; });
+      renderScoreboard(pc, currentState, currentState.series, true);
+    }
   }
 }
 
 /* ── message dispatch (shared by the WS feed and the dev toolbar) ──────────── */
 function dispatch(msg){
   switch(msg.type){
+    // Overlay code changed on disk — this overlay is standalone (no scene-base.js), so it never
+    // picked up the server's reload broadcast; a producer had to manually clear the OBS browser
+    // source cache to see any edit. Reload only when the changed file IS this page (or no file
+    // list was given — an explicit "reload all").
+    case 'reload_overlays': {
+      const files = Array.isArray(msg.files)
+        ? msg.files.map(f => String(f).replace(/\\/g, '/').toLowerCase().split('/').pop()).filter(Boolean)
+        : null;
+      const page = (location.pathname.split('/').pop() || '').toLowerCase();
+      if (!files || !files.length || files.indexOf(page) !== -1) { try { location.reload(); } catch (e) {} }
+      break;
+    }
     case 'full_state': applyFullState(msg.data); break;
     case 'state_update': applyStateUpdate(msg.data); break;
     case 'goal_scored':   // ball in the net — the TRUE goal moment (before the replay)
+      // The payload IS this goal. goalEvent() used to merge only the team into the PREVIOUS goal's _goal, so
+      // an early accent/crest/lower-third read the last goal's scorer until view_change landed.
+      if(msg.data && msg.data.goal && !goalCycleActive) currentState._goal = msg.data.goal;
       goalEvent(teamOf(msg.data||{}));
       break;
     case 'replay_will_end':
@@ -3158,12 +3222,18 @@ function dispatch(msg){
     case 'view_change':
       // replay START only shows the persistent tag — the swipe already fired at the goal
       if(msg.data.view==='goal') currentState._goal=msg.data.goal;
-      if(msg.data.view==='scoreboard')
-        renderScoreboard(msg.data.playerCache || currentState.playerCache || {}, currentState, msg.data.series);
+      currentState.view=msg.data.view||'hud';   // keeps the ?only=scoreboard tick from repainting a FINAL board as LIVE
+      _sbTickSig='';
+      if(msg.data.view==='scoreboard'){
+        // The server freezes the final score at MatchEnded; live currentState.game may already be 0-0 by now.
+        const hasFinal=(msg.data.blueScore!=null && msg.data.orangeScore!=null);
+        const st=hasFinal ? Object.assign({}, currentState, {game:Object.assign({}, currentState.game||{}, {blueScore:msg.data.blueScore, orangeScore:msg.data.orangeScore})}) : currentState;
+        renderScoreboard(msg.data.playerCache || currentState.playerCache || {}, st, msg.data.series);
+      }
       showView(msg.data.view||'hud');
       break;
     case 'clear_scoreboard':   // producer manually cleared the held post-game board → drop back to the HUD
-      unlockScoreboard(); showView('hud');
+      unlockScoreboard(); currentState.view='hud'; _sbTickSig=''; showView('hud');
       break;
     case 'game_reset':   // a new game/match → release the post-match scoreboard
       el('players-blue').innerHTML=''; el('players-orange').innerHTML='';
@@ -3175,7 +3245,9 @@ function dispatch(msg){
       hideReplayLowerThird(); hideReplayCams();   // hide the replay LT + cam grid
       prevGameTime=null; hudShow();   // a new game shows the HUD straight away
       endBrazil();   // reset the 7×1 easter egg + theme wash
-      unlockScoreboard(); if(!SB_ONLY) el('sb').classList.add('hidden');   // separate scoreboard source stays up (flips back to LIVE)
+      unlockScoreboard(); currentState.view='hud'; _sbTickSig='';
+      document.body.classList.remove('on-board');   // showView bailed while the board was locked, so this was never cleared → HUD stayed hidden
+      if(!SB_ONLY) el('sb').classList.add('hidden');   // separate scoreboard source stays up (flips back to LIVE)
       el('ot-subbar').classList.add('hidden'); el('ot-swipe').classList.add('hidden'); el('game-sub').classList.remove('hidden');
       el('replay-tag').classList.add('hidden'); el('replay-wipe').classList.add('hidden'); el('sb').classList.remove('intro');
       break;
@@ -3313,7 +3385,8 @@ function devCloseScenes(){ ['spotlight','breakScreen','winner','intro'].forEach(
   const inOBS=(()=>{ try{ if(window.obsstudio) return true; }catch(e){}
                      try{ if(window.parent && window.parent!==window && window.parent.obsstudio) return true; }catch(e){}
                      return false; })();
-  if(!inOBS || /[?&]dev\b/.test(location.search)) bar.classList.add('show');
+  const framed=(()=>{ try{ return window.self!==window.top; }catch(e){ return true; } })();   // control-panel previews embed this page
+  if((!inOBS && !framed) || /[?&]dev\b/.test(location.search)) bar.classList.add('show');
 })();
 </script>
 </body>

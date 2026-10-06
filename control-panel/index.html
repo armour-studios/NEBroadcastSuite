@@ -496,6 +496,9 @@
       <button class="ev-plat-tab" data-plat="challonge" title="Search Challonge tournaments">
         <img class="ev-plat-logo" src="../assets/platforms/challonge.png" alt="Challonge">
       </button>
+      <button class="ev-plat-tab" data-plat="challengermode" title="Load a Challengermode tournament (challengermode.com — a different platform from Challonge)">
+        <span class="ev-plat-word">CHALLENGERMODE</span>
+      </button>
       <button class="ev-plat-tab" data-plat="nxgen" title="Search NXGEN tournaments">
         <img class="ev-plat-logo ev-plat-logo--tall" src="../assets/images/nxgenwhite.png" alt="NXGEN">
       </button>
@@ -538,6 +541,22 @@
         <button class="ev-search-clear" id="ev-challonge-clear" title="Clear" style="display:none;">✕</button>
       </div>
       <div id="ev-challonge-results" class="ev-dropdown" style="display:none;"></div>
+    </div>
+
+    <!-- Challengermode panel. Their tournaments are addressed by UUID, so the primary action is
+         PASTE A LINK; searching needs a Space id (your organisation), which most producers have
+         set once in Settings. -->
+    <div id="ev-plat-panel-challengermode" class="ev-plat-panel" style="display:none;">
+      <div class="ev-search-wrap" id="ev-cm-search-wrap">
+        <svg class="ev-search-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="8.5" cy="8.5" r="5.5"/><line x1="13" y1="13" x2="17" y2="17"/>
+        </svg>
+        <input type="text" id="ev-cm-search" class="ev-search-input"
+               placeholder="Paste a Challengermode tournament link, or search your Space…">
+        <button class="ev-search-clear" id="ev-cm-clear" title="Clear" style="display:none;">✕</button>
+      </div>
+      <div id="ev-cm-results" class="ev-dropdown" style="display:none;"></div>
+      <p class="field-hint" id="ev-cm-hint" style="margin:6px 0 0;"></p>
     </div>
 
     <!-- NXGEN panel -->
@@ -703,6 +722,20 @@
       </div>
       <div id="dash-challonge-queue" style="margin-top:6px;"></div>
       <div id="dash-challonge-queue-status" style="font-size:12px; color:var(--muted); margin-top:6px;"></div>
+    </div>
+
+    <!-- Match Queue (Challengermode — shown when a Challengermode event is active) -->
+    <div class="ev-queue-block" id="ev-cm-queue-block" style="display:none;">
+      <div class="ev-queue-header">
+        <span class="field-label" style="margin:0;">Match Queue</span>
+        <div class="ev-queue-toggles">
+          <label class="qt-toggle">Auto-follow
+            <label class="switch"><input type="checkbox" id="cm-autofollow-queue"><span class="slider"></span></label>
+          </label>
+        </div>
+      </div>
+      <div id="dash-cm-queue" style="margin-top:6px;"></div>
+      <div id="dash-cm-queue-status" style="font-size:12px; color:var(--muted); margin-top:6px;"></div>
     </div>
 
     <!-- Match Queue (NXGEN — shown when NXGEN event is active) -->
@@ -976,6 +1009,10 @@
             <div class="team-dd" id="team-dd-blue" role="listbox"></div>
           </div>
         </div>
+        <div class="field-row team-abbr-row">
+          <label class="field-label" for="input-abbr-blue">Abbreviation <span class="msp-hint">(short tag on overlays)</span></label>
+          <input type="text" id="input-abbr-blue" class="input-text team-abbr-input" placeholder="AUTO" maxlength="6" autocomplete="off" spellcheck="false" title="Short team tag used wherever an overlay prints an abbreviation (RL Worlds, matchup, Pulse/GRID tiles). Blank = library tag, else initials.">
+        </div>
         <div class="field-row team-record-row" id="team-record-row-blue" style="display:none;">
           <label class="field-label">Record <span class="msp-hint">(shown on overlay)</span></label>
           <div class="tr-rec-inputs">
@@ -1022,6 +1059,10 @@
             <input type="text" id="input-name-orange" class="input-text" placeholder="Type to search teams…" autocomplete="off" style="width:100%;">
             <div class="team-dd" id="team-dd-orange" role="listbox"></div>
           </div>
+        </div>
+        <div class="field-row team-abbr-row">
+          <label class="field-label" for="input-abbr-orange">Abbreviation <span class="msp-hint">(short tag on overlays)</span></label>
+          <input type="text" id="input-abbr-orange" class="input-text team-abbr-input" placeholder="AUTO" maxlength="6" autocomplete="off" spellcheck="false" title="Short team tag used wherever an overlay prints an abbreviation (RL Worlds, matchup, Pulse/GRID tiles). Blank = library tag, else initials.">
         </div>
         <div class="field-row team-record-row" id="team-record-row-orange" style="display:none;">
           <label class="field-label">Record <span class="msp-hint">(shown on overlay)</span></label>
@@ -1334,12 +1375,14 @@
                    Every handler here was null-safe (el(...)?.), so nothing needed rewiring. -->
 
               <div class="msp-rl-cell">
-                <p class="msp-label">Replay style <span class="msp-hint">(goal transition)</span></p>
-                <select id="sel-replay-style" class="input-text msp-input" title="Which full-screen animation plays when a goal replay starts">
+                <p class="msp-label">Replay transitions <span class="msp-hint">(goal transition)</span></p>
+                <label class="msp-toggle"><input type="checkbox" id="chk-rl-replay-transitions" checked> Play the shutter-slam replay wipes</label>
+                <select id="sel-replay-style" class="input-text msp-input" title="Which full-screen animation plays when a goal replay starts" style="margin-top:8px;">
                   <option value="slam">Slam — shutter bars</option>
                   <option value="cinema">Cinema — letterbox, scrolling type</option>
+                  <option value="sweep">Sweep — angled panels, glitch type</option>
                 </select>
-                <p class="msp-hint">The full-screen wipe at the start of a goal replay. Turn wipes off entirely in Settings &gt; Rocket League.</p>
+                <p class="msp-hint">The full-screen wipe (and the Brazil flag) at the start of a goal replay, on every RL overlay that uses the shared transitions. Off = a clean cut, or use an OBS stinger instead — the HUD still hides for the replay either way.</p>
               </div>
 
             </div>
@@ -1364,19 +1407,7 @@
             <label class="field-label" for="input-ot-color">Text Color</label>
             <input type="color" id="input-ot-color" value="#ffffff" style="width:48px; height:34px; padding:2px; border:none; background:none; cursor:pointer;">
           </div>
-          <div style="flex:1; min-width:200px;">
-            <label class="field-label" for="pick-ot-logo">Sponsor (from active brand)</label>
-            <div style="display:flex; gap:8px; align-items:center;">
-              <select id="pick-ot-logo" class="input-select ad-sponsor-pick" style="flex:1; min-width:0;"></select>
-              <img id="preview-ot-logo" alt="" style="height:30px; max-width:90px; object-fit:contain; display:none;">
-            </div>
-            <div class="ad-custom" id="custom-ot-logo" style="display:none; margin-top:8px;">
-              <div style="display:flex; gap:8px; align-items:center;">
-                <input type="file" id="input-ot-logo" accept="image/*" class="input-text" style="padding:6px; flex:1;">
-                <button class="btn btn-ghost btn-sm" id="btn-ot-logo-clear" type="button">Clear</button>
-              </div>
-            </div>
-          </div>
+          <div style="flex:1; min-width:200px;" data-ad-picker="ot-logo"></div>
         </div>
       </div>
 
@@ -1396,31 +1427,9 @@
             <option value="mono">Black &amp; white</option>
           </select>
         </div>
-        <div style="flex:1; min-width:200px; margin-bottom:14px;">
-          <label class="field-label" for="pick-replay-logo">Sponsor — goal swipe (from active brand)</label>
-          <div style="display:flex; gap:8px; align-items:center;">
-            <select id="pick-replay-logo" class="input-select ad-sponsor-pick" style="flex:1; min-width:0;"></select>
-            <img id="preview-replay-logo" alt="" style="height:30px; max-width:90px; object-fit:contain; display:none;">
-          </div>
-          <div class="ad-custom" id="custom-replay-logo" style="display:none; margin-top:8px;">
-            <div style="display:flex; gap:8px; align-items:center;">
-              <input type="file" id="input-replay-logo" accept="image/*" class="input-text" style="padding:6px; flex:1;">
-              <button class="btn btn-ghost btn-sm" id="btn-replay-logo-clear" type="button">Clear</button>
-            </div>
-          </div>
-        </div>
+        <div style="flex:1; min-width:200px; margin-bottom:14px;" data-ad-picker="replay-logo"></div>
         <div style="flex:1; min-width:200px;">
-          <label class="field-label" for="pick-replay-outro">Outro Logo — after replay (from active brand)</label>
-          <div style="display:flex; gap:8px; align-items:center;">
-            <select id="pick-replay-outro" class="input-select ad-sponsor-pick" style="flex:1; min-width:0;"></select>
-            <img id="preview-replay-outro" alt="" style="height:30px; max-width:90px; object-fit:contain; display:none;">
-          </div>
-          <div class="ad-custom" id="custom-replay-outro" style="display:none; margin-top:8px;">
-            <div style="display:flex; gap:8px; align-items:center;">
-              <input type="file" id="input-replay-outro" accept="image/*" class="input-text" style="padding:6px; flex:1;">
-              <button class="btn btn-ghost btn-sm" id="btn-replay-outro-clear" type="button">Clear</button>
-            </div>
-          </div>
+          <div data-ad-picker="replay-outro"></div>
           <p style="font-size:11px; color:var(--muted); margin-top:5px;">Shown on the quick swipe after the replay. Falls back to the sponsor logo, then the brand-kit logo.</p>
         </div>
         <div style="flex:1; min-width:200px;">
@@ -1429,40 +1438,62 @@
         </div>
       </div>
 
-      <!-- ── Title sponsor roll-out (moved here from Settings ▸ Games ▸ RL automation) ── -->
-      <div class="adslot-panel gs-card" id="adslot-sponroll">
-        <h4 class="gs-card-title">Title sponsor roll-out</h4>
-        <p style="font-size:11px; color:var(--muted); margin-bottom:12px;">Every so often the title sponsor slides out from behind the bottom-right stat card ("Presented by"), holds a few seconds, then rolls back. Never plays during a goal replay.</p>
-        <label class="msp-toggle"><input type="checkbox" id="chk-rl-sponsor-roll"> Roll the title sponsor out</label>
-        <div style="display:flex; gap:10px; align-items:center; margin-top:12px;">
-          <span class="field-label" style="margin:0;">Title sponsor</span>
-          <img id="preview-sponroll-logo" alt="" style="height:30px; max-width:110px; object-fit:contain; display:none;">
-          <span id="sponroll-name" style="font-size:12px; color:var(--muted);"></span>
+      <!-- ── Worlds overlay extras (rl-worlds.html only) — one card, not three: ticker, title-sponsor
+           roll-out and the stats sidebar are all Worlds-specific toggles, so they live together
+           instead of each taking a full card slot. ── -->
+      <div class="adslot-panel gs-card" id="adslot-worlds" style="grid-column:span 2;">
+        <h4 class="gs-card-title">Worlds overlay</h4>
+        <p style="font-size:11px; color:var(--muted); margin-bottom:4px;">Extras specific to the <strong>Worlds</strong> HUD (rl-worlds.html) — on/off toggles, nothing to route or design elsewhere.</p>
+
+        <div class="ps-block" style="padding-top:10px;">
+          <label class="msp-toggle"><input type="checkbox" id="chk-worlds-ticker" checked> Scores ticker</label>
+          <p style="font-size:11px; color:var(--muted); margin:4px 0 0;">The bottom ticker lane on the Worlds overlay. Off just hides it on this overlay — the ticker's own feed/messages (Graphics ▸ Ticker) keep running everywhere else.</p>
         </div>
-        <p id="sponroll-missing" style="font-size:11px; color:var(--muted); margin-top:8px; display:none;">No title sponsor on the active brand kit. Tag one as <strong>Title</strong> in the <button type="button" class="btn btn-ghost btn-sm js-goto-brands" style="padding:2px 8px; font-size:11px; vertical-align:baseline;">Profiles tab</button>.</p>
+
+        <div class="ps-block">
+          <label class="msp-toggle"><input type="checkbox" id="chk-rl-sponsor-roll"> Title sponsor roll-out</label>
+          <p style="font-size:11px; color:var(--muted); margin:4px 0 10px;">Every so often the title sponsor slides out from behind the bottom-right stat card ("Presented by"), holds a few seconds, then rolls back. Never plays during a goal replay.</p>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <span class="field-label" style="margin:0;">Title sponsor</span>
+            <img id="preview-sponroll-logo" alt="" style="height:30px; max-width:110px; object-fit:contain; display:none;">
+            <span id="sponroll-name" style="font-size:12px; color:var(--muted);"></span>
+          </div>
+          <p id="sponroll-missing" style="font-size:11px; color:var(--muted); margin-top:8px; display:none;">No title sponsor on the active brand kit. Tag one as <strong>Title</strong> in the <button type="button" class="btn btn-ghost btn-sm js-goto-brands" style="padding:2px 8px; font-size:11px; vertical-align:baseline;">Profiles tab</button>.</p>
+        </div>
+
+        <div class="ps-block">
+          <label class="msp-toggle"><input type="checkbox" id="chk-worlds-sidebar"> Stats sidebar</label>
+          <p style="font-size:11px; color:var(--muted); margin:4px 0 10px;">An optional ranked panel on the right of the overlay (RLCS-style — e.g. "Total Goals — All-Time Worlds"). Fill it by hand or pull the current league standings.</p>
+          <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <div style="flex:1; min-width:150px;">
+              <label class="field-label" for="inp-wsb-title">Title</label>
+              <input type="text" id="inp-wsb-title" class="input-text" placeholder="Total Goals">
+            </div>
+            <div style="flex:1; min-width:150px;">
+              <label class="field-label" for="inp-wsb-sub">Subtitle</label>
+              <input type="text" id="inp-wsb-sub" class="input-text" placeholder="All-Time Worlds">
+            </div>
+          </div>
+          <label class="field-label" for="inp-wsb-rows" style="margin-top:12px; display:block;">Rows &mdash; one per line as <strong>Name | Value</strong></label>
+          <textarea id="inp-wsb-rows" class="input-text" rows="6" style="resize:vertical; font-family:inherit;" placeholder="Atomic | 111&#10;Kaydop | 109&#10;Turbopolsa | 108"></textarea>
+          <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+            <button class="btn btn-ghost btn-sm" id="btn-wsb-fill-standings" type="button">Fill from standings</button>
+            <button class="btn btn-primary btn-sm" id="btn-wsb-save" type="button">Save sidebar</button>
+            <span id="wsb-saved" style="font-size:11px; color:var(--muted); align-self:center; display:none;">Saved</span>
+          </div>
+        </div>
       </div>
 
       <!-- ── Scoreboard Ad Slot ── -->
       <div class="adslot-panel gs-card" id="adslot-sbad">
-        <h4 class="gs-card-title">Post-game scoreboard</h4>
-        <p style="font-size:11px; color:var(--muted); margin-bottom:12px;">Sponsor logo shown on the end-of-match scorecard (under the player stats).</p>
+        <h4 class="gs-card-title">Title sponsor label &amp; scorecard</h4>
+        <p style="font-size:11px; color:var(--muted); margin-bottom:12px;">Sponsor logo on the end-of-match scorecard (left on None, it uses the brand kit's title sponsor), plus the <strong>Label</strong> that sets the "Presented by" wording on the desk / duorow overlays too.</p>
         <div class="field-row">
           <label class="field-label" for="input-sbad-label">Label</label>
           <input type="text" id="input-sbad-label" class="input-text" placeholder="PRESENTED BY">
         </div>
-        <div style="flex:1; min-width:200px; margin-bottom:14px;">
-          <label class="field-label" for="pick-sbad-logo">Sponsor (from active brand)</label>
-          <div style="display:flex; gap:8px; align-items:center;">
-            <select id="pick-sbad-logo" class="input-select ad-sponsor-pick" style="flex:1; min-width:0;"></select>
-            <img id="preview-sbad-logo" alt="" style="height:30px; max-width:90px; object-fit:contain; display:none;">
-          </div>
-          <div class="ad-custom" id="custom-sbad-logo" style="display:none; margin-top:8px;">
-            <div style="display:flex; gap:8px; align-items:center;">
-              <input type="file" id="input-sbad-logo" accept="image/*" class="input-text" style="padding:6px; flex:1;">
-              <button class="btn btn-ghost btn-sm" id="btn-sbad-logo-clear" type="button">Clear</button>
-            </div>
-          </div>
-        </div>
+        <p style="font-size:11px; color:var(--muted); margin:-4px 0 12px;">Any phrase — e.g. "Presented by", "Sponsored by", "In partnership with". Applies to duorow + all desk overlays.</p>
+        <div style="flex:1; min-width:200px; margin-bottom:14px;" data-ad-picker="sbad-logo"></div>
         <div style="flex:1; min-width:200px;">
           <label class="field-label" for="input-sbad-bg">Scene Background (optional)</label>
           <div style="display:flex; gap:8px; align-items:center;">
@@ -1485,6 +1516,19 @@
         </div>
         <p class="msp-hint gs-note" id="gs-pc-off" hidden>Facecams are off. Turn them on above to link player cams.</p>
         <!-- In-Game Player Cams — map live in-game names to a person's cam feed (HUD facecams) -->
+        <!-- Player spotlight — featured-player lower-third with live stats (rl-hud.html #spotlight, server
+             set_spotlight). The handlers (btn-spotlight-apply / check-spotlight-visible) and the live player
+             list (applySpotlightState) already existed in app.js; these controls were the missing piece. -->
+        <div class="msp-col gs-rl-only gs-spotlight" id="msp-spotlight">
+          <p class="msp-label">Player spotlight <span class="msp-hint">(lower-third with that player's live stats on the RL HUD)</span></p>
+          <div class="gs-spotlight-row">
+            <select id="select-spotlight-player" class="input-select"><option value="">— Select player —</option></select>
+            <button class="btn btn-primary btn-sm" id="btn-spotlight-apply" type="button" title="Put the selected player's spotlight on air">Show</button>
+            <label class="gh-toggle gs-spotlight-onair"><span class="gh-toggle-txt"><b>On air</b></span>
+              <span class="switch"><input type="checkbox" id="check-spotlight-visible"><span class="slider"></span></span></label>
+          </div>
+          <p class="msp-hint">Players appear here once a Rocket League match is live.</p>
+        </div>
         <div class="msp-col msp-rl-strip" id="msp-playercams">
           <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
             <p class="msp-label" style="flex:1; margin:0;">In-Game Player Cams <span class="msp-hint">(HUD facecams — link each in-game name to a cam feed)</span></p>
@@ -1558,6 +1602,71 @@
         </div>
 
       </div>
+      <div class="gs-pane" data-gspane="brawlhalla">
+        <!-- Brawlhalla - stocks + legend per seat, and the ranked card lookup (shown only for Brawlhalla).
+             Stocks and legends are MANUAL: the game ships no live feed, so this strip is how they get
+             on air. The rank chips are the part that is real data - see backend/brawlhalla.js. -->
+        <div class="msp-col msp-rl-strip" id="msp-brawlhalla" style="display:none;">
+          <div class="smash-format-row">
+            <p class="msp-label" style="margin:0;">Format</p>
+            <div class="seg" id="bh-mode-seg">
+              <button class="seg-btn active" data-bh-mode="1v1" type="button" title="1v1 - one player + legend per side">1v1</button>
+              <button class="seg-btn" data-bh-mode="2v2" type="button" title="2v2 - both players on each side, stocks pooled">2v2</button>
+            </div>
+            <span class="msp-hint" id="bh-mode-hint"></span>
+          </div>
+          <div class="sm-opts">
+            <label class="sm-opt" title="Printed on the scoreboard under the centre mark. Clear the box to hand it back to auto.">
+              <span>Title</span>
+              <input type="text" id="bh-title" class="input-text" placeholder="Auto from format">
+            </label>
+            <label class="sm-opt"><span>Best of</span>
+              <select id="bh-best-of" class="input-text">
+                <option value="1">1</option><option value="3" selected>3</option><option value="5">5</option><option value="7">7</option>
+              </select>
+            </label>
+            <label class="sm-opt" title="Stocks each player starts a game with"><span>Stocks</span>
+              <select id="bh-start-stocks" class="input-text">
+                <option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option>
+              </select>
+            </label>
+            <label class="sm-opt" title="Which ranked ladder the ELO / tier chips quote. Brawlhalla publishes no 2v2 PLAYER rating (2v2 rating belongs to the team), so a 2v2 board still shows each player's 1v1 card.">
+              <span>Rank from</span>
+              <select id="bh-rank-mode" class="input-text">
+                <option value="ranked_1v1">1v1 ladder</option>
+                <option value="ranked_3v3">3v3 ladder</option>
+              </select>
+            </label>
+            <label class="sm-opt" title="Which region's leaderboard the name search looks in. ALL searches every region - use it unless you know the player's region."><span>Search region</span>
+              <select id="bh-region" class="input-text">
+                <option value="ALL">All regions</option><option value="US-E">US-East</option><option value="US-W">US-West</option>
+                <option value="EU">Europe</option><option value="SEA">SEA</option><option value="BRZ">Brazil</option>
+                <option value="AUS">Australia</option><option value="JPS">Japan</option><option value="SA">South Africa</option><option value="ME">Middle East</option>
+              </select>
+            </label>
+            <label class="sm-opt sm-opt--check" title="When a side loses its last stock, give the game to the other side and refill both for the next game.">
+              <input type="checkbox" id="bh-auto-advance" checked> Last stock ends the game
+            </label>
+            <label class="sm-opt sm-opt--check" title="Show the tier / ELO / rank chips on the scoreboard's lower bar.">
+              <input type="checkbox" id="bh-show-rank" checked> Rank chips on the board
+            </label>
+          </div>
+
+          <!-- One card per side, rendered by applyBrawlhallaControls(). -->
+          <div class="sm-board">
+            <div class="sm-side sm-side--p1" id="bh-side-blue" data-side="blue"></div>
+            <div class="sm-side sm-side--p2" id="bh-side-orange" data-side="orange"></div>
+          </div>
+          <div class="sm-actions">
+            <button class="btn btn-secondary btn-sm" id="btn-bh-reset" type="button" title="Refill both sides' stocks for the next game">New game</button>
+            <button class="btn btn-ghost btn-sm" id="btn-bh-refresh" type="button" title="Re-pull every linked player's rank, ELO and season record from the Brawlhalla API">Refresh ranks</button>
+            <button class="btn btn-ghost btn-sm" id="btn-bh-swap" type="button" title="Swap the two sides">Swap sides</button>
+          </div>
+          <p class="msp-hint" id="bh-status"></p>
+          <datalist id="bh-legends"></datalist>
+        </div>
+
+      </div>
       <div class="gs-pane" data-gspane="tokon">
         <!-- Marvel Tokon — format/game line + caster/sponsor corner for tokon.html (shown only for Tokon) -->
         <div class="msp-col msp-rl-strip" id="msp-tokon" style="display:none;">
@@ -1621,7 +1730,7 @@
         <span id="series-summary" class="sr-summary"></span>
         <button class="btn btn-secondary btn-xs" data-inv-ctx="match" title="One link both teams use to join the match room (players connect their own cameras) — copies to clipboard">+ Team join link</button>
         <label class="qt-toggle" title="Show or hide the series tracker overlay in OBS"><span>Show overlay</span><span class="switch"><input type="checkbox" id="check-series-visible"><span class="slider"></span></span></label>
-        <a href="http://127.0.0.1:3000/series.html" target="_blank" class="overlay-link" style="font-size:12px;">Series overlay ↗</a>
+        <a href="http://localhost:3000/series.html" target="_blank" class="overlay-link" style="font-size:12px;">Series overlay ↗</a>
       </div>
     </div>
     <div class="sr-meta">
@@ -1651,7 +1760,7 @@
   <section class="section dash-ow-bans" id="section-ow-bans" data-dash-auto="true" style="display:none">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
       <h3 class="section-title" style="margin-bottom:0;">Overwatch 2</h3>
-      <a href="http://127.0.0.1:3000/overwatch.html?preview=1" target="_blank" class="btn btn-secondary btn-sm">Preview ↗</a>
+      <a href="http://localhost:3000/overwatch.html?preview=1" target="_blank" class="btn btn-secondary btn-sm">Preview ↗</a>
     </div>
 
     <!-- Game Mode -->
@@ -1825,53 +1934,8 @@
       </div>
     </div>
 
-    <!-- Hero ban pickers (up to 2 per team) -->
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:12px;">
-      <!-- Team A bans -->
-      <div>
-        <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:var(--muted); margin-bottom:6px;" id="ow-ban-label-a">Team A — Hero Bans</div>
-        <div style="display:flex; flex-direction:column; gap:5px;">
-          <div class="ow-hero-search" id="ow-search-a0">
-            <div class="ow-hero-search-row">
-              <div class="ow-hero-search-preview" id="ow-ban-preview-a0"></div>
-              <input class="input-text ow-hero-search-input" id="ow-ban-input-a0" placeholder="Ban 1…" autocomplete="off">
-              <button class="btn btn-ghost btn-sm" id="btn-ow-ban-a0-clear" title="Clear">✕</button>
-            </div>
-            <div class="ow-hero-dropdown" id="ow-ban-dropdown-a0"></div>
-          </div>
-          <div class="ow-hero-search" id="ow-search-a1">
-            <div class="ow-hero-search-row">
-              <div class="ow-hero-search-preview" id="ow-ban-preview-a1"></div>
-              <input class="input-text ow-hero-search-input" id="ow-ban-input-a1" placeholder="Ban 2…" autocomplete="off">
-              <button class="btn btn-ghost btn-sm" id="btn-ow-ban-a1-clear" title="Clear">✕</button>
-            </div>
-            <div class="ow-hero-dropdown" id="ow-ban-dropdown-a1"></div>
-          </div>
-        </div>
-      </div>
-      <!-- Team B bans -->
-      <div>
-        <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:var(--muted); margin-bottom:6px;" id="ow-ban-label-b">Team B — Hero Bans</div>
-        <div style="display:flex; flex-direction:column; gap:5px;">
-          <div class="ow-hero-search" id="ow-search-b0">
-            <div class="ow-hero-search-row">
-              <div class="ow-hero-search-preview" id="ow-ban-preview-b0"></div>
-              <input class="input-text ow-hero-search-input" id="ow-ban-input-b0" placeholder="Ban 1…" autocomplete="off">
-              <button class="btn btn-ghost btn-sm" id="btn-ow-ban-b0-clear" title="Clear">✕</button>
-            </div>
-            <div class="ow-hero-dropdown" id="ow-ban-dropdown-b0"></div>
-          </div>
-          <div class="ow-hero-search" id="ow-search-b1">
-            <div class="ow-hero-search-row">
-              <div class="ow-hero-search-preview" id="ow-ban-preview-b1"></div>
-              <input class="input-text ow-hero-search-input" id="ow-ban-input-b1" placeholder="Ban 2…" autocomplete="off">
-              <button class="btn btn-ghost btn-sm" id="btn-ow-ban-b1-clear" title="Clear">✕</button>
-            </div>
-            <div class="ow-hero-dropdown" id="ow-ban-dropdown-b1"></div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <!-- Hero bans moved to Graphics > Pick / Ban (one place to run them, stored per map). -->
+    <p class="ow-bans-moved">Hero bans are entered on <b>Graphics &rsaquo; Pick / Ban</b>. They are kept per map and show on the scoreboard automatically.</p>
 
     <!-- Overlay controls -->
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
@@ -1891,8 +1955,8 @@
           <div id="mr-gep-dot-cp" style="width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,.2);flex-shrink:0;transition:background .4s;"></div>
           <span id="mr-gep-label">GEP Offline</span>
         </div>
-        <a href="http://127.0.0.1:3000/marvel-rivals.html?preview=1" target="_blank" class="btn btn-secondary btn-sm">Preview ↗</a>
-        <a href="http://127.0.0.1:3000/marvel-rivals.html?dev=1" target="_blank" class="btn btn-secondary btn-sm">Dev ↗</a>
+        <a href="http://localhost:3000/marvel-rivals.html?preview=1" target="_blank" class="btn btn-secondary btn-sm">Preview ↗</a>
+        <a href="http://localhost:3000/marvel-rivals.html?dev=1" target="_blank" class="btn btn-secondary btn-sm">Dev ↗</a>
       </div>
     </div>
 
@@ -2743,7 +2807,7 @@
           <span>Show transcription</span>
           <span class="switch"><input type="checkbox" id="cf-listen-captions" checked><span class="slider"></span></span>
         </label>
-        <a class="overlay-link listen-link" href="http://127.0.0.1:3000/listen-in.html" target="_blank">listen-in.html &#x2197;</a>
+        <a class="overlay-link listen-link" href="http://localhost:3000/listen-in.html" target="_blank">listen-in.html &#x2197;</a>
       </div>
     </section>
   </div><!-- /cf-panel-talent -->
@@ -4351,6 +4415,7 @@
     <div class="ev-seg" id="ev-src-seg">
       <button type="button" class="ev-seg-btn active" data-src="startgg">Start.gg</button>
       <button type="button" class="ev-seg-btn" data-src="challonge">Challonge</button>
+      <button type="button" class="ev-seg-btn" data-src="challengermode" title="challengermode.com — a different platform from Challonge">Challengermode</button>
       <button type="button" class="ev-seg-btn" data-src="nxgen">NXGEN</button>
       <button type="button" class="ev-seg-btn" data-src="faceit">FACEIT</button>
     </div>
@@ -4761,7 +4826,7 @@
                   <button class="btn btn-ghost btn-sm" id="lg-bkt-builder" title="Open the full bracket builder: custom phases, pools, double elimination and swiss">Open bracket builder</button>
                 </div>
                 <div class="lg2-toolbar-r">
-                  <a class="overlay-link" href="http://127.0.0.1:3000/bracket.html" target="_blank" style="font-size:11px;">bracket.html &#8599;</a>
+                  <a class="overlay-link" href="http://localhost:3000/bracket.html" target="_blank" style="font-size:11px;">bracket.html &#8599;</a>
                   <button class="btn btn-ghost btn-sm" id="lg-bkt-hide" title="Hide the bracket overlay">Hide</button>
                   <button class="btn btn-primary btn-sm" id="lg-bkt-push" title="Push this bracket to the bracket overlay">Push to overlay</button>
                 </div>
@@ -4776,7 +4841,7 @@
                   <span class="sr-summary">Series and game columns fill from results; in-game totals are typed in or synced.</span>
                 </div>
                 <div class="lg2-toolbar-r">
-                  <a class="overlay-link" href="http://127.0.0.1:3000/league-stats.html" target="_blank" style="font-size:11px;">league-stats.html &#8599;</a>
+                  <a class="overlay-link" href="http://localhost:3000/league-stats.html" target="_blank" style="font-size:11px;">league-stats.html &#8599;</a>
                   <button class="btn btn-ghost btn-sm" id="lg-stats-recalc" title="Refresh the Series &amp; Game columns from the schedule">Recalculate</button>
                   <button class="btn btn-primary btn-sm" id="lg-stats-push" title="Push this season stats board to the league-stats overlay">Push to overlay</button>
                 </div>
@@ -4882,8 +4947,8 @@
                 <div class="lg-section-head">
                   <h4>Team &amp; Player Stats</h4>
                   <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                    <a class="overlay-link" href="http://127.0.0.1:3000/league-stats.html" target="_blank" style="font-size:11px;">league-stats.html &#8599;</a>
-                    <a class="overlay-link" href="http://127.0.0.1:3000/league-leaderboard.html" target="_blank" style="font-size:11px;">league-leaderboard.html &#8599;</a>
+                    <a class="overlay-link" href="http://localhost:3000/league-stats.html" target="_blank" style="font-size:11px;">league-stats.html &#8599;</a>
+                    <a class="overlay-link" href="http://localhost:3000/league-leaderboard.html" target="_blank" style="font-size:11px;">league-leaderboard.html &#8599;</a>
                     <button class="btn btn-ghost btn-sm" id="lg-bc-refresh">Refresh Stats</button>
                     <button class="btn btn-primary btn-sm" id="lg-bc-push-stats" title="Push team totals to the league-stats overlay">Push Team Stats</button>
                     <button class="btn btn-primary btn-sm" id="lg-bc-push-leaderboard" title="Push the player leaderboard to its own overlay">Push Leaderboard</button>
@@ -5271,7 +5336,7 @@
           <span class="gfx-top-scene-name" id="gfx-active-name">Break / Starting Soon</span>
           <!-- ⓘ = the ONE OBS browser source (gfx.html). Each scene's own overlay URL lives in
                the scene header next to its ON/OFF AIR pill instead. -->
-          <a class="gfx-top-info" id="gfx-active-link" href="http://127.0.0.1:3000/gfx.html" target="_blank" title="OBS browser source: http://127.0.0.1:3000/gfx.html — one source carries every pushed graphic. Click to open.">i</a>
+          <a class="gfx-top-info" id="gfx-active-link" href="http://localhost:3000/gfx.html" target="_blank" title="OBS browser source: http://localhost:3000/gfx.html — one source carries every pushed graphic. Click to open.">i</a>
         </div>
         <div class="gfx-top-live">
           <span class="gfx-top-scene-lbl">Live</span>
@@ -5339,7 +5404,7 @@
               <!-- Series lives inside Map Pool now (same underlying pick/ban data) — see the
                    Map Pool / Series mode toggle at the top of that scene's panel. -->
               <button class="gfx-sidenav-btn" data-gfxscene="veto">Map Pool / Series</button>
-              <button class="gfx-sidenav-btn" data-gfxscene="draft">Draft</button>
+              <button class="gfx-sidenav-btn" data-gfxscene="draft">Pick / Ban</button>
               <button class="gfx-sidenav-btn" data-gfxscene="seriesstats" id="gfx-tab-seriesstats">Series Stats</button>
             </div>
           </div>
@@ -5768,16 +5833,19 @@
                 </select>
                 <span class="field-hint">Sets the starting map count &amp; the max — a series doesn't always play every map (Bo5 is often decided 3-0/3-1). Add slots below as it goes further.</span>
               </div>
-              <div class="gfx-ctrl-row" style="justify-content:space-between; align-items:center;">
-                <span class="field-hint" id="mp-team-key" style="margin:0;"></span>
-                <span style="display:flex; align-items:center; gap:8px;">
-                  <label class="mp-auto-lbl" title="Keep these scores live-synced from the series editor on Match — Teams. Turn off to type scores in by hand.">
-                    <input type="checkbox" id="mp-auto-series"> Auto from Series
-                  </label>
-                  <button type="button" class="btn btn-secondary btn-sm" id="mp-from-series" title="Fill maps and scores from the series editor on Match — Teams" data-gfx="fix">Fill from Series</button>
-                  <button type="button" class="btn btn-ghost btn-sm" id="mp-clear-scores" title="Blank every map's score (keeps the maps and picks)" data-gfx="fix">Clear scores</button>
-                </span>
+              <!-- Toolbar: series sync on the left, clearing on the right. The team key that used to be
+                   a sentence here ("Scores: X left · Y right") is now the column header below. -->
+              <div class="mp-toolbar">
+                <label class="gh-toggle mp-auto-toggle" title="Keep these scores live-synced from the series editor on Match — Teams. Turn off to type scores in by hand.">
+                  <span class="switch"><input type="checkbox" id="mp-auto-series"><span class="slider"></span></span>
+                  <span class="gh-toggle-txt"><b>Auto from Series</b></span>
+                </label>
+                <button type="button" class="btn btn-secondary btn-sm" id="mp-from-series" title="Fill maps and scores from the series editor on Match — Teams">Fill from Series</button>
+                <span class="mp-toolbar-gap"></span>
+                <button type="button" class="btn btn-ghost btn-sm" id="mp-clear-scores" title="Blank every map's score (keeps the maps and picks)">Clear scores</button>
+                <button type="button" class="btn btn-ghost btn-sm mp-clear-maps" id="mp-clear-maps" title="Remove every map from the series (maps, picks and scores)">Clear maps</button>
               </div>
+              <div id="mp-head" class="mp-head" aria-hidden="true"></div>
               <div id="mp-slots" class="mp-slots"></div>
               <div style="margin-top:8px;">
                 <button type="button" class="btn btn-ghost btn-sm" id="mp-add-slot">+ Add map</button>
@@ -5793,41 +5861,54 @@
               <button type="button" class="btn btn-ghost btn-sm" id="btn-veto-front-open" style="width:100%;margin-top:14px;">Open full board</button>
             </div>
 
-            <!-- DRAFT — compact status readout + Start Draft quick action. Overwatch gets a real
-                 ban board right here (turn banner + 4 snake ban slots + type-to-ban) since bans
-                 are the whole draft for that game; "Open full board" still reaches the popout. -->
-            <div class="gfx-front-panel" data-frontkey="draft" id="gfx-front-draft" style="display:none;">
-              <!-- Editable scene name + subtext, live on the front card (which-side-starts + Start
-                   live in the summary body below, rendered per draft state). -->
-              <div class="dm-front-meta" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">
-                <input id="draft-front-title" class="input-text" placeholder="Scene title (e.g. GRAND FINAL — DRAFT)" style="font-size:12px;">
-                <input id="draft-front-subtitle" class="input-text" placeholder="Subtext (e.g. BEST OF 5)" style="font-size:12px;">
-                <!-- Overwatch only: how many hero bans total (applies on the next Start Draft). -->
-                <div id="draft-front-owbans-row" style="display:none;align-items:center;gap:8px;">
-                  <span class="field-label" data-gfx="fix">Hero bans</span>
-                  <select id="draft-front-owbans" class="input-select" style="flex:1;font-size:12px;">
-                    <option value="4">4 — two per team</option>
-                    <option value="2">2 — one per team</option>
-                  </select>
+            <!-- PICK / BAN — scene text, setup (ban count for Overwatch + who goes first), then the
+                 live board. Overwatch gets a real two-team ban board right here since bans are the
+                 whole draft for that game; other games show progress and run the full board. -->
+            <div class="gfx-front-panel pb-card" data-frontkey="draft" id="gfx-front-draft" style="display:none;">
+              <div class="pb-meta">
+                <label class="pb-field"><span class="gfx-fp-lbl">Scene title</span>
+                  <input id="draft-front-title" class="input-text" placeholder="e.g. GRAND FINAL — HERO BANS"></label>
+                <label class="pb-field"><span class="gfx-fp-lbl">Subtext</span>
+                  <input id="draft-front-subtitle" class="input-text" placeholder="e.g. BEST OF 5"></label>
+              </div>
+              <div class="pb-setup">
+                <!-- Overwatch only. The hidden select is the value store the existing wiring reads. -->
+                <div class="pb-field" id="draft-front-owbans-row" style="display:none;">
+                  <span class="gfx-fp-lbl">Hero bans</span>
+                  <div class="pb-seg" id="draft-front-owbans-seg" role="group">
+                    <button type="button" data-v="2">1 per team</button>
+                    <button type="button" data-v="4">2 per team</button>
+                  </div>
+                  <select id="draft-front-owbans" hidden><option value="2">1 per team</option><option value="4">2 per team</option></select>
+                </div>
+                <div class="pb-field">
+                  <span class="gfx-fp-lbl">Goes first</span>
+                  <div class="pb-seg" id="draft-front-first-seg" role="group">
+                    <button type="button" data-v="a"></button>
+                    <button type="button" data-v="b"></button>
+                  </div>
+                  <select id="draft-front-start" hidden><option value="a"></option><option value="b"></option></select>
                 </div>
               </div>
-              <div class="gfx-popout-summary-body" id="gfx-front-draft-body"></div>
+              <div class="gfx-popout-summary-body pb-status" id="gfx-front-draft-body"></div>
               <div id="gfx-front-draft-ow" class="dm-front-ow" style="display:none;">
                 <div class="dm-front-ow-turn" id="dm-front-ow-turn"></div>
                 <div class="dm-front-ow-slots" id="dm-front-ow-slots"></div>
-                <div class="dm-front-ow-input">
+                <div class="dm-front-ow-input" id="dm-front-ow-input">
                   <div class="team-typeahead" style="flex:1; position:relative;">
-                    <input id="draft-front-input" class="input-text" placeholder="Type a hero to ban…" autocomplete="off" style="width:100%;font-size:12px;">
+                    <input id="draft-front-input" class="input-text" placeholder="Search a hero to ban (name or role)…" autocomplete="off" style="width:100%;">
                     <div class="team-dd" id="draft-front-dd" role="listbox"></div>
                   </div>
                   <button type="button" class="btn btn-primary btn-sm" id="btn-draft-front-submit">Ban</button>
                 </div>
+                <p class="pb-hint">Bans show on the Overwatch scoreboard as you enter them. Use Push Live to put the ban scene on air.</p>
               </div>
-              <div style="display:flex;gap:6px;margin-bottom:6px;">
-                <button type="button" class="btn btn-ghost btn-sm" id="btn-draft-front-undo" style="flex:1;" title="Undo the last pick / ban">Undo</button>
-                <button type="button" class="btn btn-ghost btn-sm" id="btn-draft-front-reset" style="flex:1;" title="Clear every pick & ban made so far (keeps the board & format)">Reset</button>
+              <div class="pb-actions">
+                <button type="button" class="btn btn-primary btn-sm" id="btn-draft-front-start">Start pick / ban</button>
+                <button type="button" class="btn btn-ghost btn-sm" id="btn-draft-front-undo" title="Undo the last pick / ban">Undo</button>
+                <button type="button" class="btn btn-ghost btn-sm" id="btn-draft-front-reset" title="Clear every pick &amp; ban made so far (keeps the board &amp; format)">Reset</button>
+                <button type="button" class="btn btn-ghost btn-sm" id="btn-draft-front-open">Full board</button>
               </div>
-              <button type="button" class="btn btn-ghost btn-sm" id="btn-draft-front-open" style="width:100%;">Open full board</button>
             </div>
 
             <!-- SPOTLIGHT — Title, reorderable team list and Add-team search (moved out of
@@ -6277,7 +6358,7 @@
         <div class="mp-head">
           <h3>Bracket</h3>
           <div class="mp-head-tools">
-            <a class="overlay-link" href="http://127.0.0.1:3000/bracket.html" target="_blank">bracket.html &#8599;</a>
+            <a class="overlay-link" href="http://localhost:3000/bracket.html" target="_blank">bracket.html &#8599;</a>
             <button type="button" class="btn btn-ghost btn-sm" data-popout-close>Close</button>
           </div>
         </div>
@@ -6301,7 +6382,7 @@
         <div class="mp-head">
           <h3>Spotlight</h3>
           <div class="mp-head-tools">
-            <a class="overlay-link" href="http://127.0.0.1:3000/watchlist.html" target="_blank">watchlist.html &#8599;</a>
+            <a class="overlay-link" href="http://localhost:3000/watchlist.html" target="_blank">watchlist.html &#8599;</a>
             <button type="button" class="btn btn-ghost btn-sm" data-popout-close>Close</button>
           </div>
         </div>
@@ -6323,7 +6404,7 @@
         <div class="mp-head">
           <h3>Standings</h3>
           <div class="mp-head-tools">
-            <a class="overlay-link" href="http://127.0.0.1:3000/standings.html" target="_blank">standings.html &#8599;</a>
+            <a class="overlay-link" href="http://localhost:3000/standings.html" target="_blank">standings.html &#8599;</a>
             <button type="button" class="btn btn-ghost btn-sm" data-popout-close>Close</button>
           </div>
         </div>
@@ -6387,7 +6468,7 @@
         <div class="mp-head">
           <h3>Schedule</h3>
           <div class="mp-head-tools">
-            <a class="overlay-link" href="http://127.0.0.1:3000/schedule.html" target="_blank">schedule.html &#8599;</a>
+            <a class="overlay-link" href="http://localhost:3000/schedule.html" target="_blank">schedule.html &#8599;</a>
             <button type="button" class="btn btn-ghost btn-sm" data-popout-close>Close</button>
           </div>
         </div>
@@ -6488,7 +6569,7 @@
         <div class="mp-head">
           <h3>Map Pool</h3>
           <div class="mp-head-tools">
-            <a class="overlay-link" href="http://127.0.0.1:3000/mapscreen.html" target="_blank">mapscreen.html &#8599;</a>
+            <a class="overlay-link" href="http://localhost:3000/mapscreen.html" target="_blank">mapscreen.html &#8599;</a>
             <button type="button" class="btn btn-ghost btn-sm" data-popout-close>Close</button>
           </div>
         </div>
@@ -6588,9 +6669,9 @@
     <div class="gfx-fullboard" id="gfx-popout-draft" style="display:none;">
       <div class="gfx-popout-box">
         <div class="mp-head">
-          <h3>Draft</h3>
+          <h3>Pick / Ban</h3>
           <div class="mp-head-tools">
-            <a class="overlay-link" href="http://127.0.0.1:3000/draft.html" target="_blank">draft.html &#8599;</a>
+            <a class="overlay-link" href="http://localhost:3000/draft.html" target="_blank">draft.html &#8599;</a>
             <button type="button" class="btn btn-ghost btn-sm" data-popout-close>Close</button>
           </div>
         </div>
@@ -6655,7 +6736,7 @@
                 <select id="draft-start" title="Which team acts first in the draft">
                   <option value="a">Blue side first</option><option value="b">Orange side first</option>
                 </select>
-                <button class="btn btn-primary btn-sm" id="btn-draft-start">Start Draft</button>
+                <button class="btn btn-primary btn-sm" id="btn-draft-start">Start pick / ban</button>
                 <label class="qt-toggle" id="draft-auto-wrap" title="Fill the LoL draft live from the League Client (champ select). Needs the League client running + in the draft lobby on this machine." style="display:none;">
                   <span>Auto (League Client)</span>
                   <span class="switch"><input type="checkbox" id="draft-auto"><span class="slider"></span></span>
@@ -6665,7 +6746,7 @@
 
               <div class="dm-turn-banner" id="draft-turn-banner">
                 <div class="dm-turn-dot" id="draft-turn-dot" style="background:#555"></div>
-                <div class="dm-turn-label" id="draft-turn">Choose a game and click Start Draft.</div>
+                <div class="dm-turn-label" id="draft-turn">Choose a game and click Start pick / ban.</div>
               </div>
 
               <div class="dm-board" id="draft-board">
@@ -6934,8 +7015,8 @@
     </p>
     <div style="display:flex; align-items:center; gap:10px; background:rgba(255,255,255,0.04); border:1px dashed var(--border); border-radius:8px; padding:10px 12px; margin-bottom:14px;">
       <span style="font-size:12px; color:var(--muted);">Overlay browser source / scene:</span>
-      <a href="http://127.0.0.1:3000/schedule.html" target="_blank" class="overlay-link" style="font-weight:600;">
-        http://127.0.0.1:3000/schedule.html
+      <a href="http://localhost:3000/schedule.html" target="_blank" class="overlay-link" style="font-weight:600;">
+        http://localhost:3000/schedule.html
       </a>
     </div>
     <div class="field-row">
@@ -6969,8 +7050,8 @@
     </p>
     <div style="display:flex; align-items:center; gap:10px; background:rgba(255,255,255,0.04); border:1px dashed var(--border); border-radius:8px; padding:10px 12px; margin-bottom:14px;">
       <span style="font-size:12px; color:var(--muted);">Overlay browser source / scene:</span>
-      <a href="http://127.0.0.1:3000/standings.html" target="_blank" class="overlay-link" style="font-weight:600;">
-        http://127.0.0.1:3000/standings.html
+      <a href="http://localhost:3000/standings.html" target="_blank" class="overlay-link" style="font-weight:600;">
+        http://localhost:3000/standings.html
       </a>
     </div>
     <div class="field-row">
@@ -7056,7 +7137,7 @@
       </div>
     </div>
     <p style="font-size:12px; color:var(--muted); margin:8px 0 12px;">
-      Build a bracket by hand and push it to <a href="http://127.0.0.1:3000/bracket.html" target="_blank" class="overlay-link">bracket.html</a>.
+      Build a bracket by hand and push it to <a href="http://localhost:3000/bracket.html" target="_blank" class="overlay-link">bracket.html</a>.
       Fill each slot from your saved teams (or type a name), enter scores, and hit the advance arrow to send the winner to the next round.
     </p>
     <datalist id="bb-teams-datalist"></datalist>
@@ -7101,6 +7182,11 @@
       <div class="field-row" style="margin-bottom:0;">
         <label class="field-label" for="input-brand-sponsor-label">Sponsor rail label</label>
         <input type="text" id="input-brand-sponsor-label" class="input-text" placeholder="PARTNERS">
+      </div>
+      <div class="field-row" style="margin-bottom:0;">
+        <label class="field-label" for="input-brand-presented-label">"Presented by" label</label>
+        <input type="text" id="input-brand-presented-label" class="input-text" placeholder="PRESENTED BY">
+        <span style="font-size:11px; color:var(--muted);">Title-sponsor wording across all overlays (RL HUD, duorow, desk, scorecard). Blank = "Presented by".</span>
       </div>
     </div>
     <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:12px;">
@@ -7148,6 +7234,10 @@
         <select id="select-brand-theme" class="input-select" style="flex:1; min-width:0;" title="Overlay design for the selected game"></select>
       </div>
       <div id="brand-design-summary" style="font-size:11px; color:var(--muted); margin-top:6px;"></div>
+      <label class="qt-toggle brand-link-styles" style="font-size:12px; margin-top:10px;" title="Off: activating, saving or switching this profile never touches your overlay styles. On: every game set above switches to its design (and the package's captured scene style presets apply) whenever this profile goes live.">
+        <span>Apply these designs when this profile goes live</span>
+        <span class="switch"><input type="checkbox" id="chk-brand-link-styles"><span class="slider"></span></span>
+      </label>
     </div>
 
     <div class="brand-pkg-section">
@@ -7271,7 +7361,7 @@
     </p>
     <div class="obs-src-row">
       <span class="obs-src-label">OBS source (Main Banner)</span>
-      <input type="text" class="input-text obs-src-url" id="banner-main-url" readonly value="http://127.0.0.1:3000/sponsor-banner.html?src=main">
+      <input type="text" class="input-text obs-src-url" id="banner-main-url" readonly value="http://localhost:3000/sponsor-banner.html?src=main">
       <button class="btn btn-ghost btn-sm" type="button" data-copy="banner-main-url">Copy</button>
     </div>
     <div style="display: flex; align-items: center; gap: 20px; flex-wrap: wrap; margin-bottom: 15px; background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px;">
@@ -7367,13 +7457,16 @@
           <h3 class="section-title" style="margin-bottom:0;">Scene Sources (OBS Browser Sources)</h3>
           <span id="scene-onair-count" class="scene-onair-count" style="display:none;"></span>
         </div>
-        <a class="btn btn-blue btn-sm" href="http://127.0.0.1:3000/scenes.html" target="_blank" style="text-decoration:none;">Open full launcher ↗</a>
+        <a class="btn btn-blue btn-sm" href="http://localhost:3000/scenes.html" target="_blank" style="text-decoration:none;">Open full launcher ↗</a>
       </div>
       <p style="font-size:12px; color:var(--muted); margin-bottom:14px;">
         Every overlay URL in one place. <strong>Search</strong> or filter by category, <strong>Copy</strong> a URL into an
         OBS Browser Source (1920×1080), <strong>Open</strong> to preview, or <strong>Edit HTML</strong> to customize.
         Cards glow green when that scene is <strong>on air</strong>.
+        Playing and casting on one PC? The <strong>monitor</strong> button pops an overlay out over your game
+        as a transparent, click-through window (borderless or windowed game mode, not exclusive fullscreen).
       </p>
+      <div id="game-overlay-mgr" class="go-mgr" hidden></div>
       <div id="scene-source-list"></div>
     </section>
   </div>
@@ -7395,6 +7488,7 @@
     <button type="button" class="ev-subnav-btn" data-inttab="cameras" hidden>Cameras</button>
     <button type="button" class="ev-subnav-btn" data-inttab="tournaments" hidden>Tournament Platforms</button>
     <button type="button" class="ev-subnav-btn" data-inttab="twitch" hidden>Twitch</button>
+    <button type="button" class="ev-subnav-btn" data-inttab="riot" hidden>Riot Games</button>
     <!-- Marble Race parked — unlisted from Integrations, code kept. Restore this button,
          the store card and the #integration-chatgames panel together (see INT_TABS in app.js).
     <button type="button" class="ev-subnav-btn" data-inttab="chatgames">Chat Games</button>
@@ -7486,6 +7580,14 @@
         </div>
         <span class="int-card-status" data-st="off">No key</span>
       </div>
+      <div class="int-card" data-card="riot" data-goto="riot">
+        <div class="int-card-logo mono-riot">RIOT</div>
+        <div class="int-card-body">
+          <div class="int-card-name">Riot Games</div>
+          <div class="int-card-tag">League of Legends, Valorant and TFT player identity and ranked data — bring your own developer key.</div>
+        </div>
+        <span class="int-card-status" data-st="off">No key</span>
+      </div>
       <div class="int-card" data-card="sheets" data-goto="tournaments" data-scroll="sheets-conn-badge">
         <div class="int-card-logo mono-sheets">GS</div>
         <div class="int-card-body">
@@ -7532,7 +7634,7 @@
         <div class="int-card-logo mono-val">VAL</div>
         <div class="int-card-body">
           <div class="int-card-name">Valorant</div>
-          <div class="int-card-tag">Live scoreboard and player data from the built-in Local Client API — fully automatic.</div>
+          <div class="int-card-tag">Live scoreboard and player data via the Overwolf relay on the PC in the match.</div>
         </div>
         <span class="int-card-status" data-st="ready">Local client</span>
       </div>
@@ -8050,7 +8152,7 @@
       </div>
 
       <div style="display:flex;gap:6px;margin-bottom:8px;">
-        <a href="http://127.0.0.1:3000/stream-credits.html?loop=1" target="_blank" class="btn btn-primary btn-sm" style="flex:1;text-align:center;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;">
+        <a href="http://localhost:3000/stream-credits.html?loop=1" target="_blank" class="btn btn-primary btn-sm" style="flex:1;text-align:center;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
           Open Credits Overlay
         </a>
@@ -8062,6 +8164,14 @@
         <label class="field-label" for="credits-endtext">End card text</label>
         <input type="text" id="credits-endtext" class="input-text" placeholder="Thanks For Watching" maxlength="80">
         <p class="section-desc" style="margin:4px 0 0;">Shown big &amp; centered when the credits finish rolling. Leave blank for &ldquo;Thanks For Watching&rdquo;.</p>
+      </div>
+
+      <!-- Side rails beside the roll. Each one only appears when it has something to list. -->
+      <div class="credits-rails" style="margin-bottom:12px;">
+        <label class="gh-toggle"><span class="gh-toggle-txt"><b>Show Top 8</b><small>Event standings down the left of the roll (from the Standings board, else the bracket).</small></span>
+          <span class="switch"><input type="checkbox" id="credits-show-top8" checked><span class="slider"></span></span></label>
+        <label class="gh-toggle"><span class="gh-toggle-txt"><b>Show stream activity</b><small>This stream's raids, subs, bits and follows down the right.</small></span>
+          <span class="switch"><input type="checkbox" id="credits-show-activity" checked><span class="slider"></span></span></label>
       </div>
 
       <!-- Credit Sponsors — dedicated big call-outs in the end roll (separate from the sponsor bar) -->
@@ -8267,6 +8377,26 @@
           <input type="text" id="input-challonge-slug" class="input-text" placeholder="my-tournament or subdomain-tournament">
         </div>
 
+        <!-- Live poll interval + the monthly request budget.
+             Challonge's FREE plan allows 500 requests a MONTH (enforced since 6 July 2026 - over
+             it you get 429s), and every live poll costs three. A 30s poll is ~86,000 a month, so
+             a free key runs dry in under four hours of broadcasting. This is the dial for that,
+             and the meter so it is not discovered from a dead bracket mid-show. -->
+        <div class="field-row">
+          <label class="field-label" for="input-challonge-poll">Live poll interval</label>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <select id="input-challonge-poll" class="input-text" style="max-width:220px;">
+              <option value="15">Every 15 seconds</option>
+              <option value="30" selected>Every 30 seconds</option>
+              <option value="60">Every minute</option>
+              <option value="180">Every 3 minutes</option>
+              <option value="600">Every 10 minutes</option>
+            </select>
+            <span id="challonge-budget" style="font-size:12px; color:var(--muted);"></span>
+          </div>
+          <p class="field-hint" style="margin:4px 0 0;">Each poll costs 3 API requests. Challonge's free plan allows 500 a month before it starts returning 429 &mdash; raise this interval, or upgrade the Challonge plan, for a long event.</p>
+        </div>
+
         <!-- Buttons -->
         <div style="display: flex; gap: 8px; flex-wrap: wrap;">
           <button class="btn btn-secondary" id="btn-challonge-save">Save Settings</button>
@@ -8300,6 +8430,101 @@
             <div id="challonge-queue-list" style="display:flex; flex-direction:column; gap:4px; max-height:180px; overflow-y:auto;"></div>
             <p id="challonge-queue-empty" class="sps-empty" style="display:none;">No open matches right now.</p>
           </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- Challengermode — a DIFFERENT platform from Challonge above, despite the similar name.
+         GraphQL API, bot-token auth, stage-based tournaments (groups then playoffs). -->
+    <section class="section" style="margin-bottom:0;">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4v6h6"/><path d="M20 20v-6h-6"/><path d="M4 10a8 8 0 0 1 14-4"/><path d="M20 14a8 8 0 0 1-14 4"/></svg>
+        <h3 class="section-title" style="margin:0;">Challengermode</h3>
+        <span id="cm-conn-badge" style="display:none; padding: 3px 10px; background: rgba(74, 222, 128, 0.2); border: 1px solid #4ade80; border-radius: 4px; font-size: 11px; color: #86efac; white-space: nowrap;">
+          <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><polyline points="20 6 9 17 4 12"/></svg> Connected
+        </span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 10px; background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px;">
+
+        <p class="field-hint" style="margin:0;">Not the same as Challonge &mdash; Challengermode is a separate platform (challengermode.com). Multi-stage tournaments, real finish placements including ties, and proper round names.</p>
+
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <label for="check-cm-enabled" style="font-weight: 600; color: #e0e0e0; cursor: pointer;">Enable Challengermode Sync</label>
+          <input type="checkbox" id="check-cm-enabled" style="width: 18px; height: 18px; cursor: pointer; accent-color: #055fdb;">
+        </div>
+
+        <!-- Refresh key -->
+        <div class="field-row">
+          <label class="field-label" for="input-cm-key">Refresh key</label>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input type="password" id="input-cm-key" class="input-text" placeholder="Paste your Challengermode refresh key" style="flex: 1;">
+            <button id="btn-cm-change-key" class="btn btn-ghost btn-sm" style="display:none; white-space:nowrap;">Change Key</button>
+          </div>
+          <p class="field-hint" style="margin:4px 0 0;">Create one in the Challengermode <strong>Application Dashboard</strong> &rarr; Credentials. It is shown only once.</p>
+          <details class="int-keyhelp"><summary>How do I get this?</summary><div class="int-keyhelp-body"><ol>
+            <li>Sign in at <a href="https://www.challengermode.com" target="_blank" rel="noopener">challengermode.com</a>.</li>
+            <li>Open the <a href="https://www.challengermode.com/developers" target="_blank" rel="noopener">developer portal</a> and create an application.</li>
+            <li>In the application's <strong>Credentials</strong> tab, generate a long-lived <strong>refresh key</strong> and copy it straight away &mdash; it is not shown again.</li>
+            <li>Paste it here. The app exchanges it for a short-lived access token automatically and re-exchanges it as it expires.</li>
+            <li>For a <strong>private or unlisted</strong> tournament, also link your bot to your Space in the dashboard &mdash; a bot can read public tournaments without it.</li>
+          </ol></div></details>
+        </div>
+
+        <!-- Tournament -->
+        <div class="field-row">
+          <label class="field-label" for="input-cm-tournament">Tournament link or id</label>
+          <input type="text" id="input-cm-tournament" class="input-text" placeholder="https://www.challengermode.com/tournaments/... or the id">
+          <p class="field-hint" style="margin:4px 0 0;">Paste the whole link &mdash; the id is picked out of it.</p>
+        </div>
+
+        <!-- Space id. Optional: pasting a tournament link always works without it. It is only
+             needed to BROWSE your organisation's tournaments from the Events page. -->
+        <div class="field-row">
+          <label class="field-label" for="input-cm-space">Space id <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
+          <input type="text" id="input-cm-space" class="input-text" placeholder="Paste your Space link or id to browse its tournaments">
+          <p class="field-hint" style="margin:4px 0 0;">Lets Events &#9656; Challengermode list your organisation's tournaments instead of pasting a link each time.</p>
+        </div>
+
+        <!-- Poll interval. Challengermode budgets by FIELD COST, not request count, so this is an
+             ordinary freshness dial rather than a quota lever like Challonge's. -->
+        <div class="field-row">
+          <label class="field-label" for="input-cm-poll">Live poll interval</label>
+          <select id="input-cm-poll" class="input-text" style="max-width:220px;">
+            <option value="10">Every 10 seconds</option>
+            <option value="30" selected>Every 30 seconds</option>
+            <option value="60">Every minute</option>
+            <option value="180">Every 3 minutes</option>
+          </select>
+        </div>
+
+        <!-- Buttons -->
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button class="btn btn-secondary" id="btn-cm-save">Save Settings</button>
+          <button class="btn btn-primary" id="btn-cm-test">Test Connection</button>
+          <button class="btn btn-blue" id="btn-cm-load">Load Tournament</button>
+          <button class="btn btn-ghost btn-sm" id="btn-cm-refresh" style="display:none;" title="Re-fetch matches, scores and placements">Refresh</button>
+        </div>
+
+        <div id="cm-result" style="font-size: 13px; color: var(--muted);"></div>
+
+        <!-- Loaded tournament info -->
+        <div id="cm-tournament-info" style="display:none; padding:10px; background:rgba(255,255,255,.04); border:1px solid var(--border); border-radius:8px;">
+          <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+            <div>
+              <div id="cm-t-name" style="font-weight:700; font-size:14px; margin-bottom:2px;"></div>
+              <div id="cm-t-meta" style="font-size:11px; color:var(--muted);"></div>
+            </div>
+            <a id="cm-t-link" href="#" target="_blank" rel="noopener" class="btn btn-ghost btn-sm" style="white-space:nowrap;">View on Challengermode &#8599;</a>
+          </div>
+          <div style="display:flex; gap:14px; align-items:center; margin-top:10px; flex-wrap:wrap;">
+            <label class="switch-row" style="display:flex; align-items:center; gap:8px; font-size:12px;">
+              <label class="switch"><input type="checkbox" id="cm-autofollow"><span class="slider"></span></label>
+              <span>Auto-follow the live match onto the scoreboard</span>
+            </label>
+            <button class="btn btn-ghost btn-sm" id="btn-cm-push-top8" title="Put the tournament's real finish order on the standings / top-8 board. It keeps updating as the bracket resolves.">Push Top 8</button>
+          </div>
+          <div id="cm-placement-note" style="font-size:11px; color:var(--muted); margin-top:6px;"></div>
         </div>
       </div>
     </section>
@@ -8623,15 +8848,15 @@
       <span class="game-tab-name">Apex</span>
     </button>
   </div>
-  <div class="gh-picker" id="gh-picker"></div>
+  <div class="gh-layout">
+  <aside class="gh-side" id="gh-picker" aria-label="Games"></aside>
   <div class="gh-card">
     <div class="gh-head">
       <img class="gh-logo" id="gh-logo" alt="">
       <div class="gh-titles">
         <div class="gh-name" id="gh-name"></div>
-        <div class="gh-sub" id="gh-sub"></div>
+        <div class="gh-meta"><span class="gh-sub" id="gh-sub"></span><span class="gh-status" id="gh-status" data-st="none"></span></div>
       </div>
-      <span class="gh-status" id="gh-status" data-st="none"></span>
       <span class="gh-active-badge" id="gh-active-badge" hidden>Active game</span>
       <button type="button" class="btn btn-secondary btn-sm" id="gh-make-active" hidden>Make active</button>
     </div>
@@ -8678,6 +8903,8 @@
           <div class="gh-group-title">Overlay options</div>
           <label class="gh-toggle"><span class="gh-toggle-txt"><b>Round history strip</b><small>Slides a round-by-round result strip onto the CS2 overlay.</small></span>
             <span class="switch"><input type="checkbox" id="check-csgo-history"><span class="slider"></span></span></label>
+          <label class="gh-toggle"><span class="gh-toggle-txt"><b>Victory screen at map end</b><small>Puts the Winner graphic on air for the team with more rounds when the map ends, and takes it down when the next map goes live.</small></span>
+            <span class="switch"><input type="checkbox" id="check-csgo-auto-winner" checked><span class="slider"></span></span></label>
           <label class="gh-toggle"><span class="gh-toggle-txt"><b>Built-in radar</b><small>Off uses an external radar (boltobserv) added as its own OBS source.</small></span>
             <span class="switch"><input type="checkbox" id="check-csgo-builtin-radar"><span class="slider"></span></span></label>
         </div>
@@ -8687,27 +8914,29 @@
     <!-- Valorant -->
     <div class="game-section" id="games-section-valorant">
       <div class="gh-pane" data-gtab="connection">
-        <p class="gh-lead">Connects automatically to Valorant's local client API (port 2999) while a match is running. Nothing to install.</p>
+        <p class="gh-lead">Live data comes from the NE Broadcast Suite Relay (Overwolf) running on the PC that is in the match. Valorant has no first-party live feed, so the relay is required — nothing arrives without it.</p>
         <span id="val-conn" class="prod-chip gh-legacy-chip">Valorant: waiting</span>
         <details class="gh-guide"><summary>Setup guide</summary><div class="gh-guide-body">
       <div style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px 16px; font-size:12px; color:var(--muted); line-height:1.8;">
         <strong style="color:#e0e0e0; display:block; margin-bottom:6px;">Setup steps</strong>
         <ol style="margin:0; padding-left:18px;">
-          <li>Launch <strong>Valorant</strong> and join or spectate a match.</li>
-          <li>In BroadcastStudio, set the active game to <strong>Valorant</strong> on the Dashboard.</li>
-          <li>The overlay connects automatically — no restart needed.</li>
+          <li>Install <strong>Overwolf</strong> on the PC that will be in the Valorant match (an observer seat counts).</li>
+          <li>Load the <strong>NE Broadcast Suite Relay</strong> from <code>companion-overwolf/</code>: Overwolf settings &rsaquo; About &rsaquo; Development options &rsaquo; Load unpacked extension.</li>
+          <li>If that PC is not this one, set <code>SUITE_BASE</code> in the relay's <code>background.html</code> to this machine's LAN address.</li>
+          <li>Set the active game to <strong>Valorant</strong> on the Dashboard and join the match. The relay starts with the game.</li>
         </ol>
         <div style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.07);">
           <strong style="color:#e0e0e0;">For observer/spectator coverage:</strong><br>
-          Use Valorant's built-in <strong>Observer Tool</strong> (requires a custom game or tournament lobby with spectator slots enabled).
-          The overlay automatically highlights the currently-spectated player with a team-colored glow.
-          No third-party software needed.
+          Run the relay on the observer PC in a custom game or tournament lobby with spectator slots. Valorant reports
+          who that seat is watching, and the overlay highlights that player with a team-coloured glow.
         </div>
         <div style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.07); color:#7a8090;">
           <strong style="color:#9aa0b0;">How it works:</strong>
-          Valorant exposes a local HTTPS server at <code>127.0.0.1:2999</code> during any active match.
-          BroadcastStudio polls <code>/liveclientdata/allgamedata</code> every 500 ms and broadcasts
-          real-time player health, weapons, abilities, economy, round state, and spike events to the overlay via WebSocket.
+          The relay reads Overwolf's Game Events Provider and posts to <code>/api/val-gep</code>. That gives names,
+          agents, alive state, shields, kills/deaths/assists, weapon, credits, ult points, spike and the round score.
+          <br><strong style="color:#9aa0b0;">What it cannot give:</strong> per-player <strong>health</strong> and
+          ability charges — Valorant exposes those for the local client only, so the HUD does not show them for the
+          other nine players rather than inventing numbers.
         </div>
       </div>
         </div></details>
@@ -8749,44 +8978,63 @@
             mirroring the broadcast "teamfight view." <strong>Minimal</strong> forces the clean view; <strong>Full HUD</strong> always shows player loadouts.
           </p>
         </div>
-        <details class="gh-guide"><summary>Advanced: real team gold via OCR</summary><div class="gh-guide-body">
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:6px;">
+        <details class="gh-guide" id="lol-ocr-details"><summary>Advanced: real team gold via OCR</summary><div class="gh-guide-body">
+        <div class="lol-ocr-head">
           <h4 class="section-title" style="font-size:13px; margin:0;">Real gold via OCR (optional)</h4>
           <label class="qt-toggle"><span>Enable OCR</span><span class="switch"><input type="checkbox" id="lol-ocr-enable"><span class="slider"></span></span></label>
         </div>
-        <p class="field-hint" style="margin:0 0 10px; max-width:600px;">
-          Reads the two team-gold numbers straight off the spectator scoreboard (like LeagueOCR) and overrides the estimate.
-          Calibrate the capture boxes over each team's gold number — the overlay's <code>est</code> tag turns to <code>OCR</code> when it locks on.
-          Defaults assume a 1920×1080 spectator HUD; adjust per your resolution/layout.
+        <p class="field-hint" style="margin:0 0 10px; max-width:640px;">
+          Reads the two team-gold numbers off the spectator scoreboard on this PC's screen and overrides the estimate.
+          Spectate a game, pick the monitor the client is on, then <strong>Auto-detect</strong>. The overlay's <code>est</code> tag
+          turns to <code>OCR</code> once it locks on. Reads that cannot be right (a dropped digit, gold going down) are held, not shown.
         </p>
-        <div style="display:flex; gap:18px; flex-wrap:wrap;">
-          <div>
-            <div style="font-size:11px; font-weight:700; color:var(--blue, #1ea0e6); text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px;">Blue gold box</div>
+        <div class="lol-ocr-toolbar">
+          <label class="lol-ocr-display">Monitor <select id="lol-ocr-display" class="input-text"></select></label>
+          <button class="btn btn-primary btn-sm" id="lol-ocr-autolocate" type="button">Auto-detect gold boxes</button>
+          <button class="btn btn-secondary btn-sm" id="lol-ocr-snapshot" type="button">Snapshot</button>
+          <span id="lol-ocr-status" class="prod-chip">OCR: off</span>
+        </div>
+        <p class="field-hint lol-ocr-msg" id="lol-ocr-msg"></p>
+        <!-- Calibration picture: the display, with the two capture boxes drawn over it. Drag a box to
+             move it, drag its corner to resize, drag on empty space to draw a new one for the side
+             picked below. Coordinates are the display's physical pixels; the image is just scaled. -->
+        <div class="lol-ocr-cal" id="lol-ocr-cal">
+          <img id="lol-ocr-shot" alt="" draggable="false">
+          <div class="lol-ocr-box blue" id="lol-ocr-box-blue"><span>Blue</span></div>
+          <div class="lol-ocr-box red" id="lol-ocr-box-red"><span>Red</span></div>
+          <div class="lol-ocr-cal-empty" id="lol-ocr-cal-empty">Take a snapshot while spectating to see the boxes over the real HUD.
+            Drag a box to move it, drag its corner to resize, or draw a new one on empty space.</div>
+        </div>
+        <div class="lol-ocr-draw">
+          <span class="field-hint" style="margin:0;">Draw a new box for</span>
+          <div class="seg" id="lol-ocr-side" role="group"><button type="button" class="seg-btn active" data-side="blue">Blue</button><button type="button" class="seg-btn" data-side="red">Red</button></div>
+        </div>
+        <div class="lol-ocr-sides">
+          <div class="lol-ocr-side">
+            <div class="lol-ocr-side-title blue">Blue gold box</div>
             <div class="lol-ocr-grid">
               <label>X<input type="number" id="lol-ocr-bx" class="input-text"></label>
               <label>Y<input type="number" id="lol-ocr-by" class="input-text"></label>
               <label>W<input type="number" id="lol-ocr-bw" class="input-text"></label>
               <label>H<input type="number" id="lol-ocr-bh" class="input-text"></label>
             </div>
+            <div class="lol-ocr-preview"><img id="lol-ocr-prev-blue" alt=""><span id="lol-ocr-prev-blue-txt">What the engine sees appears here after a snapshot.</span></div>
           </div>
-          <div>
-            <div style="font-size:11px; font-weight:700; color:#e8485c; text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px;">Red gold box</div>
+          <div class="lol-ocr-side">
+            <div class="lol-ocr-side-title red">Red gold box</div>
             <div class="lol-ocr-grid">
               <label>X<input type="number" id="lol-ocr-rx" class="input-text"></label>
               <label>Y<input type="number" id="lol-ocr-ry" class="input-text"></label>
               <label>W<input type="number" id="lol-ocr-rw" class="input-text"></label>
               <label>H<input type="number" id="lol-ocr-rh" class="input-text"></label>
             </div>
+            <div class="lol-ocr-preview"><img id="lol-ocr-prev-red" alt=""><span id="lol-ocr-prev-red-txt"></span></div>
           </div>
         </div>
-        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:10px;">
-          <button class="btn btn-secondary btn-sm" id="lol-ocr-apply">Apply regions</button>
-          <span id="lol-ocr-status" class="prod-chip">OCR: off</span>
+        <div class="lol-ocr-foot">
+          <button class="btn btn-secondary btn-sm" id="lol-ocr-apply" type="button">Apply boxes</button>
+          <span class="field-hint" style="margin:0;">Live read — <span id="lol-ocr-read" class="lol-ocr-read">—</span></span>
         </div>
-        <p class="field-hint" style="margin-top:8px;">
-          Live read — <span id="lol-ocr-read" style="color:#e0e0e0; font-weight:700;">—</span>.
-          Tune the boxes until these match the on-screen gold. Windows-only; needs the <code>tesseract.js</code> package.
-        </p>
         </div></details>
       </div>
     </div>
@@ -9132,6 +9380,7 @@ PacketSendRate=10</pre>
 
     </div>
   </div>
+  </div><!-- /.gh-layout -->
   </div>
 
   <!-- PLUGINS — community marketplace. Storefront + creator payouts are not live yet; this panel
@@ -9198,6 +9447,87 @@ PacketSendRate=10</pre>
     </section>
   </div>
 
+  <!-- RIOT GAMES — the producer's own key from developer.riotgames.com -->
+  <div id="integration-riot" class="integration-panel" style="display:none;">
+    <section class="section">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+        <h3 class="section-title" style="margin:0;">Riot Games</h3>
+        <span class="int-card-status" id="riot-key-chip" data-st="off">No key</span>
+      </div>
+      <p class="field-hint" style="max-width:760px; margin-top:0;">
+        One key covers League of Legends, Valorant and Teamfight Tactics. It is stored encrypted on
+        this machine and is never sent anywhere except to Riot.
+      </p>
+
+      <div style="display:flex; flex-direction:column; gap:14px; background:rgba(255,255,255,0.05); padding:15px; border-radius:8px;">
+
+        <div class="field-row" style="margin-bottom:0;">
+          <label class="field-label" for="input-riot-key">API Key</label>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input type="password" id="input-riot-key" class="input-text" placeholder="RGAPI-…" style="flex:1;" autocomplete="off" spellcheck="false">
+            <button id="btn-riot-change-key" class="btn btn-ghost btn-sm" style="display:none; white-space:nowrap;">Change Key</button>
+          </div>
+          <details class="int-keyhelp"><summary>How do I get this?</summary><div class="int-keyhelp-body"><ol>
+            <li>Sign in at <a href="https://developer.riotgames.com" target="_blank" rel="noopener">developer.riotgames.com</a> with your Riot account.</li>
+            <li>The <b>development key</b> on that dashboard works immediately — copy it and paste it here.</li>
+            <li><b>A development key expires every 24 hours.</b> When calls start failing overnight, regenerate it on that page and paste the new one. For a key that does not expire, register a product and apply for a personal or production key.</li>
+            <li>Riot's rate limits are small, so nothing in this app polls them — data is pulled only when you press a button here.</li>
+          </ol></div></details>
+        </div>
+
+        <div style="display:flex; gap:20px; flex-wrap:wrap;">
+          <div class="field-row" style="margin-bottom:0;">
+            <label class="field-label" for="select-riot-platform">Platform <span class="field-hint">— summoner, ranked, status</span></label>
+            <select id="select-riot-platform" class="input-text" style="min-width:220px;">
+              <option value="na1">North America (na1)</option>
+              <option value="br1">Brazil (br1)</option>
+              <option value="la1">LAN (la1)</option>
+              <option value="la2">LAS (la2)</option>
+              <option value="euw1">EU West (euw1)</option>
+              <option value="eun1">EU Nordic &amp; East (eun1)</option>
+              <option value="tr1">T&uuml;rkiye (tr1)</option>
+              <option value="ru">Russia (ru)</option>
+              <option value="me1">Middle East (me1)</option>
+              <option value="kr">Korea (kr)</option>
+              <option value="jp1">Japan (jp1)</option>
+              <option value="oc1">Oceania (oc1)</option>
+              <option value="sg2">Singapore (sg2)</option>
+              <option value="tw2">Taiwan (tw2)</option>
+              <option value="vn2">Vietnam (vn2)</option>
+              <option value="th2">Thailand (th2)</option>
+              <option value="ph2">Philippines (ph2)</option>
+            </select>
+          </div>
+          <div class="field-row" style="margin-bottom:0;">
+            <label class="field-label" for="select-riot-region">Routing region <span class="field-hint">— Riot ID, match history</span></label>
+            <select id="select-riot-region" class="input-text" style="min-width:180px;">
+              <option value="americas">Americas</option>
+              <option value="europe">Europe</option>
+              <option value="asia">Asia</option>
+              <option value="sea">SEA</option>
+            </select>
+            <p class="field-hint" style="margin:4px 0 0; max-width:340px;">Follows the platform automatically. Riot splits its API across both, and a mismatch reads as &ldquo;player not found&rdquo;.</p>
+          </div>
+        </div>
+
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn btn-secondary btn-sm" id="btn-riot-save">Save</button>
+          <button class="btn btn-primary btn-sm" id="btn-riot-test">Test key</button>
+        </div>
+
+        <div class="field-row" style="margin-bottom:0; padding-top:12px; border-top:1px solid var(--border);">
+          <label class="field-label" for="input-riot-riotid">Look up a Riot ID <span class="field-hint">— confirms the key and the region in one go</span></label>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input type="text" id="input-riot-riotid" class="input-text" placeholder="Name#TAG" style="flex:1; max-width:320px;">
+            <button class="btn btn-secondary btn-sm" id="btn-riot-lookup">Look up</button>
+          </div>
+        </div>
+
+        <div id="riot-result" style="font-size:13px; color:var(--muted);"></div>
+      </div>
+    </section>
+  </div>
+
   <!-- ELGATO STREAM DECK -->
   <div id="integration-streamdeck" class="integration-panel" style="display:none;">
     <section class="section">
@@ -9211,7 +9541,7 @@ PacketSendRate=10</pre>
       <div style="display:flex; align-items:center; gap:12px; margin:14px 0;">
         <!-- target=_blank routes through main.js setWindowOpenHandler -> system browser,
              which downloads the file with normal browser UX (panel window never navigates). -->
-        <a class="btn btn-primary" href="http://127.0.0.1:3000/api/integrations/streamdeck-plugin" target="_blank" rel="noopener">Download plugin</a>
+        <a class="btn btn-primary" href="http://localhost:3000/api/integrations/streamdeck-plugin" target="_blank" rel="noopener">Download plugin</a>
         <span id="streamdeck-conn-status" class="field-hint" style="margin:0;">Plugin not connected.</span>
       </div>
       <div class="field-hint" style="max-width:720px;">
@@ -10174,15 +10504,12 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
     <div id="game-overlay-note" style="margin-top:10px; font-size:12px; color:var(--muted);"></div>
 
     <div id="rl-layouts" style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,.08);">
-      <span style="font-size:12px; color:var(--muted);">Rocket League layouts — pick a browser source (both read the same live data):</span>
+      <span style="font-size:12px; color:var(--muted);">Rocket League layouts — pick a browser source (all read the same live data):</span>
       <div style="display:flex; flex-wrap:wrap; gap:18px; margin-top:8px;">
-        <a href="http://127.0.0.1:3000/" target="_blank" class="overlay-link" style="font-weight:600;">
-          localhost:3000/ <span style="color:var(--muted); font-weight:400;">— Classic</span>
-        </a>
-        <a href="http://127.0.0.1:3000/rl-hud.html" target="_blank" class="overlay-link" style="font-weight:600;">
+        <a href="http://localhost:3000/rl-hud.html" target="_blank" class="overlay-link" style="font-weight:600;">
           localhost:3000/rl-hud.html <span style="color:var(--muted); font-weight:400;">— React style (boost + statcard, bottom-right)</span>
         </a>
-        <a href="http://127.0.0.1:3000/rl-hud.html?only=scoreboard" target="_blank" class="overlay-link" style="font-weight:600;">
+        <a href="http://localhost:3000/rl-hud.html?only=scoreboard" target="_blank" class="overlay-link" style="font-weight:600;">
           localhost:3000/rl-hud.html?only=scoreboard <span style="color:var(--muted); font-weight:400;">— Post-game scoreboard ONLY (dedicated source; pair with "Scoreboard on separate source")</span>
         </a>
       </div>
@@ -10223,7 +10550,7 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
       <span class="set-fold-hint">Add maps, modes, roles and characters before an app update ships them</span>
     </summary>
     <div style="height:12px;"></div>
-    <p class="section-desc">Build a bundle of maps, roles, and characters that extends an existing game — for when a new hero or map releases and you don't want to wait on an app update. Export it to share, or import one someone else built. One active config per game; anything you add here is merged alongside the built-in content, not a replacement for it.</p>
+    <p class="section-desc">Add or fix this game's maps, characters, roles and role icons yourself — for when a new hero or map releases and you don't want to wait on an app update. Save &amp; apply makes it live in this app; Export writes a file you can share, Import loads one someone else built. Your content is merged with the built-in content: new items are added, and an item with the same name as a built-in one replaces its image.</p>
 
     <div style="display:grid; grid-template-columns:160px 1fr 1fr 1fr; gap:8px; margin-bottom:10px; align-items:end;">
       <div class="field-row" style="margin:0;">
@@ -10256,9 +10583,11 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
     <div class="gc-panel" id="gc-panel-maps">
       <div class="gc-dropzone" id="gc-dropzone-maps">
         <div class="gc-dropzone-hint">
-          <span>Drag &amp; drop map images here, or</span>
-          <button class="btn btn-secondary btn-sm" id="gc-add-map" type="button">+ Add Map</button>
+          <span>Drop map images here, or</span>
+          <button class="btn btn-primary btn-sm" id="gc-upload-maps" type="button">Upload images</button>
+          <button class="btn btn-ghost btn-sm" id="gc-add-maps" type="button">Add without image</button>
         </div>
+        <div class="gc-dropzone-sub">PNG, JPG, WebP or SVG. Select several at once — each file name becomes the map name. Click a thumbnail to change its image.</div>
       </div>
       <div id="gc-list-maps"></div>
     </div>
@@ -10269,32 +10598,39 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
         <input type="text" id="gc-mode-desc" class="input-text" style="flex:2;" placeholder="Description (optional)">
         <button class="btn btn-primary btn-sm" id="gc-add-mode" type="button">Add</button>
       </div>
-      <p class="section-desc" style="margin-bottom:10px;">Reference only for now — not yet wired into any game logic.</p>
+      <p class="section-desc" style="margin-bottom:10px;">Modes you add here are offered as the Mode / type on the Maps tab.</p>
       <div id="gc-list-modes"></div>
     </div>
 
     <div class="gc-panel" id="gc-panel-roles" style="display:none;">
       <div style="display:flex; gap:8px; margin-bottom:10px;">
-        <input type="text" id="gc-role-name" class="input-text" style="flex:1;" placeholder="Role name (e.g. Flex)">
+        <input type="text" id="gc-role-name" class="input-text" style="flex:1;" placeholder="Add a role (e.g. Flex)">
         <button class="btn btn-primary btn-sm" id="gc-add-role" type="button">Add</button>
       </div>
+      <p class="section-desc" style="margin-bottom:10px;">Click a role's icon box to upload its icon (a white or light icon on a transparent background reads best). Icons show in the player Role picker and on overlays that print a role.</p>
       <div id="gc-list-roles"></div>
     </div>
 
     <div class="gc-panel" id="gc-panel-characters" style="display:none;">
       <div class="gc-dropzone" id="gc-dropzone-characters">
         <div class="gc-dropzone-hint">
-          <span>Drag &amp; drop character portraits here, or</span>
-          <button class="btn btn-secondary btn-sm" id="gc-add-character" type="button">+ Add Character</button>
+          <span>Drop character portrait images here, or</span>
+          <button class="btn btn-primary btn-sm" id="gc-upload-characters" type="button">Upload images</button>
+          <button class="btn btn-ghost btn-sm" id="gc-add-characters" type="button">Add without image</button>
         </div>
+        <div class="gc-dropzone-sub">PNG, JPG, WebP or SVG. Select several at once — each file name becomes the character name. Set a role so role filters and ban limits include it.</div>
       </div>
       <div id="gc-list-characters"></div>
     </div>
 
+    <input type="file" id="gc-file" accept="image/*" hidden>
     <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:14px; padding-top:14px; border-top:1px solid var(--border);">
-      <button class="btn btn-primary btn-sm" id="btn-gc-export">⤓ Export / Save</button>
-      <button class="btn btn-secondary btn-sm" id="btn-gc-import">⤒ Import Game Config</button>
-      <button class="btn btn-ghost btn-sm" id="btn-gc-reset" style="display:none;">Reset to built-in</button>
+      <button class="btn btn-primary btn-sm" id="btn-gc-save" type="button">Save &amp; apply</button>
+      <span class="gc-chip gc-chip-warn" id="gc-dirty" style="display:none;">Unsaved changes</span>
+      <span style="flex:1;"></span>
+      <button class="btn btn-secondary btn-sm" id="btn-gc-export" type="button" title="Write this content to a .zip you can share">Export to file</button>
+      <button class="btn btn-secondary btn-sm" id="btn-gc-import" type="button">Import from file</button>
+      <button class="btn btn-ghost btn-sm" id="btn-gc-reset" type="button" style="display:none;">Reset to built-in</button>
     </div>
     <div id="gc-result" style="margin-top:10px; font-size:13px;"></div>
     </details>
@@ -10331,14 +10667,9 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
       </div>
     </div>
     <div class="settings-grid-2" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);">
-      <div class="field-row" style="margin:0;">
-        <label class="field-label">Overlay Theme</label>
-        <select id="select-theme" class="input-select">
-          <option value="default">Default</option>
-          <option value="midnight">Midnight</option>
-          <option value="neon">Neon</option>
-        </select>
-      </div>
+      <!-- "Overlay Theme" (Default / Midnight / Neon accent presets) removed 2026-10: set_theme now picks the
+           overlay LAYOUT, so the select always rendered blank and choosing an entry reset the game's
+           layout. The accent colour below and brand kits cover what the presets did. -->
       <div class="field-row" style="margin:0;">
         <label class="field-label" for="settings-accent">Accent Color <span class="field-desc">(when no brand kit)</span></label>
         <div style="display:flex;gap:8px;align-items:center;">
@@ -10381,6 +10712,10 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
       <div class="field-row" style="margin:0;">
         <label class="field-label">Show Series Score on HUD</label>
         <label class="qt-toggle"><span>Visible</span><span class="switch"><input type="checkbox" id="settings-show-series" checked><span class="slider"></span></span></label>
+      </div>
+      <div class="field-row" style="margin:0;">
+        <label class="field-label">Show promotions</label>
+        <label class="qt-toggle" title="A slim line on the Dashboard, Events and Marketplace pages about Nameless events and sponsors. Never shown while you are live, and never on air."><span>Nameless events &amp; sponsors</span><span class="switch"><input type="checkbox" id="settings-show-promos" checked><span class="slider"></span></span></label>
       </div>
     </div>
   </section>
@@ -10448,7 +10783,7 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
     <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
       <button class="btn btn-primary btn-sm" id="btn-export-profile">⤓ Export profile</button>
       <button class="btn btn-secondary btn-sm" id="btn-import-profile">⤒ Import profile</button>
-      <label class="qt-toggle" style="font-size:12px;" title="Also apply the shared look/overlay settings. Off = only merge libraries (teams, brands, etc.)."><span>Apply look on import</span><span class="switch"><input type="checkbox" id="chk-import-settings" checked><span class="slider"></span></span></label>
+      <label class="qt-toggle" style="font-size:12px;" title="Also replace your overlay styles (layout per game, font, colour mode, replay / stats-screen / overtime looks) with the file's. Off = your styles stay exactly as they are; teams, brand kits and other libraries still merge in."><span>Replace my overlay styles</span><span class="switch"><input type="checkbox" id="chk-import-settings"><span class="slider"></span></span></label>
     </div>
     <div id="import-export-result" style="margin-top: 14px; font-size: 14px;"></div>
 
@@ -10533,6 +10868,13 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
     <p class="section-desc" style="max-width:720px;">How the RL overlay behaves around the kickoff, the post-game scoreboard, and replays. Scene lists come from OBS. Live controls (pause, replay speed, clear board) stay on the Match — Teams card during a show.</p>
     <div class="msp-rl-grid" style="margin-top:12px;">
 
+      <div class="msp-rl-row">
+        <div class="msp-rl-cell">
+          <p class="msp-label">Clean feed</p>
+          <label class="msp-toggle"><input type="checkbox" id="chk-rl-hide-ui"> Hide the RL overlay (clean game feed)</label>
+        </div>
+      </div>
+
       <!-- ── 1 · KICKOFF ─────────────────────────────────────── -->
       <div class="msp-rl-section-hd"><span class="msp-rl-step">1</span> Kickoff <span class="msp-rl-when">when the game starts</span></div>
       <div class="msp-rl-row">
@@ -10542,12 +10884,10 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
           <select id="sel-rl-kickoff-scene" class="input-text msp-input"><option value="">— None —</option></select>
         </div>
         <!-- RL auto-spectate / director-cam / first-kickoff-cam cells REMOVED 2026-08 — the camera
-             automation never worked reliably and is gone entirely (no ChangePOV commands anymore). -->
-        <div class="msp-rl-cell">
-          <p class="msp-label">Replay transitions <span class="msp-hint">(overlay animation)</span></p>
-          <label class="msp-toggle"><input type="checkbox" id="chk-rl-replay-transitions" checked> Play the shutter-slam replay wipes</label>
-          <p class="msp-hint">The animated intro/outro (and the Brazil flag) on the RL overlays. Turn off to use an OBS stinger or a clean cut instead — the HUD still hides for the replay.</p>
-        </div>
+             automation never worked reliably and is gone entirely (no ChangePOV commands anymore).
+             Replay transitions (on/off + style) moved to Match ▸ Teams ▸ Look 2026-09 — it's a visual
+             pick for this match, not scene automation, and now sits with the style dropdown it was
+             split from instead of two tabs away from it. -->
       </div>
 
       <!-- ── 2 · MATCH END ───────────────────────────────────── -->
@@ -12019,6 +12359,7 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
 <script src="heroes-data.js"></script>
 <!-- Smash fighter registry — ONE list shared with the overlays (slugs, aliases, art paths). -->
 <script src="../overlay/smash-fighters.js"></script>
+<script src="../overlay/brawlhalla-legends.js"></script>
 <!-- app.js + app-store-nav.js are loaded at the END of <body> (below) so that every element —
      including the floating panels and the Events push/link modals — exists before their load-time
      wiring runs. Loading app.js here left those trailing modals unwired (couldn't close / operate). -->
@@ -12237,6 +12578,7 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
 <script src="leagues.js"></script>
 <script src="br-lobby.js"></script>
 <script src="gameconfig.js"></script>
+<script src="promos.js"></script>
 <script src="games-hub.js"></script>
 <script src="league-interchange.js"></script>
 <script src="competitions.js"></script>

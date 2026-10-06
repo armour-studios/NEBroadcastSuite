@@ -651,6 +651,7 @@
     }
 
     /* Build BOTH sides at once and keep only the kinds at least one side can fill. */
+    const EMPTY_FRAME = '<div class="sub-frame"></div>';
     function buildFrameSet(a, b, ctxA, ctxB) {
       const out = { a: [], b: [] };
       FRAME_KINDS.forEach((kind) => {
@@ -658,8 +659,10 @@
         const fb = frameFor(kind, b.team, b.p, b.prof, b.record, ctxB);
         if (!fa && !fb) return;                       // neither side has this line — skip the beat
         // Fall back to the side's own context so a half is never blank mid-rotation.
-        out.a.push(fa || frameFor('context', a.team, a.p, a.prof, a.record, ctxA));
-        out.b.push(fb || frameFor('context', b.team, b.p, b.prof, b.record, ctxB));
+        // Always push ONE element per side: an empty string here left a bar with fewer frames than
+        // the other (or none — applyFrameSet then threw and aborted the whole render).
+        out.a.push(fa || frameFor('context', a.team, a.p, a.prof, a.record, ctxA) || EMPTY_FRAME);
+        out.b.push(fb || frameFor('context', b.team, b.p, b.prof, b.record, ctxB) || EMPTY_FRAME);
       });
       return out;
     }
@@ -680,8 +683,8 @@
       wrapA.classList.toggle('is-hidden', !SHOW_INFO || !n);
       wrapB.classList.toggle('is-hidden', !SHOW_INFO || !n);
       if (!n) return;
-      wrapA.firstElementChild.classList.add('on');
-      wrapB.firstElementChild.classList.add('on');
+      if (wrapA.firstElementChild) wrapA.firstElementChild.classList.add('on');
+      if (wrapB.firstElementChild) wrapB.firstElementChild.classList.add('on');
       if (n < 2 || FLIP_MS <= 0) return;
       let i = 0;
       _subTimer = setInterval(() => {

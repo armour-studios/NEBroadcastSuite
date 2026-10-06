@@ -49,7 +49,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-head-text { flex: 1 1 auto; min-width: 0; }
 .bk-bar { display: none; }
 .bk-eyebrow { font-family: var(--disp); font-weight: 700; font-size: 12px; letter-spacing: .42em; text-transform: uppercase;
-  color: var(--accent); text-align: left; }
+  color: var(--accent-ink, var(--accent)); text-align: left; }
 .bk-title { font-family: var(--disp); font-weight: 700; font-size: 44px; line-height: 1.02; letter-spacing: .01em; text-transform: uppercase; color: #fff;
   text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 1180px; }
 .bk-subtitle { font-family: var(--body); font-weight: 600; font-size: 16px; color: rgba(255,255,255,.8); text-align: left;
@@ -70,8 +70,8 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-section-pills:empty { display: none; }
 .bk-spill { font-family: var(--disp); font-weight: 700; font-size: 11px; letter-spacing: .18em; text-transform: uppercase;
   padding: 4px 10px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
-.bk-spill.wb { color: var(--accent); border-color: rgba(255,255,255,.28); background: rgba(255,255,255,.06); }
-.bk-spill.lb { color: var(--accent-2); border-color: rgba(255,255,255,.28); background: rgba(255,255,255,.06); }
+.bk-spill.wb { color: var(--accent-ink, var(--accent)); border-color: rgba(255,255,255,.28); background: rgba(255,255,255,.06); }
+.bk-spill.lb { color: var(--accent-2-ink, var(--accent-2)); border-color: rgba(255,255,255,.28); background: rgba(255,255,255,.06); }
 @supports (color: color-mix(in srgb, red 50%, white)) {
   .bk-spill.wb { border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
   .bk-spill.lb { border-color: color-mix(in srgb, var(--accent-2) 45%, transparent); background: color-mix(in srgb, var(--accent-2) 12%, transparent); }
@@ -130,8 +130,8 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-section-pills { display: flex; gap: 6px; margin-top: 2px; }
 .bk-spill { font-family: var(--disp); font-weight: 700; font-size: 11px; letter-spacing: .18em; text-transform: uppercase;
   padding: 4px 10px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
-.bk-spill.wb { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
-.bk-spill.lb { color: var(--accent-2); border-color: color-mix(in srgb, var(--accent-2) 45%, transparent); background: color-mix(in srgb, var(--accent-2) 12%, transparent); }
+.bk-spill.wb { color: var(--accent-ink, var(--accent)); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.bk-spill.lb { color: var(--accent-2-ink, var(--accent-2)); border-color: color-mix(in srgb, var(--accent-2) 45%, transparent); background: color-mix(in srgb, var(--accent-2) 12%, transparent); }
 
 /* Match cards; columns flex-fill the canvas width, but a short board (a two-round day of a
    multi-stage event) centres instead of stretching two cards across 1816px. */
@@ -318,7 +318,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-run-logo { width: 64px; height: 64px; object-fit: contain; filter: drop-shadow(0 3px 10px rgba(0,0,0,.6)); }
 .bk-run-logo.logo-on-dark { filter: brightness(0) invert(1) drop-shadow(0 3px 10px rgba(0,0,0,.6)); }
 .bk-run-eyebrow { font-family: var(--disp); font-weight: 700; font-size: 12px; letter-spacing: .42em; text-transform: uppercase;
-  color: var(--accent); }
+  color: var(--accent-ink, var(--accent)); }
 @supports (color: color-mix(in srgb, red 50%, white)) {
   .bk-run-eyebrow { color: color-mix(in srgb, var(--accent) 75%, #fff); } }
 .bk-run-team { font-family: var(--disp); font-weight: 700; font-size: 40px; line-height: 1.05; text-transform: uppercase; color: #fff; }
@@ -327,7 +327,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); }
 .bk-run-band-label { font-family: var(--disp); font-weight: 700; font-size: 13px; letter-spacing: .3em; text-transform: uppercase;
   color: rgba(255,255,255,.55); margin-bottom: 10px; }
-.bk-run-band.losers .bk-run-band-label { color: var(--accent-2); }
+.bk-run-band.losers .bk-run-band-label { color: var(--accent-2-ink, var(--accent-2)); }
 @supports (color: color-mix(in srgb, red 50%, white)) {
   .bk-run-band.losers .bk-run-band-label { color: color-mix(in srgb, var(--accent-2) 70%, #fff); } }
 .bk-run-band.gf .bk-run-band-label { color: rgba(255,214,107,.85); }
@@ -385,13 +385,13 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-origin { font-size: 12px; line-height: 1; color: rgba(255,255,255,.5); padding: 4px 9px 0;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: .02em; }
 .bk-exit { font-size: 12px; line-height: 1; font-weight: 600; padding: 4px 9px 5px;
-  color: var(--accent);
+  color: var(--accent-ink, var(--accent));
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @supports (color: color-mix(in srgb, red 50%, white)) {
   .bk-exit { color: color-mix(in srgb, var(--accent) 80%, #fff); } }
 .bk-exit::before { content: '\2192  '; opacity: .75; }
 .bk-lad-note { text-align: center; font-family: var(--disp); font-size: 16px; font-weight: 600;
-  color: var(--accent); letter-spacing: .05em; }
+  color: var(--accent-ink, var(--accent)); letter-spacing: .05em; }
 @supports (color: color-mix(in srgb, red 50%, white)) {
   .bk-lad-note { color: color-mix(in srgb, var(--accent) 80%, #fff); } }
 .bk-lad-note::before { content: '\2192  '; opacity: .75; }
@@ -590,7 +590,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   letter-spacing: .1em; line-height: 1; text-transform: uppercase; }
 .bk-pr-onair.live { background: #ff3b47; color: #fff; }
 .bk-pr-onair .pdot { width: 6px; height: 6px; border-radius: 50%; background: currentColor;
-  animation: bkLivePulse 1.4s ease-in-out infinite; }
+  animation: bkDotPulse 1.4s ease-in-out infinite; }
 /* Channel chip — platform glyph (brand-coloured) + channel name. */
 .bk-pr-chip { display: inline-flex; align-items: center; gap: 6px; background: rgba(255,255,255,.08);
   border: 1px solid rgba(255,255,255,.14); border-radius: 999px; padding: 3px 11px; line-height: 1;
@@ -601,7 +601,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-pr-chip.plat-youtube .bk-pr-icon { color: #ff4e45; }
 .bk-pr-chip.plat-kick     .bk-pr-icon { color: #53fc18; }
 .bk-pr-chip.plat-facebook .bk-pr-icon { color: #4c8bf5; }
-.bk-pr-chip.plat-generic .bk-pr-icon { color: var(--accent-2); }
+.bk-pr-chip.plat-generic .bk-pr-icon { color: var(--accent-2-ink, var(--accent-2)); }
 .bk-pr-chip .bk-pr-chname { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .bk-pr { position: relative; display: flex; align-items: stretch; height: 70px; border-radius: 11px;
@@ -653,9 +653,9 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-pr-cstream.plat-youtube .bk-pr-icon { color: #ff4e45; }
 .bk-pr-cstream.plat-kick     .bk-pr-icon { color: #53fc18; }
 .bk-pr-cstream.plat-facebook .bk-pr-icon { color: #4c8bf5; }
-.bk-pr-cstream.plat-generic  .bk-pr-icon { color: var(--accent-2); }
+.bk-pr-cstream.plat-generic  .bk-pr-icon { color: var(--accent-2-ink, var(--accent-2)); }
 .bk-pr-cstream .bk-pr-chname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@keyframes bkLivePulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+@keyframes bkDotPulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
 /* Tighter rows for the multi-group (tiled) layouts. */
 .bk-pair.cols-2 .bk-pr, .bk-pair.cols-3 .bk-pr { height: 60px; }
 .bk-pair.cols-2 .bk-pr-name, .bk-pair.cols-3 .bk-pr-name { font-size: 19px; }
@@ -802,7 +802,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   padding: 13px 22px; border-bottom: 1px solid var(--hair);
   background: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.02));
   font-family: var(--disp); font-weight: 700; font-size: 15px; letter-spacing: .14em; text-transform: uppercase; color: #e3e8f1; }
-.bk-gp-round { font-size: 13px; letter-spacing: .1em; color: var(--accent); }
+.bk-gp-round { font-size: 13px; letter-spacing: .1em; color: var(--accent-ink, var(--accent)); }
 .bk-gp-row { display: grid; grid-template-columns: 74px 1fr 78px 78px 100px 168px; align-items: center;
   padding: 0 18px; height: 60px; border-bottom: 1px solid rgba(255,255,255,.05); }
 .bk-gp-row.norecord { grid-template-columns: 74px 1fr 100px 168px; }
@@ -846,7 +846,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-gp-fix:last-child { margin-bottom: 0; }
 .bk-gp-fix.live { border-color: rgba(255,255,255,.28); background: rgba(255,255,255,.07); }
 .bk-gp-fix-rd { font-family: var(--disp); font-weight: 700; font-size: 11px; letter-spacing: .08em;
-  text-transform: uppercase; color: var(--accent); flex: 0 0 auto; min-width: 52px; }
+  text-transform: uppercase; color: var(--accent-ink, var(--accent)); flex: 0 0 auto; min-width: 52px; }
 .bk-gp-fix-teams { flex: 1; min-width: 0; font-family: var(--disp); font-weight: 600; font-size: 15px; color: #fff;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bk-gp-fix-vs { color: rgba(255,255,255,.4); font-weight: 400; padding: 0 4px; }

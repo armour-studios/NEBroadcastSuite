@@ -68,7 +68,7 @@
       font-weight: 800; font-size: 22px; letter-spacing: .16em; text-transform: uppercase; color: var(--duo-text);
       background: var(--duo-surface); border: 1px solid var(--duo-border);
     }
-    .duo-bestof b { color: var(--duo-accent); font-weight: 800; }
+    .duo-bestof b { color: var(--duo-accent-ink, var(--duo-accent)); font-weight: 800; }
 
     .zone-hud {
       flex: 1 1 0;
@@ -280,11 +280,11 @@
       text-align: center;
     }
     .match-team--a .match-score {
-      color: var(--team-a);
+      color: var(--team-a-ink, var(--team-a));
       text-shadow: 0 0 22px color-mix(in srgb, var(--team-a) 60%, transparent);
     }
     .match-team--b .match-score {
-      color: var(--team-b);
+      color: var(--team-b-ink, var(--team-b));
       text-shadow: 0 0 22px color-mix(in srgb, var(--team-b) 60%, transparent);
     }
 
@@ -442,8 +442,8 @@
       min-width: 116px;
       text-align: center;
     }
-    .pred-side--a .pred-pct { color: var(--team-a); }
-    .pred-side--b .pred-pct { color: var(--team-b); }
+    .pred-side--a .pred-pct { color: var(--team-a-ink, var(--team-a)); }
+    .pred-side--b .pred-pct { color: var(--team-b-ink, var(--team-b)); }
     /* currentColor = the team colour, so the glow tracks it without color-mix */
     .pred-pct { text-shadow: 0 0 26px currentColor, 0 2px 5px rgba(0,0,0,.8); }
     /* Leading side reads a touch heavier */
@@ -1117,7 +1117,7 @@
       const label = el('pb-label');
       const logo = el('pb-logo');
       if (slot.logo) {
-        label.textContent = (slot.label || 'PRESENTED BY').toString().trim();
+        label.textContent = (_pbBrand.presentedLabel || slot.label || 'PRESENTED BY').toString().trim();
         logo.src = slot.logo;
         logo.style.display = '';
         wrap.classList.remove('is-empty');

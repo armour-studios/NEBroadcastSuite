@@ -306,6 +306,39 @@
   }
   window.__fgcApplyBrandColors = applyBrandColors;
 
+  // ── Event-name fit ─────────────────────────────────────────────────────────
+  // fgc-redesign.css pins #topText to one 22px line at 18px. A long event name ("$100 | Fight
+  // Night #3 - Nameless Esports x Valiant Smash") wrapped to a second line inside that 22px box and
+  // both lines were cut off, on the narrower skins (SF6 / Strive / 2XKO) every time. Keep it on one
+  // line and step the size down until it fits (fgc-redesign.css reads --fgc-top-fs). Measured with a
+  // Range because the element is a centred flex row, where scrollWidth under-reports overflow on
+  // the left.
+  function fitTopText() {
+    var top = document.getElementById('topText');
+    if (!top) return;
+    var avail = top.clientWidth - (document.documentElement.classList.contains('fgc-has-logo') ? 34 : 0) - 8;
+    if (avail <= 0) return;
+    var range = document.createRange();
+    for (var px = 18; px >= 10; px--) {
+      document.documentElement.style.setProperty('--fgc-top-fs', px + 'px');
+      range.selectNodeContents(top);
+      if (range.getBoundingClientRect().width <= avail) break;
+    }
+  }
+  (function watchTopText() {
+    var start = function () {
+      var top = document.getElementById('topText');
+      if (!top || typeof MutationObserver === 'undefined') return;
+      var busy = false;
+      var run = function () { if (busy) return; busy = true; requestAnimationFrame(function () { fitTopText(); busy = false; }); };
+      // Text only: the skins' own fit rewrites the style attribute constantly.
+      new MutationObserver(run).observe(top, { childList: true, characterData: true, subtree: true });
+      window.addEventListener('resize', run);
+      run();
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
+  })();
+
   // ── Diagnostic (add ?debug=1 to the browser-source URL) ────────────────────
   // Prints, on-screen, exactly what the overlay is receiving so we can tell a STATE problem
   // (team colours arriving empty → plaques stay default) apart from a CACHE/render problem

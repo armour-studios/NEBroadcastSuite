@@ -342,6 +342,12 @@ async function submitBugReport({ title, description, severity, area, appVersion,
 // Uploads a batch of already-recorded local Decision Records (backend/telemetry/recorder.js)
 // to the shared training dataset. Opt-in — only called when the producer has explicitly
 // enabled upload (see server.js's telemetryAutoSync).
+// Public promo feed for the in-app promo strip (no auth, no per-user data — see backend/promos.js).
+async function getPromos() {
+  _require();
+  try { const { data } = await _client(false).get('/api/broadcast/promos'); return data; } catch (e) { throw _err(e); }
+}
+
 async function uploadTelemetryBatch(records) {
   _require();
   try { const { data } = await _client().post('/api/telemetry/batch', { records }); return data; } catch (e) { throw _err(e); }
@@ -352,6 +358,7 @@ module.exports = {
   health, retryInMs,
   submitBugReport,
   uploadTelemetryBatch,
+  getPromos,
   loginWithDiscord,
   loginWithEmail, acceptContract, refreshSession, linkTwitch, refreshTwitch, me,
   listProfiles, getProfile, saveProfile, deleteProfile, shareProfile,

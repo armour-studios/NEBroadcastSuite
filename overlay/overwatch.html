@@ -23,108 +23,130 @@ html,body{width:1920px;height:1080px;overflow:hidden;background:transparent;
 }
 #ow-board.hidden{opacity:0;pointer-events:none}
 
-/* ── Team panels ─────────────────────────────────────────────────── */
+/* ── Team panels — World Cup style. Box sizes are fixed (572x64 panels, 34px centre pill);
+   only the dress changed. Outer edge -> inner edge (the right panel mirrors via row-reverse):
+   [logo on a team-colour shield] [name + win pips] [BAN chip] [score box] [gold attack/defend tile] */
 .ow-panel{
   position:absolute;top:0;
   width:572px;height:64px;
-  background:rgba(7,9,15,.93);
+  background:linear-gradient(180deg,#2a2c33 0%,#1b1c21 55%,#141518 100%);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.08);
   display:flex;flex-direction:row;align-items:center;
-  padding:0 10px;gap:8px;
+  padding:0;gap:12px;
   overflow:hidden;
 }
-.ow-panel.left {left:0}
-.ow-panel.right{right:0;flex-direction:row-reverse}
+.ow-panel.left {left:0;clip-path:polygon(0 0,100% 0,calc(100% - 16px) 100%,0 100%)}
+.ow-panel.right{right:0;flex-direction:row-reverse;clip-path:polygon(0 0,100% 0,100% 100%,16px 100%)}
 
-.ow-accent{position:absolute;top:0;bottom:0;width:2px}
-.ow-panel.left  .ow-accent{right:0}
-.ow-panel.right .ow-accent{left:0}
+/* Team colour as a slanted shield block at the OUTER edge; the logo sits on it. */
+.ow-accent{position:absolute;top:0;bottom:0;width:74px;z-index:0}
+.ow-panel.left  .ow-accent{left:0;clip-path:polygon(0 0,100% 0,calc(100% - 14px) 100%,0 100%)}
+.ow-panel.right .ow-accent{right:0;clip-path:polygon(0 0,100% 0,100% 100%,14px 100%)}
+.ow-accent::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.18),rgba(0,0,0,.25))}
 
-/* ── Ban portraits column — full-height, skewed portrait cards ───── */
-.ow-bans-col{
-  display:none;flex-direction:row;align-items:stretch;
-  align-self:stretch;gap:1px;flex-shrink:0;padding:5px 0;
-  margin-right:6px;
-}
-.ow-bans-col.has-bans{display:flex}
-.ow-panel.right .ow-bans-col{margin-right:0;margin-left:6px;}
-/* slant inward toward center of scoreboard */
-#ow-panel-a .ow-bans-col{transform:skewX(7deg);transform-origin:bottom center;}
-#ow-panel-b .ow-bans-col{transform:skewX(-7deg);transform-origin:bottom center;}
-/* counter-skew images so faces stay upright */
-#ow-panel-a .ow-ban-img,#ow-panel-a .ow-ban-role-icon{transform:skewX(-7deg);}
-#ow-panel-b .ow-ban-img,#ow-panel-b .ow-ban-role-icon{transform:skewX(7deg);}
-
-.ow-ban-portrait{
-  width:26px;border-radius:2px;
-  background:var(--surface2);border:1px solid rgba(255,255,255,.15);
-  overflow:hidden;position:relative;flex-shrink:0;
-  transition:border-color .3s;
-}
-.ow-ban-img{width:100%;height:100%;object-fit:cover;object-position:50% 25%;display:block}
-.ow-ban-role-icon{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
-
-/* ── Team identity column (name + series dots) ───────────────────── */
-.ow-team-col{
-  display:flex;flex-direction:column;justify-content:center;
-  gap:4px;flex:1;min-width:0;
-}
-
-.ow-team-bottom{
-  display:flex;flex-direction:row;align-items:center;
-  gap:5px;justify-content:flex-end;
-}
-.ow-panel.right .ow-team-bottom{justify-content:flex-start;}
-
-/* Season / league record (toggle in control panel) */
-.ow-team-record{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
-  color:rgba(255,255,255,.75);text-align:right;}
-.ow-panel.right .ow-team-record{text-align:left;}
-.ow-team-record.hidden{display:none;}
-
-/* ── Team name ─────────────────────────────────────────────────────── */
-.ow-team-name{
-  font-size:22px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;
-  line-height:1;color:var(--text);
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-  min-width:0;text-align:right;
-}
-.ow-panel.right .ow-team-name{text-align:left}
-
-/* ── Series win dots ───────────────────────────────────────────────── */
-.ow-map-history{display:flex;flex-direction:row;align-items:center;gap:4px;flex-shrink:0}
-.ow-map-dot{
-  width:14px;height:14px;border-radius:50%;
-  background:transparent;
-  border:1.5px solid color-mix(in srgb,var(--team-color,rgba(255,255,255,.35)) 55%,transparent);
-  transition:background .3s,border-color .3s;
-}
-.ow-map-dot.win{
-  background:var(--team-color,#4dc4ff);
-  border-color:var(--team-color,#4dc4ff);
-}
-
-/* ── Role icon (attack / defend) ──────────────────────────────────── */
-.ow-role-icon{flex-shrink:0;display:none;align-items:center;justify-content:center;width:24px;height:24px;}
-.ow-role-icon.visible{display:flex}
-
-/* ── Logo / sep / score ────────────────────────────────────────────── */
+/* ── Logo ─────────────────────────────────────────────────────────── */
 .ow-logo-wrap{
-  width:44px;height:44px;
+  position:relative;z-index:1;
+  width:44px;height:44px;margin:0 16px 0 12px;
   display:flex;align-items:center;justify-content:center;
   overflow:hidden;flex-shrink:0;
+  filter:drop-shadow(0 2px 6px rgba(0,0,0,.55));
 }
+.ow-panel.right .ow-logo-wrap{margin:0 12px 0 16px}
 .ow-logo-wrap img{width:44px;height:44px;object-fit:contain}
-.ow-panel-sep{flex-shrink:0;width:1px;height:28px;background:rgba(255,255,255,.15)}
-.ow-score{
-  font-size:40px;font-weight:900;line-height:1;letter-spacing:-1px;
-  color:#fff;flex-shrink:0;min-width:28px;text-align:center;
+.ow-panel-sep{display:none}
+
+/* ── Team identity column (name + win pips) ───────────────────────── */
+.ow-team-col{
+  display:flex;flex-direction:column;justify-content:center;
+  gap:7px;flex:1;min-width:0;
 }
+.ow-team-bottom{display:flex;flex-direction:row;align-items:center;gap:5px;justify-content:flex-start;}
+.ow-panel.right .ow-team-bottom{justify-content:flex-end;}
+.ow-team-record{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:rgba(255,255,255,.7);text-align:left;}
+.ow-panel.right .ow-team-record{text-align:right;}
+.ow-team-record.hidden{display:none;}
+.ow-team-name{
+  font-size:23px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;
+  line-height:1;color:#fff;font-style:italic;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  min-width:0;text-align:left;padding-right:4px;
+}
+.ow-panel.right .ow-team-name{text-align:right;padding:0 0 0 4px}
+
+/* Win pips — slanted bars in the team colour. */
+.ow-map-history{display:flex;flex-direction:row;align-items:center;gap:3px;flex-shrink:0}
+.ow-panel.right .ow-map-history{flex-direction:row-reverse}
+.ow-map-dot{
+  width:16px;height:5px;transform:skewX(-20deg);
+  background:rgba(255,255,255,.16);
+  transition:background .3s;
+}
+.ow-map-dot.win{background:var(--team-color,#4dc4ff);box-shadow:0 0 6px var(--team-color,#4dc4ff)}
+
+/* ── Hero bans — full-height portrait(s) butted straight onto the score box (the negative margin
+   cancels the panel's flex gap), each with a solid red BAN bar across the bottom: readable at
+   stream size, and a lone portrait can't be mistaken for "their hero". */
+.ow-bans-col{
+  display:none;flex-direction:row;align-items:stretch;
+  align-self:stretch;flex-shrink:0;
+  margin-right:-12px;
+}
+.ow-bans-col.has-bans{display:flex}
+.ow-panel.right .ow-bans-col{flex-direction:row-reverse;margin-right:0;margin-left:-12px}
+.ow-bans-tag{display:none}
+.ow-bans-tiles{display:flex;flex-direction:row;gap:2px}
+.ow-panel.right .ow-bans-tiles{flex-direction:row-reverse}
+.ow-ban-portrait{
+  width:62px;height:64px;
+  background:#2a2c33;
+  overflow:hidden;position:relative;flex-shrink:0;
+}
+.ow-ban-img{width:100%;height:100%;object-fit:cover;object-position:50% 18%;display:block;
+  filter:grayscale(.45) brightness(.9)}
+.ow-ban-role-icon{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+/* Diagonal strike through the face, above the image, under the label. */
+.ow-ban-portrait::after{
+  content:'';position:absolute;left:-10px;right:-10px;top:42%;height:3px;margin-top:-1.5px;z-index:1;
+  background:#e2323c;transform:rotate(-40deg);box-shadow:0 0 5px rgba(0,0,0,.5);
+}
+.ow-ban-portrait::before{
+  content:'BAN';position:absolute;left:0;right:0;bottom:0;height:17px;z-index:2;
+  display:flex;align-items:center;justify-content:center;
+  background:#d9262f;color:#fff;
+  font-size:12px;font-weight:900;letter-spacing:.2em;line-height:1;padding-left:.2em;
+  box-shadow:0 -1px 0 rgba(0,0,0,.35);
+}
+
+/* ── Score — its own dark box ──────────────────────────────────────── */
+.ow-score{
+  align-self:stretch;display:flex;align-items:center;justify-content:center;
+  width:64px;flex-shrink:0;
+  font-size:40px;font-weight:900;font-style:italic;line-height:1;letter-spacing:-1px;color:#fff;
+  background:linear-gradient(180deg,#121317,#0a0b0d);
+  box-shadow:inset 1px 0 0 rgba(255,255,255,.06), inset -1px 0 0 rgba(255,255,255,.06);
+}
+/* No attack/defend tile: the score box runs to the slanted inner edge. */
+.ow-panel.left.no-role  .ow-score{width:80px;padding-right:16px}
+.ow-panel.right.no-role .ow-score{width:80px;padding-left:16px}
+
+/* ── Attack / defend — gold tile at the inner edge ─────────────────── */
+.ow-role-icon{
+  flex-shrink:0;display:none;align-items:center;justify-content:center;
+  width:50px;height:50px;margin:0 22px 0 0;border-radius:3px;
+  color:#1b1406;background:linear-gradient(180deg,#e2c06b,#b18a37);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.35), 0 2px 8px rgba(0,0,0,.4);
+}
+.ow-panel.right .ow-role-icon{margin:0 0 0 22px}
+.ow-role-icon.visible{display:flex}
+.ow-role-icon svg{width:26px;height:26px}
 
 /* ── Center pill — two-layer rotating ─────────────────────────────── */
 #ow-center-group{
   position:absolute;top:0;left:50%;transform:translateX(-50%);
   display:grid;
-  background:rgba(7,9,15,.94);
+  background:linear-gradient(180deg,#2a2c33 0%,#1b1c21 60%,#141518 100%);
+  box-shadow:inset 0 -2px 0 rgba(255,255,255,.85);
   clip-path:polygon(0 0,100% 0,calc(100% - 14px) 100%,14px 100%);
   height:34px;overflow:hidden;
   filter:drop-shadow(0 4px 14px rgba(0,0,0,.65));
@@ -142,12 +164,16 @@ html,body{width:1920px;height:1080px;overflow:hidden;background:transparent;
 
 #ow-map-box{display:flex;align-items:center;gap:7px;}
 .ow-map-label{
-  font-size:13px;font-weight:800;text-transform:uppercase;
-  letter-spacing:2px;color:#fff;line-height:1;
+  font-size:18px;font-weight:900;font-style:italic;text-transform:uppercase;
+  letter-spacing:1px;color:#fff;line-height:1;
 }
 .ow-map-of{
-  font-size:18px;font-weight:900;text-transform:uppercase;
+  font-size:18px;font-weight:900;font-style:italic;text-transform:uppercase;
   letter-spacing:.5px;color:#fff;line-height:1;
+}
+.ow-map-ft{
+  font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:2px;color:#fff;line-height:1;
+  padding-left:9px;margin-left:2px;border-left:1px solid rgba(255,255,255,.22);
 }
 
 /* ── Sponsor section ───────────────────────────────────────────────── */
@@ -192,52 +218,56 @@ html,body{width:1920px;height:1080px;overflow:hidden;background:transparent;
 }
 .ow-mode-icon img{width:14px;height:14px;object-fit:contain}
 /* ── Live heroes (Overwolf GEP): one icon per player, red ring = currently on a banned hero ── */
-.ow-live { position: absolute; top: calc(100% + 8px); display: flex; gap: 6px; align-items: center; }
+.ow-live { position: absolute; top: 72px; display: flex; gap: 6px; align-items: center; }
 #ow-live-a { left: 14px; }
 #ow-live-b { right: 14px; }
 .ow-live img { width: 34px; height: 34px; border-radius: 7px; object-fit: cover;
   background: #10131a; border: 1px solid rgba(255,255,255,.28);
   filter: drop-shadow(0 2px 6px rgba(0,0,0,.6)); }
 .ow-live img.is-banned { border-color: #ef4444; box-shadow: 0 0 10px rgba(239,68,68,.65); }
+#ow-live-b { flex-direction: row-reverse; }
 </style>
 </head>
 <body>
 <div id="ow-board" class="hidden">
 
-  <!-- LEFT: [bans-col] [team-col: name + dots] [logo] [|] [score] -->
+  <!-- LEFT: [logo] [team-col: name + pips] [ban chip] [score] [attack/defend tile] -->
   <div class="ow-panel left" id="ow-panel-a">
     <div class="ow-accent" id="ow-accent-a"></div>
-    <div class="ow-bans-col" id="ow-bans-col-a">
-      <div class="ow-ban-portrait" id="ow-ban-portrait-a0" style="display:none">
-        <img class="ow-ban-img" id="ow-ban-img-a0" alt="" style="display:none"
-             onerror="this.style.display='none';owShowIcon('ow-ban-icon-a0')">
-        <span class="ow-ban-role-icon" id="ow-ban-icon-a0"></span>
-      </div>
-      <div class="ow-ban-portrait" id="ow-ban-portrait-a1" style="display:none">
-        <img class="ow-ban-img" id="ow-ban-img-a1" alt="" style="display:none"
-             onerror="this.style.display='none';owShowIcon('ow-ban-icon-a1')">
-        <span class="ow-ban-role-icon" id="ow-ban-icon-a1"></span>
-      </div>
-    </div>
+    <div class="ow-logo-wrap"><img id="ow-logo-a" src="" alt="" onerror="this.src='/assets/games/overwatch2.png'"></div>
     <div class="ow-team-col">
       <div class="ow-team-name" id="ow-name-a">TEAM A</div>
       <div class="ow-team-bottom">
         <div class="ow-map-history" id="ow-history-a"></div>
-        <div class="ow-role-icon" id="ow-role-a"></div>
       </div>
       <div class="ow-team-record hidden" id="ow-record-a"></div>
     </div>
-    <div class="ow-logo-wrap"><img id="ow-logo-a" src="" alt="" onerror="this.src='/assets/games/overwatch2.png'"></div>
-    <div class="ow-panel-sep"></div>
+    <div class="ow-bans-col" id="ow-bans-col-a">
+      <div class="ow-bans-tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><line x1="5.6" y1="5.6" x2="18.4" y2="18.4"/></svg><span id="ow-bans-tag-a">Ban</span></div>
+      <div class="ow-bans-tiles">
+        <div class="ow-ban-portrait" id="ow-ban-portrait-a0" style="display:none">
+          <img class="ow-ban-img" id="ow-ban-img-a0" alt="" style="display:none"
+               onerror="this.style.display='none';owShowIcon('ow-ban-icon-a0')">
+          <span class="ow-ban-role-icon" id="ow-ban-icon-a0"></span>
+        </div>
+        <div class="ow-ban-portrait" id="ow-ban-portrait-a1" style="display:none">
+          <img class="ow-ban-img" id="ow-ban-img-a1" alt="" style="display:none"
+               onerror="this.style.display='none';owShowIcon('ow-ban-icon-a1')">
+          <span class="ow-ban-role-icon" id="ow-ban-icon-a1"></span>
+        </div>
+      </div>
+    </div>
     <div class="ow-score" id="ow-score-a">0</div>
+    <div class="ow-role-icon" id="ow-role-a"></div>
   </div>
 
-  <!-- CENTER pill — rotates between game counter and map history -->
+  <!-- CENTER pill — game counter; rotates with the map history once a map has been played -->
   <div id="ow-center-group">
     <div id="ow-center-default">
       <div id="ow-map-box">
-        <span class="ow-map-label">Game</span>
-        <span class="ow-map-of" id="ow-map-of">1 of 5</span>
+        <span class="ow-map-label">Map</span>
+        <span class="ow-map-of" id="ow-map-of">1</span>
+        <span class="ow-map-ft" id="ow-map-ft">FT3</span>
       </div>
       <div id="ow-sponsor-box">
         <span class="ow-sp-label">Presented By</span>
@@ -248,61 +278,62 @@ html,body{width:1920px;height:1080px;overflow:hidden;background:transparent;
     </div>
   </div>
 
-  <!-- RIGHT (row-reverse): [score] [|] [logo] [team-col: name + dots] [bans-col] -->
+  <!-- RIGHT (row-reverse, mirrors the left): [logo] [team-col] [ban chip] [score] [attack/defend tile] -->
   <div class="ow-panel right" id="ow-panel-b">
     <div class="ow-accent" id="ow-accent-b"></div>
-    <div class="ow-bans-col" id="ow-bans-col-b">
-      <div class="ow-ban-portrait" id="ow-ban-portrait-b0" style="display:none">
-        <img class="ow-ban-img" id="ow-ban-img-b0" alt="" style="display:none"
-             onerror="this.style.display='none';owShowIcon('ow-ban-icon-b0')">
-        <span class="ow-ban-role-icon" id="ow-ban-icon-b0"></span>
-      </div>
-      <div class="ow-ban-portrait" id="ow-ban-portrait-b1" style="display:none">
-        <img class="ow-ban-img" id="ow-ban-img-b1" alt="" style="display:none"
-             onerror="this.style.display='none';owShowIcon('ow-ban-icon-b1')">
-        <span class="ow-ban-role-icon" id="ow-ban-icon-b1"></span>
-      </div>
-    </div>
+    <div class="ow-logo-wrap"><img id="ow-logo-b" src="" alt="" onerror="this.src='/assets/games/overwatch2.png'"></div>
     <div class="ow-team-col">
       <div class="ow-team-name" id="ow-name-b">TEAM B</div>
       <div class="ow-team-bottom">
         <div class="ow-map-history" id="ow-history-b"></div>
-        <div class="ow-role-icon" id="ow-role-b"></div>
       </div>
       <div class="ow-team-record hidden" id="ow-record-b"></div>
     </div>
-    <div class="ow-logo-wrap"><img id="ow-logo-b" src="" alt="" onerror="this.src='/assets/games/overwatch2.png'"></div>
-    <div class="ow-panel-sep"></div>
+    <div class="ow-bans-col" id="ow-bans-col-b">
+      <div class="ow-bans-tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><line x1="5.6" y1="5.6" x2="18.4" y2="18.4"/></svg><span id="ow-bans-tag-b">Ban</span></div>
+      <div class="ow-bans-tiles">
+        <div class="ow-ban-portrait" id="ow-ban-portrait-b0" style="display:none">
+          <img class="ow-ban-img" id="ow-ban-img-b0" alt="" style="display:none"
+               onerror="this.style.display='none';owShowIcon('ow-ban-icon-b0')">
+          <span class="ow-ban-role-icon" id="ow-ban-icon-b0"></span>
+        </div>
+        <div class="ow-ban-portrait" id="ow-ban-portrait-b1" style="display:none">
+          <img class="ow-ban-img" id="ow-ban-img-b1" alt="" style="display:none"
+               onerror="this.style.display='none';owShowIcon('ow-ban-icon-b1')">
+          <span class="ow-ban-role-icon" id="ow-ban-icon-b1"></span>
+        </div>
+      </div>
+    </div>
     <div class="ow-score" id="ow-score-b">0</div>
+    <div class="ow-role-icon" id="ow-role-b"></div>
   </div>
 
 </div>
 <script src="scene-base.js"></script>
 <script>
 const HERO_ROLES = {
-  dva:'tank',doomfist:'tank','junker-queen':'tank',mauga:'tank',hazard:'tank',
+  dva:'tank',domina:'tank',doomfist:'tank','junker-queen':'tank',mauga:'tank',hazard:'tank',
   orisa:'tank',ramattra:'tank',reinhardt:'tank',roadhog:'tank',
   sigma:'tank',winston:'tank','wrecking-ball':'tank',zarya:'tank',
-  ashe:'damage',bastion:'damage',cassidy:'damage',echo:'damage',freja:'damage',
+  anran:'damage',ashe:'damage',bastion:'damage',emre:'damage',shion:'damage',sierra:'damage',vendetta:'damage',cassidy:'damage',echo:'damage',freja:'damage',
   genji:'damage',hanzo:'damage',junkrat:'damage',mei:'damage',
   pharah:'damage',reaper:'damage',sojourn:'damage','soldier-76':'damage',
   sombra:'damage',symmetra:'damage',torbjorn:'damage',tracer:'damage',
   venture:'damage',widowmaker:'damage',
-  ana:'support',baptiste:'support',brigitte:'support',illari:'support',
+  ana:'support',baptiste:'support','jetpack-cat':'support',mizuki:'support',wuyang:'support',brigitte:'support',illari:'support',
   juno:'support',kiriko:'support',lifeweaver:'support',lucio:'support',
   mercy:'support',moira:'support',zenyatta:'support'
 };
-const ROLE_SVG = {
-  tank:'<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="rgba(255,255,255,.6)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L4 6v5c0 5.5 3.5 10.3 8 11.5 4.5-1.2 8-6 8-11.5V6z"/></svg>',
-  damage:'<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="rgba(255,255,255,.6)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>',
-  support:'<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="rgba(255,255,255,.6)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l7.78-7.78a5.5 5.5 0 0 0 0-7.78z"/></svg>'
-};
+// Latest state — lets the hero helpers resolve heroes / role icons added via Custom content.
+let owData = null;
+const customHero = (n) => SceneBase.customCharacter(owData, 'overwatch', n);
+const roleIconHtml = (role) => { const src = role && SceneBase.roleIcon('overwatch', role, owData); return src ? '<img src="' + src + '" width="16" height="16" alt="">' : ''; };
 
 function heroSlug(n){
   return(n||'').toLowerCase().replace(/ö/g,'o').replace(/ú/g,'u').replace(/[.']/g,'').replace(/:\s*/g,'-').replace(/\s+/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
 }
-function heroRole(n){ return HERO_ROLES[heroSlug(n)]||null; }
-function heroImgUrl(n){ const s=heroSlug(n); return s?`/assets/overwatch/heroes/${s}.png`:''; }
+function heroRole(n){ const c=customHero(n); return (c&&c.role&&c.role.toLowerCase())||HERO_ROLES[heroSlug(n)]||null; }
+function heroImgUrl(n){ const c=customHero(n); if(c&&c.image) return c.image; const s=heroSlug(n); return s?`/assets/overwatch/heroes/${s}.png`:''; }
 function owShowIcon(id){ const e=document.getElementById(id); if(e) e.style.opacity='.55'; }
 
 function applyBan(pId,imgId,iconId,name){
@@ -319,7 +350,7 @@ function applyBan(pId,imgId,iconId,name){
   p.style.display='';
   const role=heroRole(name);
   const url=heroImgUrl(name);
-  if(icon){icon.innerHTML=ROLE_SVG[role]||'';icon.style.opacity='0';}
+  if(icon){icon.innerHTML=roleIconHtml(role);icon.style.opacity='0';}
   if(url&&img){
     img.style.display='block';
     img.onerror=function(){this.style.display='none';owShowIcon(iconId);};
@@ -384,6 +415,7 @@ function renderSponsors(brand){
 const MAP_MODES = {
   'dorado':'escort','havana':'escort','junkertown':'escort','rialto':'escort',
   'route 66':'escort','shambali monastery':'escort','watchpoint: gibraltar':'escort',
+  'watchpoint: grimsvotn':'escort','watchpoint: grimsvötn':'escort',   // the game may report it with the ö
   'blizzard world':'hybrid','eichenwalde':'hybrid','hollywood':'hybrid',
   "king's row":'hybrid','midtown':'hybrid','numbani':'hybrid','paraíso':'hybrid',
   'antarctic peninsula':'control','busan':'control','ilios':'control',
@@ -454,6 +486,7 @@ function buildHistoryBar(containerId,hist,tA,tB,fallbackMode,showLabels){
 }
 
 const PREVIEW=new URLSearchParams(location.search).get('preview')==='1';
+let _owHasHistory=false;   // set by render(); gates the centre-pill rotation below
 
 function render(state){
   const ow=state.owMatch||{}, veto=state.veto||{}, teams=state.teams||{}, brand=state.brand||{};
@@ -486,7 +519,9 @@ function render(state){
   setText('ow-score-b',String(series.orange||0));
 
   const displayGame=Math.min(Math.max(1,gameNum),bestOf);
-  setText('ow-map-of',`${displayGame} of ${bestOf}`);
+  setText('ow-map-of',String(displayGame));
+  // FT3 = first to N map wins; BO5 = best of N maps (producer's pick on the scorecard).
+  setText('ow-map-ft',ow.seriesLabel==='bo' ? 'BO'+bestOf : 'FT'+Math.ceil(bestOf/2));
 
   renderSponsors(brand);
 
@@ -516,8 +551,19 @@ function render(state){
   const hasBans=!!(namesA[0]||namesA[1]||namesB[0]||namesB[1]);
   const bColA=document.getElementById('ow-bans-col-a');
   const bColB=document.getElementById('ow-bans-col-b');
-  if(bColA) bColA.classList.toggle('has-bans',hasBans);
-  if(bColB) bColB.classList.toggle('has-bans',hasBans);
+  // Each side shows its block only when IT has a ban (one-ban formats, or mid-draft before the
+  // other team has locked theirs) and the tag is singular/plural to match.
+  const sideHas=function(n){ return !!(n[0]||n[1]); };
+  if(bColA) bColA.classList.toggle('has-bans',hasBans&&sideHas(namesA));
+  if(bColB) bColB.classList.toggle('has-bans',hasBans&&sideHas(namesB));
+  setText('ow-bans-tag-a',(namesA[0]&&namesA[1])?'Bans':'Ban');
+  setText('ow-bans-tag-b',(namesB[0]&&namesB[1])?'Bans':'Ban');
+
+  // The centre pill only rotates to the map-history strip once there IS history — a decided map,
+  // or the series being past game 1. On game 1 the strip is a row of empty placeholders, so the
+  // pill just holds on "GAME 1 OF 5".
+  _owHasHistory=hist.some(function(m){ return !!m.winner; })||gameNum>1;
+  if(!_owHasHistory){ const g=document.getElementById('ow-center-group'); if(g) g.classList.remove('show-history'); }
 
   // Attack / Defense role icons
   const atk = ow.showAttack ? (ow.attackSide || null) : null;
@@ -526,13 +572,14 @@ function render(state){
 }
 
 // Crossed daggers (attack)
-const ROLE_ATTACK_SVG = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="21" x2="21" y2="3"/><line x1="3" y1="15" x2="9" y2="21"/><line x1="21" y1="9" x2="15" y2="3"/><line x1="21" y1="21" x2="3" y2="3"/><line x1="15" y1="21" x2="21" y2="15"/><line x1="3" y1="9" x2="9" y2="3"/></svg>';
+const ROLE_ATTACK_SVG = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="21" x2="21" y2="3"/><line x1="3" y1="15" x2="9" y2="21"/><line x1="21" y1="9" x2="15" y2="3"/><line x1="21" y1="21" x2="3" y2="3"/><line x1="15" y1="21" x2="21" y2="15"/><line x1="3" y1="9" x2="9" y2="3"/></svg>';
 // Shield (defense)
-const ROLE_DEFENSE_SVG = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L4 5v6c0 5 3.6 9.7 8 11 4.4-1.3 8-6 8-11V5z"/><line x1="12" y1="7" x2="12" y2="17"/></svg>';
+const ROLE_DEFENSE_SVG = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L4 5v6c0 5 3.6 9.7 8 11 4.4-1.3 8-6 8-11V5z"/><line x1="12" y1="7" x2="12" y2="17"/></svg>';
 
 function applyRole(id, role){
   const el=document.getElementById(id); if(!el) return;
   el.classList.remove('visible');
+  const panel=el.closest('.ow-panel'); if(panel) panel.classList.toggle('no-role',!role);
   if(!role){ el.innerHTML=''; return; }
   el.innerHTML = role==='attack' ? ROLE_ATTACK_SVG : ROLE_DEFENSE_SVG;
   el.classList.add('visible');
@@ -580,7 +627,9 @@ function renderLiveHeroes(data){
   ['a', 'b'].forEach(function(side){
     var panel = document.getElementById('ow-panel-' + side);
     var host = document.getElementById('ow-live-' + side);
-    if (!host && panel) { host = document.createElement('div'); host.className = 'ow-live'; host.id = 'ow-live-' + side; panel.appendChild(host); }
+    // On the BOARD, not the panel: the panel clips its overflow, which hid this strip entirely.
+    var boardEl = document.getElementById('ow-board');
+    if (!host && boardEl) { host = document.createElement('div'); host.className = 'ow-live'; host.id = 'ow-live-' + side; boardEl.appendChild(host); }
     if (!host) return;
     if (!fresh) { host.innerHTML = ''; host.style.display = 'none'; return; }
     var players = gep.roster.filter(function(p){ return map[String(p.team)] === side; }).slice(0, 6);
@@ -595,16 +644,19 @@ function renderLiveHeroes(data){
     }).join('');
   });
 }
-SceneBase.connect(function(data){ render(data); try { renderLiveHeroes(data); } catch (e) {} });
+SceneBase.connect(function(data){ owData = data; render(data); try { renderLiveHeroes(data); } catch (e) {} });
 
-// Rotate center pill between game counter and map history every 5 seconds
+// Rotate center pill between game counter and map history every 5 seconds — only once the
+// series has history to show (see _owHasHistory in render()).
 (function(){
   let _timer=null;
   function start(){
     if(_timer) return;
     _timer=setInterval(function(){
       const g=document.getElementById('ow-center-group');
-      if(g) g.classList.toggle('show-history');
+      if(!g) return;
+      if(_owHasHistory) g.classList.toggle('show-history');
+      else g.classList.remove('show-history');
     },5000);
   }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start);

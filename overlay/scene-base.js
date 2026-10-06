@@ -261,6 +261,35 @@
     if (data.fontFamily) {
       root.style.setProperty('--main-font', `'${data.fontFamily}', sans-serif`);
     }
+    refreshInk();
+  }
+
+  // "Ink" twins of the colour variables scenes print TEXT in. Brand and team colours are chosen as
+  // fills, and a dark one (a navy kit, a black-and-gold team) is fine as a bar but unreadable as
+  // type on the suite's near-black furniture — series scores, "BEST OF 7", eyebrow labels all
+  // vanished on a navy kit. Each --x gets an --x-ink lifted just far enough to read (hue kept, see
+  // liftForDark); scenes write `color: var(--x-ink, var(--x))`, and fills keep using --x so the
+  // brand colour itself is never altered. The floor is the 3:1 large-text threshold against the
+  // panel colour, which leaves the default palettes exactly as they were.
+  const INK_VARS = ['--accent', '--accent-2', '--duo-accent', '--duo-accent2', '--team-a', '--team-b'];
+  const _inkLast = {};
+  function refreshInk() {
+    const root = document.documentElement;
+    let cs;
+    try { cs = getComputedStyle(root); } catch (e) { return; }
+    INK_VARS.forEach((name) => {
+      const v = cs.getPropertyValue(name).trim();
+      if (!v || _inkLast[name] === v) return;
+      _inkLast[name] = v;
+      root.style.setProperty(name + '-ink', SceneBase.liftForDark(v, 0.12));
+    });
+  }
+  // Scenes set these variables from their own render — often late (winner.html re-tints --accent to
+  // the champion's colour after its artwork loads) — so follow the root's inline style rather than
+  // relying on being called at the right moment. refreshInk only writes when a SOURCE value changed,
+  // so its own writes settle after one extra pass.
+  if (typeof MutationObserver !== 'undefined') {
+    new MutationObserver(refreshInk).observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
   }
 
   function cssVar(name, fallback) {
@@ -435,15 +464,44 @@
         null for squad games so every other scene keeps its team name untouched.
         Smash runs three ways: a crew battle IS a team event (null), doubles prints the PAIR, and
         singles collapses to the one player. */
+    /* Role icon for a player role string ('' when the game/role has none). A producer-uploaded icon
+       (state.gameConfigs[game].roleIcons, from Custom content) wins over the bundled one. Bundled
+       icons are white-on-transparent SVGs, so they sit on any dark plate without recolouring. */
+    roleIcon(game, role, data) {
+      const key = String(role || '').trim().toLowerCase();
+      const cfg = data && data.gameConfigs && data.gameConfigs[game];
+      if (cfg && cfg.roleIcons && cfg.roleIcons[key]) return cfg.roleIcons[key];
+      const set = { overwatch: { tank: 'tank', dps: 'damage', damage: 'damage', support: 'support' } }[game];
+      const file = set && set[key];
+      return file ? '/assets/' + game + '/roles/' + file + '.svg' : '';
+    },
+    /* A character added or overridden through Custom content, matched by name → { image, role }
+       (null when there is none). Overlays check this before their bundled portrait path so a
+       producer-added hero shows without an app update. */
+    customCharacter(data, game, name) {
+      const cfg = data && data.gameConfigs && data.gameConfigs[game];
+      const key = String(name || '').trim().toLowerCase();
+      if (!key || !cfg || !Array.isArray(cfg.characters)) return null;
+      return cfg.characters.find((c) => c && String(c.name || '').toLowerCase() === key) || null;
+    },
+
     soloIdentity(data, side, team) {
       const g = data && data.games && data.activeGame && data.games[data.activeGame];
-      if (!g || g.format !== '1v1' || (Number(g.rosterSize) || 1) > 1) return null;
+      if (!g || g.format !== '1v1') return null;
+      // Brawlhalla carries rosterSize 2 (the doubles PAIR) but is a head-to-head game either way:
+      // which format is live is state.brawlhalla.mode, not something the registry can say. Without
+      // this it failed the rosterSize gate and every 1v1 Brawlhalla name plate came up blank.
+      const bhMode = data.activeGame === 'brawlhalla'
+        ? (((data.brawlhalla && data.brawlhalla.mode) === '2v2') ? '2v2' : '1v1')
+        : '';
+      if ((Number(g.rosterSize) || 1) > 1 && !bhMode) return null;
       if (data.activeGame === 'smash' && data.smash && data.smash.mode === 'team') return null;
       const str = (v) => (v == null ? '' : String(v)).trim();
       const roster = (team && Array.isArray(team.players)) ? team.players : [];
       // Smash DOUBLES: the competitors are the PAIR - print both tags ("DDOG / PIGGY"), with the
       // team's own name on the second line when it is a real name rather than the two tags again.
-      if (data.activeGame === 'smash' && data.smash && data.smash.mode === 'doubles') {
+      // A PAIR (Smash doubles / Brawlhalla 2v2): the competitors are both players, so print both.
+      if ((data.activeGame === 'smash' && data.smash && data.smash.mode === 'doubles') || bhMode === '2v2') {
         const tags = roster.slice(0, 2).map((x) => str(x && (x.gamertag || x.name))).filter(Boolean);
         if (tags.length < 2) return null;   // only one player known - fall back to the team name
         const name = tags.join(' / ');
@@ -503,6 +561,8 @@
         soloSub: solo ? solo.sub : '',
         logo,
         customLogo,
+        // Short tag set on Match > Teams (or banked in the library); '' = derive initials locally.
+        abbr: (t.abbr || '').toString().trim(),
         logoOnDark: !customLogo || this.isDefaultGameLogo(logo),
         color: t.color || (side === 'orange' ? FALLBACK_ACCENT2 : FALLBACK_ACCENT),
         players: Array.isArray(t.players) ? t.players : [],
@@ -558,6 +618,7 @@
         const demo = demoState();
         applyBrand(demo);
         try { onState(demo); } catch (e) { console.error('[scene] preview render error', e); }
+        refreshInk();
       }
 
       // NOTE: standalone sources used to render demoState() immediately here too ("so the scene is
@@ -649,12 +710,13 @@
             // every overlay (not just the ones loading this file) — nothing to do here.
             _lastFull = msg.data;
             try { onState(msg.data); } catch (e) { console.error('[scene] render error', e); }
+            refreshInk();
           } else if (msg.type === 'state_update' && _liveKeys && _lastFull && msg.data) {
             // Partial live tick — merge only the keys this scene asked for, then re-render off the
             // last full payload so brand/teams/settings are all still present.
             let touched = false;
             _liveKeys.forEach((k) => { if (k in msg.data) { _lastFull[k] = msg.data[k]; touched = true; } });
-            if (touched) { try { onState(_lastFull); } catch (e) { console.error('[scene] live render error', e); } }
+            if (touched) { try { onState(_lastFull); } catch (e) { console.error('[scene] live render error', e); } refreshInk(); }
           }
         };
         ws.onclose = () => setTimeout(open, 800);

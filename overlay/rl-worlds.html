@@ -17,9 +17,20 @@
   (team / brand / game default). Chrome accents (header rule, partner tab, pips, transitions) use the
   active brand kit's colour. FONT: Settings "Overlay Font" > brand-kit font > Montserrat.
 
-  TRANSITIONS: a panel sweep plays INTO each goal replay (team colour + replay-slot logo), OUT of it
-  (brand colour + outro logo), and INTO / OUT OF the post-game scoreboard. Honours the producer's
-  "replay transitions" toggle (rlReplayTransitions) for the replay sweeps.
+  KICKOFF HOLD: after a replay the live furniture (player name/stats + dial) stays off until the
+  match clock actually ticks down — rl-hud's rule — so nothing pops back over the countdown.
+
+  TRANSITIONS: overlay/replay-fx.js — the SHARED engine. Same timing as the React HUD (cover holds
+  until RL actually cuts to the replay, outro on the "replay ending" cue) and the same three looks
+  (slam / cinema / sweep). This layout defaults to 'sweep'; Match ▸ Teams overrides it; ?fx=<style>
+  pins one per source. The board's in/out cover uses the same style via ReplayFX.cover().
+
+  TICKER: the existing ticker scene (ticker.html) runs in a lane on the SAME bottom bar as the
+  player stats (never a second bar), filling the dead space between them and the boost dial.
+
+  POST-GAME BOARD: this layout does NOT draw its own. It frames rl-hud.html?only=scoreboard, so the
+  producer's chosen stats-screen design (Default / Glass / Block / Radar / Compare) + its sponsors
+  and background are the same board every other RL layout shows.
 
   Mode sources: goal_scored / view_change goal → replay; view_change hud → kickoff; rl_kickoff
   {countdown|live}; view_change scoreboard → board; clear_scoreboard / game_reset → back to the HUD.
@@ -32,43 +43,65 @@
   --blue:#2f7bff; --orange:#e9a24a;
   --accent:#2f7bff;                          /* brand kit colour */
   --ink:#0c0f16; --ink-2:#161b26; --line:rgba(255,255,255,.08);
-  --paper:#f4f6fa; --txt:#ffffff; --muted:rgba(222,228,240,.6);
+  --bar:#000000;          /* the top bug's bars + the sponsor rail read BLACK, not dark grey */
+  --paper:#f4f6fa; --txt:#ffffff;
+  --muted:#ffffff;        /* labels are WHITE — hierarchy comes from size/weight, not grey text */
   --spec:var(--blue);
   --font:var(--main-font,'Montserrat'),'Montserrat','Segoe UI',sans-serif;
+  --label-font:'Montserrat','Segoe UI',sans-serif;   /* real bold at label sizes — see the note below */
   --plate-w:320px;
   --ease:cubic-bezier(.22,.8,.24,1);
 }
 *{margin:0;padding:0;box-sizing:border-box;}
+/* TRACKING IS IN WHOLE PIXELS EVERYWHERE, never em: at broadcast label sizes (9–13px) an em value
+   lands on a fraction (.14em of 11px = 1.54px), the glyph advances round differently along the run,
+   and small caps come out looking unevenly spaced. Keep new labels on whole px too. */
 html,body{width:1920px;height:1080px;overflow:hidden;background:transparent;}
+/* Text rendering matches overlay/rl-hud.html exactly — that HUD's text is the reference the producer
+   is happy with: grayscale antialiasing, and the Settings font applied as-is. */
 body{position:relative;font-family:var(--font);color:var(--txt);-webkit-font-smoothing:antialiased;}
 img{display:block;}
 .hidden{display:none !important;}
 .num{font-variant-numeric:tabular-nums;font-weight:800;}
-.panel{background:linear-gradient(180deg,var(--ink-2),var(--ink));}
+.panel{background:linear-gradient(180deg,#141414,#000);}
 
 .hud{transition:opacity .25s;}
 body.on-board .hud{opacity:0;}
 
 /* ══ TOP SCOREBUG ══════════════════════════════════════════════════════════════ */
-.bug{position:absolute;top:20px;left:50%;transform:translateX(-50%);display:inline-flex;flex-direction:column;
-  box-shadow:0 12px 28px rgba(0,0,0,.45);animation:bugDrop .6s var(--ease) backwards;}
+.bug{position:absolute;top:20px;left:50%;transform:translateX(-50%);display:inline-flex;flex-direction:column;padding-top:32px;
+  filter:drop-shadow(0 12px 18px rgba(0,0,0,.45));animation:bugDrop .6s var(--ease) backwards;}
 @keyframes bugDrop{from{opacity:0;transform:translateX(-50%) translateY(-24px);}}
-/* width:0 + min-width:100% = always the row's width; never widens the bug itself */
-.hdr{width:0;min-width:100%;height:28px;display:flex;align-items:center;justify-content:center;padding:0 16px;
-  background:var(--ink);box-shadow:inset 0 -2px 0 var(--accent);overflow:hidden;}
+/* The header is a centred bar ABOVE the row: min-width:100% keeps it at least as wide as the score
+   row, and fitHeader() may widen it past that for a long event title (instead of shrinking the type
+   into something thin and gappy). Absolute, so its own width never widens the bug itself. */
+.hdr{position:absolute;top:0;left:50%;transform:translateX(-50%);min-width:100%;height:32px;
+  display:flex;align-items:center;justify-content:center;padding:0 16px;
+  background:var(--bar);overflow:hidden;}
 .hd-text{display:flex;align-items:center;min-width:0;white-space:nowrap;font-weight:700;font-size:13px;
-  letter-spacing:.2em;text-transform:uppercase;line-height:1;}
-.hd-event{display:inline-block;overflow:hidden;max-width:0;opacity:0;transition:max-width .6s var(--ease),opacity .35s;}
+  letter-spacing:3px;text-transform:uppercase;line-height:1.25;}
+.hdr.hd-empty{display:none;}
+.hd-event{display:inline-block;overflow:hidden;max-width:0;opacity:0;transition:max-width .5s var(--ease),opacity .45s var(--ease);}
 .names .hd-event{opacity:1;}
 .sep{color:var(--muted);margin:0 .7em;}
 .hd-round{flex:none;}
+/* OVERTIME banner — sits ABOVE the header/score (reference-style top tab), sponsor logo + label */
+.otbar{width:0;min-width:100%;height:26px;display:none;align-items:center;justify-content:center;gap:12px;
+  padding:0 16px;overflow:hidden;background:var(--ot-bg,#d8212c);color:var(--ot-color,#fff);
+  border-radius:5px 5px 0 0;animation:otDrop .45s var(--ease);}
+.otbar.show{display:flex;}
+.otbar img{max-height:16px;max-width:110px;object-fit:contain;}
+.otbar img.hidden{display:none;}
+.otbar .ot-lbl{font-weight:800;font-size:12px;letter-spacing:3px;text-transform:uppercase;line-height:1;}
+@keyframes otDrop{from{opacity:0;transform:translateY(-100%);}}
 
 .row{display:flex;align-items:flex-start;}
 .pwrap{width:0;height:80px;overflow:hidden;display:flex;transition:width .55s var(--ease);}
 .pwrap.blue{justify-content:flex-end;}
 .names .pwrap{width:var(--plate-w);}
 .plate{flex:none;width:var(--plate-w);height:80px;position:relative;display:flex;align-items:center;justify-content:center;
-  padding:0 24px;overflow:hidden;transition:transform .55s var(--ease);}
+  padding:0 24px;overflow:hidden;transition:transform .55s var(--ease);
+  box-shadow:inset 0 0 30px rgba(255,255,255,.34),inset 0 0 0 1px rgba(255,255,255,.2),inset 0 2px 0 rgba(255,255,255,.3);}
 .plate.blue{background:linear-gradient(180deg,rgba(255,255,255,.14),rgba(0,0,0,.22)),var(--blue);transform:translateX(100%);}
 .plate.orange{background:linear-gradient(180deg,rgba(255,255,255,.14),rgba(0,0,0,.22)),var(--orange);transform:translateX(-100%);}
 .names .plate{transform:none;}
@@ -77,19 +110,23 @@ body.on-board .hud{opacity:0;}
 .names .plate::after{animation:sheen .9s .35s ease-out;}
 @keyframes sheen{to{left:calc(100% + 40px);}}
 .pname{font-weight:800;font-size:38px;line-height:1;text-transform:uppercase;white-space:nowrap;max-width:100%;overflow:hidden;
-  letter-spacing:.01em;}
+  letter-spacing:0;}
 
-.lcol{flex:none;width:88px;display:flex;flex-direction:column;position:relative;z-index:2;}
-.ltile{height:80px;display:flex;align-items:center;justify-content:center;background:var(--ink-2);}
-.ltile img{width:60px;height:60px;object-fit:contain;}
+/* SQUARE logo tile: start.gg crests are square, so the tile is square and the crest fills it edge to
+   edge (a hair of padding keeps it off the seams). A wide wordmark still fits inside uncropped —
+   object-fit:contain never crops, it just letterboxes the odd shape. */
+.lcol{flex:none;width:80px;display:flex;flex-direction:column;position:relative;z-index:2;}
+.ltile{height:80px;display:flex;align-items:center;justify-content:center;background:var(--bar);overflow:hidden;}
+.ltile img{width:100%;height:100%;object-fit:contain;padding:2px;}
 .ltile img.punch{animation:punch .55s var(--ease);}
 @keyframes punch{0%{transform:scale(.5);opacity:0;}65%{transform:scale(1.08);opacity:1;}100%{transform:scale(1);}}
-.ltag{height:22px;display:flex;align-items:center;justify-content:center;background:var(--ink);
-  font-weight:700;font-size:12px;letter-spacing:.14em;text-transform:uppercase;white-space:nowrap;overflow:hidden;color:var(--muted);}
+.ltag{height:22px;display:flex;align-items:center;justify-content:center;background:var(--bar);font-family:var(--label-font);
+  font-weight:700;font-size:12px;letter-spacing:2px;text-transform:uppercase;white-space:nowrap;overflow:hidden;color:var(--muted);}
 
 .core{flex:none;display:flex;flex-direction:column;}
 .scores{display:flex;height:80px;}
-.sc{width:74px;display:flex;align-items:center;justify-content:center;font-size:52px;line-height:1;}
+.sc{width:74px;display:flex;align-items:center;justify-content:center;font-size:52px;line-height:1;
+  box-shadow:inset 0 0 26px rgba(255,255,255,.34),inset 0 0 0 1px rgba(255,255,255,.18),inset 0 2px 0 rgba(255,255,255,.3);}
 .sc.blue{background:linear-gradient(180deg,rgba(255,255,255,.14),rgba(0,0,0,.22)),var(--blue);}
 .sc.orange{background:linear-gradient(180deg,rgba(255,255,255,.14),rgba(0,0,0,.22)),var(--orange);}
 .sc.bump{animation:bump .7s var(--ease);}
@@ -99,178 +136,370 @@ body.on-board .hud{opacity:0;}
 .clock.ot{background:#d8212c;color:#fff;}
 /* the pips span the FULL width of the scoreboard core — each side's set fills its half, so the
    segments stretch edge-to-edge with the centre diamond between them */
-.pips{height:22px;display:flex;align-items:center;background:var(--ink);padding:0 10px;gap:6px;}
+.pips{height:22px;display:flex;align-items:center;background:var(--bar);padding:0 10px;gap:6px;}
 .pipset{display:flex;gap:5px;flex:1 1 0;min-width:0;}
 .pipset.orange{flex-direction:row-reverse;}
 .pip{flex:1 1 0;min-width:0;height:5px;background:rgba(255,255,255,.18);}
 .pipset.blue .pip.on{background:var(--blue);} .pipset.orange .pip.on{background:var(--orange);}
-.pip-mid{width:9px;height:9px;background:var(--accent);margin:0 9px;border-radius:1px;
-  box-shadow:0 0 0 2px #fff,0 0 8px rgba(255,255,255,.5);}
+/* centre mark on the series strip — the same box as a pip, just outlined instead of filled */
+.pip-mid{flex:none;height:5px;background:transparent;box-shadow:inset 0 0 0 1px rgba(255,255,255,.9);margin:0 7px;}
+
+/* ══ SPONSORS ══════════════════════════════════════════════════════════════════
+   Every placement from the brand kit shows here: title tab under the bug (OT slot in overtime),
+   replay sponsor in the replay band, the title-sponsor roll-out off the player bar, and
+   "Presented by" on the post-game board. A dark logo gets a light plate so it never disappears. */
+img.logo-dark{background:#f4f6fa;padding:4px 10px;box-sizing:content-box;}
+.tsp{align-self:center;display:flex;align-items:center;gap:12px;height:36px;padding:0 26px;background:var(--bar);
+  clip-path:polygon(0 0,100% 0,calc(100% - 14px) 100%,14px 100%);transition:background .3s;}
+.tsp.hidden{display:none;}
+.tsp img{max-height:24px;max-width:150px;object-fit:contain;}
+.tsp .tsp-lbl{display:none;font-weight:800;font-size:13px;letter-spacing:3px;white-space:nowrap;}
+/* GAME X OF X, sitting beside the title-sponsor logo at the bottom of the bug */
+.tsp .tsp-game{font-family:var(--label-font);font-weight:800;font-size:12px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);white-space:nowrap;}
+.tsp .tsp-game:empty{display:none;}
+.tsp.ot .tsp-game{display:none;}
+.tsp.ot{background:var(--ot-bg,#d8212c);}
+.tsp.ot .tsp-lbl{display:block;color:var(--ot-color,#fff);}
 
 /* ══ TOP-CORNER BOOST CARDS ════════════════════════════════════════════════════ */
-.corner{position:absolute;top:20px;display:flex;flex-direction:column;gap:4px;width:280px;}
-.corner.blue{left:0;} .corner.orange{right:0;}
-.bcard{position:relative;height:38px;display:flex;align-items:center;justify-content:space-between;padding:0 16px 3px;
+.corner{position:absolute;top:20px;display:flex;flex-direction:column;gap:5px;width:288px;
+  transition:transform .45s var(--ease),opacity .35s;}
+/* The rails clear the frame for a replay and through the kickoff countdown, and come back with the
+   rest of the live furniture once play resumes (the kickoff hold releases on the first clock tick). */
+.replay .corner.blue,.kickhold .corner.blue{transform:translateX(-112%);opacity:0;}
+.replay .corner.orange,.kickhold .corner.orange{transform:translateX(112%);opacity:0;}
+.replay #ptab,.kickhold #ptab{transform:translateX(-112%);opacity:0;}
+.corner.blue{left:0;--tc:var(--blue);} .corner.orange{right:0;--tc:var(--orange);}
+.bcard{position:relative;height:42px;display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:0 18px;overflow:hidden;
+  background:#000;
+  /* top highlight + a faint always-visible boost TRACK along the bottom (so 0% still reads as a bar) */
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.06),inset 0 -4px 0 rgba(255,255,255,.06);
+  transition:background .28s ease,box-shadow .28s ease;
   animation:slideL .5s var(--ease) backwards;}
 .corner.orange .bcard{flex-direction:row-reverse;animation-name:slideR;}
+/* cards size to the rail; the SPECTATED one reaches further in toward the centre of frame */
+.bcard{width:100%;transition:width .3s var(--ease),background .28s ease,box-shadow .28s ease;}
+.corner.blue .bcard{align-self:flex-start;} .corner.orange .bcard{align-self:flex-end;}
+.bcard.spec{width:calc(100% + 34px);}
 @keyframes slideL{from{transform:translateX(-100%);}} @keyframes slideR{from{transform:translateX(100%);}}
-.bcard .bn{font-weight:700;font-size:16px;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px;}
-.bcard .bv{font-size:18px;}
-.bcard .bbar{position:absolute;left:0;bottom:0;height:3px;width:0;transition:width .2s linear;}
-.corner.orange .bbar{left:auto;right:0;}
-.corner.blue .bbar{background:var(--blue);} .corner.orange .bbar{background:var(--orange);}
-.bcard.spec::before{content:'';position:absolute;top:0;bottom:0;width:3px;background:var(--paper);}
-.corner.blue .bcard.spec::before{right:0;} .corner.orange .bcard.spec::before{left:0;}
-.bcard.demo{opacity:.4;}
-/* event pop icon — flashes on the player's card the moment they get a goal/assist/save/shot/demo */
-.bfx{position:absolute;top:50%;transform:translateY(-50%) scale(1);width:24px;height:24px;opacity:0;pointer-events:none;z-index:3;}
-.corner.blue .bfx{right:14px;} .corner.orange .bfx{left:14px;}
-.bfx svg{width:100%;height:100%;display:block;filter:drop-shadow(0 0 6px currentColor);}
-.bfx.goals{color:var(--accent);} .bfx.assists{color:#4c9bff;} .bfx.saves{color:#3ad07a;} .bfx.shots{color:#ffd15a;} .bfx.demos{color:#ff5a3c;}
-.bfx.show{animation:bfxPop 1.6s var(--ease);}
-@keyframes bfxPop{0%{opacity:0;transform:translateY(-50%) scale(.35) rotate(-12deg);}
-  16%{opacity:1;transform:translateY(-50%) scale(1.2) rotate(0);}28%{transform:translateY(-50%) scale(1);}
-  72%{opacity:1;}100%{opacity:0;transform:translateY(-50%) scale(1);}}
+/* team-colour accent on the OUTER edge, so each card reads its side at a glance */
+.bcard::after{content:'';position:absolute;top:0;bottom:0;width:4px;background:var(--tc);opacity:.85;}
+.corner.blue .bcard::after{left:0;} .corner.orange .bcard::after{right:0;}
+.bcard .bn{font-weight:700;font-size:16px;letter-spacing:0;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;}
+.corner.orange .bcard .bn{text-align:right;}
+.bcard .bv{font-size:19px;font-weight:800;color:#fff;font-variant-numeric:tabular-nums;flex:none;min-width:26px;text-align:center;}
+.corner.blue .bcard .bv{text-align:right;} .corner.orange .bcard .bv{text-align:left;}
+/* boost fill along the bottom edge — team colour + sheen + soft glow (rides over the track) */
+.bcard .bbar{position:absolute;left:0;bottom:0;height:4px;width:0;transition:width .25s linear;
+  background:var(--tc);background-image:linear-gradient(90deg,rgba(255,255,255,.28),transparent 60%);box-shadow:0 0 8px var(--tc);}
+.corner.orange .bbar{left:auto;right:0;background-image:linear-gradient(270deg,rgba(255,255,255,.28),transparent 60%);}
+/* spectated player — clearly different: a rich TEAM-COLOUR gradient (not a faded grey wash),
+   white text, glowing team-colour outer accent */
+.bcard.spec{background:var(--tc);   /* flat team colour — the spectated player owns the rail */
+  box-shadow:inset 0 3px 0 rgba(255,255,255,.4),inset 0 -4px 0 rgba(255,255,255,.1),0 6px 18px rgba(0,0,0,.5);}
+.bcard.spec .bn,.bcard.spec .bv{font-weight:800;color:#fff;}
+.bcard.spec::after{width:6px;opacity:1;box-shadow:0 0 16px var(--tc);}
+.bcard.demo{opacity:.42;filter:grayscale(.5);}
+/* event flash — the instant a player lands a goal/assist/save/shot/demo their whole bar snaps
+   to full team colour with white text, and a clean white Rocket League icon pops (Worlds only) */
+.bcard.evt{background:var(--tc) !important;box-shadow:inset 0 1px 0 rgba(255,255,255,.28),0 0 22px var(--tc);}
+.bcard.evt .bn{color:#fff;}
+/* the icon TAKES OVER the boost value's spot for the event, so nothing stacks */
+.bcard.evt .bv{opacity:0;transition:opacity .1s;}
+.bcard.evt::after{opacity:1;background:#fff;box-shadow:0 0 12px rgba(255,255,255,.6);}
+.bcard.evt .bbar{background:rgba(255,255,255,.92);box-shadow:0 0 10px rgba(255,255,255,.5);}
+.bfx{position:absolute;top:50%;transform:translateY(-50%) scale(1);width:44px;height:44px;opacity:0;pointer-events:none;z-index:4;
+  background-color:#fff;
+  /* mask-mode:alpha (not the default 'luminance') is load-bearing: without it the mask reads the
+     PNG's own brightness per pixel, so darker regions of the icon art render partially see-through
+     instead of solid white — mask by SHAPE (alpha), not luminance, for a fully opaque white glyph. */
+  mask-mode:alpha;-webkit-mask-mode:alpha;
+  -webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;-webkit-mask-position:center;mask-position:center;-webkit-mask-size:contain;mask-size:contain;}
+/* sit centred over the boost-value slot (blue value hugs the right, orange the left) */
+.corner.blue .bfx{right:12px;} .corner.orange .bfx{left:12px;}
+.bfx.goals{-webkit-mask-image:url(/assets/rl/solid/ball.png);mask-image:url(/assets/rl/solid/ball.png);}
+.bfx.assists{-webkit-mask-image:url(/assets/rl/solid/assist.png);mask-image:url(/assets/rl/solid/assist.png);}
+.bfx.saves{-webkit-mask-image:url(/assets/rl/solid/save.png);mask-image:url(/assets/rl/solid/save.png);}
+.bfx.shots{-webkit-mask-image:url(/assets/rl/solid/shot.png);mask-image:url(/assets/rl/solid/shot.png);}
+/* DEMO — a bomb with a lit fuse (the look of RL's own demo tag). Inline SVG rather than the flat
+   demolition.png so it reads at this size and can carry its own animation. */
+.bfx.demos{-webkit-mask-image:url(/assets/rl/solid/demolition.png);mask-image:url(/assets/rl/solid/demolition.png);}
+.bfx.show{animation:bfxPop 1.6s cubic-bezier(.2,1.5,.35,1);}
+/* DEMO CALLOUT — RLCS-style pairing across the whole card: who demoed, the bomb, who got demoed.
+   Each name sits on its own TEAM's colour, so the card carries both. Only demos do this; every other
+   event just pops its icon over the boost value. */
+.dcall{position:absolute;inset:0;z-index:6;display:none;align-items:stretch;overflow:hidden;}
+.dcall.show{display:flex;}
+.dcall .dc-a,.dcall .dc-v{flex:1;min-width:0;display:flex;align-items:center;padding:0 12px;
+  font-family:var(--label-font);font-weight:800;font-size:14px;text-transform:uppercase;color:#fff;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.dcall .dc-a{justify-content:flex-end;background:var(--dc-a,var(--blue));}
+.dcall .dc-v{justify-content:flex-start;background:var(--dc-v,var(--orange));}
+.dcall .dc-ic{flex:none;width:46px;background:#000;position:relative;}
+.dcall .dc-ic::after{content:'';position:absolute;inset:9px;background-color:#fff;
+  -webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;-webkit-mask-position:center;mask-position:center;
+  -webkit-mask-size:contain;mask-size:contain;
+  -webkit-mask-image:url(/assets/rl/solid/demolition.png);mask-image:url(/assets/rl/solid/demolition.png);}
+.dcall.show .dc-a{animation:dcInL .4s cubic-bezier(.2,.9,.3,1) both;}
+.dcall.show .dc-v{animation:dcInR .4s cubic-bezier(.2,.9,.3,1) both;}
+.dcall.show .dc-ic::after{animation:dcBomb 1.5s cubic-bezier(.2,1.3,.3,1) both;}
+@keyframes dcInL{from{transform:translateX(-100%);}}
+@keyframes dcInR{from{transform:translateX(100%);}}
+@keyframes dcBomb{0%{opacity:0;transform:scale(.3) rotate(-30deg);}12%{opacity:1;transform:scale(1.35) rotate(8deg);}
+  22%{transform:scale(1) rotate(-6deg);}30%{transform:scale(1.06) rotate(5deg);}38%{transform:scale(1) rotate(-3deg);}
+  50%,86%{opacity:1;transform:scale(1) rotate(0);}100%{opacity:1;transform:scale(1);}}
+.dcall.out{animation:dcOut .32s ease both;}
+@keyframes dcOut{to{opacity:0;}}
+/* the bomb lands, rattles on its fuse, then blows out bigger than the rest */
+.bfx.demos.show{animation:bfxBomb 1.7s cubic-bezier(.2,1.2,.3,1);}
+@keyframes bfxBomb{
+  0%{opacity:0;transform:translateY(-50%) scale(.25) rotate(-34deg);}
+  10%{opacity:1;transform:translateY(-50%) scale(1.5) rotate(10deg);}
+  18%{transform:translateY(-50%) scale(1.02) rotate(-9deg);}
+  25%{transform:translateY(-50%) scale(1.08) rotate(8deg);}
+  32%{transform:translateY(-50%) scale(1) rotate(-6deg);}
+  39%{transform:translateY(-50%) scale(1.05) rotate(5deg);}
+  46%{transform:translateY(-50%) scale(1) rotate(-3deg);}
+  53%{transform:translateY(-50%) scale(1.03) rotate(2deg);}
+  62%,74%{opacity:1;transform:translateY(-50%) scale(1) rotate(0);}
+  82%{opacity:1;transform:translateY(-50%) scale(1.35);}
+  100%{opacity:0;transform:translateY(-50%) scale(2.1);}}
+/* snaps in oversized and settles, holds solid WHITE for most of the beat, then lifts away */
+@keyframes bfxPop{
+  0%{opacity:0;transform:translateY(-50%) scale(.2) rotate(-25deg);}
+  12%{opacity:1;transform:translateY(-50%) scale(1.55) rotate(6deg);}
+  24%{opacity:1;transform:translateY(-50%) scale(.92) rotate(-2deg);}
+  34%{opacity:1;transform:translateY(-50%) scale(1.08) rotate(0);}
+  44%,78%{opacity:1;transform:translateY(-50%) scale(1);}
+  100%{opacity:0;transform:translateY(-50%) scale(1.5);}}
+/* white shock-ring behind the icon on the same beat */
+.bcard .bfx-ring{position:absolute;top:50%;width:44px;height:44px;border-radius:50%;z-index:3;opacity:0;
+  border:3px solid #fff;pointer-events:none;transform:translateY(-50%) scale(.4);}
+.corner.blue .bfx-ring{right:12px;} .corner.orange .bfx-ring{left:12px;}
+.bfx-ring.show{animation:bfxRing .75s cubic-bezier(.2,.8,.3,1);}
+.bfx-ring.demos{border-color:#ff7a3c;box-shadow:0 0 18px rgba(255,122,60,.55);}
+.bfx-ring.demos.show{animation:bfxRing .8s cubic-bezier(.2,.8,.3,1) .55s;}
+@keyframes bfxRing{0%{opacity:.95;transform:translateY(-50%) scale(.35);}
+  100%{opacity:0;transform:translateY(-50%) scale(2.4);}}
 
-/* ══ PARTNER TAB ═══════════════════════════════════════════════════════════════ */
-.ptab{position:absolute;left:0;height:52px;min-width:220px;max-width:380px;display:flex;align-items:center;justify-content:center;
-  padding:0 28px 0 22px;box-shadow:inset -4px 0 0 var(--accent);transition:transform .5s var(--ease),opacity .5s;}
-.ptab.out{transform:translateX(-110%);opacity:0;}
-.ptab span{font-weight:700;font-size:20px;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;}
-.ptab img{max-height:32px;max-width:300px;object-fit:contain;}
+/* ══ PARTNER BANNER ════════════════════════════════════════════════════════════
+   A real 3D CUBE under the left boost cards: two full box faces (front + top) mounted on a
+   preserve-3d cube. Advancing tumbles the cube a quarter-turn on its X axis so you see the box
+   turn over its top edge with depth (not a flat card flip); the sponsor is swapped on the hidden
+   face each turn (see renderPartners / rollPartner). Fixed 288px width, team colour on both edges. */
+.ptab{position:absolute;left:0;width:288px;height:62px;perspective:820px;
+  transition:transform .5s var(--ease),opacity .5s;}
+.ptab.out{transform:translateX(-112%);opacity:0;}
+.ptab-cube{position:relative;width:100%;height:100%;transform-style:preserve-3d;
+  transform:translateZ(-31px) rotateX(0deg);will-change:transform;}
+/* each face is a full box: dark glass, both team-colour edges, header strip + logo well */
+.ptab-face{position:absolute;inset:0;overflow:hidden;backface-visibility:hidden;
+  background:linear-gradient(180deg,rgba(18,18,18,.98),rgba(0,0,0,.99));
+  box-shadow:0 14px 26px rgba(0,0,0,.5);}
+.ptab-face::before,.ptab-face::after{content:'';position:absolute;top:0;bottom:0;width:4px;z-index:3;
+  background:var(--blue);box-shadow:0 0 12px var(--blue);}
+.ptab-face::after{left:0;} .ptab-face::before{right:0;}
+.pf-front{transform:rotateX(0deg) translateZ(31px);}
+.pf-top{transform:rotateX(90deg) translateZ(31px);}
+/* header bar: accent tick + PARTNERS label — floats OVER the top of the box rather than taking
+   flex space, so the logo below always centres on the FULL box height whether or not it's showing */
+.ptab-hd{position:absolute;left:0;right:0;top:0;z-index:4;height:19px;display:flex;align-items:center;padding:0 12px 0 16px;
+  background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.015));}
+.ptab-hd.empty{display:none;}
+.ptab-lbl{display:flex;align-items:center;gap:8px;font-family:var(--label-font);font-weight:800;font-size:9px;letter-spacing:2px;
+  text-transform:uppercase;color:var(--muted);line-height:1;}
+.ptab-lbl::before{content:'';width:9px;height:2px;border-radius:1px;background:var(--blue);box-shadow:0 0 6px var(--blue);}
+.ptab-lbl:empty{display:none;}
+/* logo well — a faint lit backing; logos scale UP to fill it so small marks don't float. Spans the
+   FULL face height (the header floats on top of it) so the logo is always centred on the whole box. */
+.ptab-slot{position:absolute;inset:0;min-width:0;display:flex;align-items:center;justify-content:center;padding:4px 14px;}
+.ptab-slot::before{content:'';position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(ellipse at 55% 50%,rgba(255,255,255,.07),transparent 72%);}
+.ptab-logo{position:relative;z-index:2;width:100%;height:100%;min-height:0;display:flex;align-items:center;justify-content:center;}
+.ptab-logo img{width:100%;height:100%;object-fit:contain;display:block;}
+.ptab-logo span{font-weight:800;font-size:19px;letter-spacing:1px;text-transform:uppercase;white-space:nowrap;}
+
+/* ══ STATS SIDEBAR ═════════════════════════════════════════════════════════════
+   An optional RLCS-style ranked panel on the right (series stats or league standings). Producer
+   toggles it; rows come from state.worldsSidebar. Sits under the orange boost cards and pops in. */
+.wsb{position:absolute;right:0;width:300px;display:flex;flex-direction:column;overflow:hidden;
+  background:linear-gradient(180deg,rgba(20,20,20,.97),rgba(0,0,0,.98));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 12px 30px rgba(0,0,0,.5);
+  transition:transform .5s var(--ease),opacity .5s;}
+.wsb::after{content:'';position:absolute;right:0;top:0;bottom:0;width:4px;background:var(--orange);opacity:.85;}
+.wsb.off{transform:translateX(112%);opacity:0;pointer-events:none;}
+.wsb-hd{padding:11px 18px 9px;background:rgba(255,255,255,.05);border-bottom:1px solid rgba(255,255,255,.08);}
+.wsb-title{font-weight:800;font-size:16px;letter-spacing:2px;text-transform:uppercase;line-height:1;}
+.wsb-sub{margin-top:4px;font-family:var(--label-font);font-weight:700;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);line-height:1;}
+.wsb-rows{display:flex;flex-direction:column;}
+.wsb-row{display:flex;align-items:center;gap:12px;height:31px;padding:0 18px;border-bottom:1px solid rgba(255,255,255,.05);}
+.wsb-row:nth-child(even){background:rgba(255,255,255,.02);}
+.wsb-rk{flex:none;width:16px;text-align:center;font-weight:800;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;}
+.wsb-lg{flex:none;width:18px;height:18px;object-fit:contain;}
+.wsb-nm{flex:1;min-width:0;font-weight:700;font-size:13px;letter-spacing:1px;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.wsb-vl{flex:none;font-weight:800;font-size:14px;color:#fff;font-variant-numeric:tabular-nums;}
 
 /* ══ BOTTOM-LEFT: spectated player ═════════════════════════════════════════════ */
-.pl{position:absolute;left:0;bottom:0;transition:transform .5s var(--ease),opacity .4s;}
+.pl{position:absolute;left:0;right:236px;bottom:0;transition:transform .5s var(--ease),opacity .4s;}
+/* with the ticker on, the bar runs the FULL width — the ticker lane reaches the right edge */
+.has-ticker .pl{right:0;}
 .pl.off,.replay .pl{transform:translateY(30px);opacity:0;}
 .cam{width:280px;height:158px;border:3px solid var(--spec);border-bottom:none;display:none;}
+.noplayer .cam{display:none !important;}
 .cam-on .cam{display:block;}
-.plrow{display:flex;align-items:stretch;height:46px;}
+.plrow{display:flex;align-items:stretch;height:52px;}   /* 52px = ticker.html's own bar height */
+.noplayer .plname,.noplayer .plstats{display:none;}   /* ticker-only bar */
+/* KICKOFF HOLD (ported from rl-hud): from the replay's end the live furniture stays OFF until the
+   ball is actually touched, so it never pops back over the kickoff countdown. The ticker lane keeps
+   running — only the player's own name/stats and the dial wait. */
+.kickhold .plname,.kickhold .plstats{display:none;}
 /* name hugs its text (no fixed 280px block leaving dead space beside a short name) */
 .plname{display:flex;align-items:center;justify-content:center;padding:0 26px;min-width:150px;
-  background:linear-gradient(180deg,rgba(255,255,255,.14),rgba(0,0,0,.22)),var(--spec);
+  background:var(--spec);   /* FLAT team colour — no gradient across the name plate */
   font-weight:800;font-size:22px;text-transform:uppercase;white-space:nowrap;overflow:hidden;}
-.plstats{display:flex;align-items:center;gap:26px;padding:0 24px;}
-.plstats div{display:flex;align-items:baseline;gap:6px;white-space:nowrap;}
-.plstats b{font-size:18px;}
-.plstats span{font-weight:700;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);}
+/* flat black panel with a thin team-colour rule along the bottom — no colour wash across the bar */
+.plstats{display:flex;align-items:center;gap:26px;padding:0 24px;
+  box-shadow:inset 0 -2px 0 var(--spec),inset 0 1px 0 rgba(255,255,255,.05);}
+.plname{box-shadow:inset 0 -2px 0 rgba(0,0,0,.35);}
+.plstats div{display:flex;align-items:center;gap:9px;white-space:nowrap;}
+/* white Rocket League glyph in front of each stat (icon + number + word, RLCS-style) — sized to
+   read clearly on the spectated player's statcard, not a tiny bullet next to the number */
+.plstats .sic{flex:none;width:22px;height:22px;background-color:#fff;
+  mask-mode:alpha;-webkit-mask-mode:alpha;
+  -webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;-webkit-mask-position:center;mask-position:center;-webkit-mask-size:contain;mask-size:contain;}
+.plstats .sic.goals{-webkit-mask-image:url(/assets/rl/solid/ball.png);mask-image:url(/assets/rl/solid/ball.png);}
+.plstats .sic.shots{-webkit-mask-image:url(/assets/rl/solid/shot.png);mask-image:url(/assets/rl/solid/shot.png);}
+.plstats .sic.assists{-webkit-mask-image:url(/assets/rl/solid/assist.png);mask-image:url(/assets/rl/solid/assist.png);}
+.plstats .sic.saves{-webkit-mask-image:url(/assets/rl/solid/save.png);mask-image:url(/assets/rl/solid/save.png);}
+.plstats .sic.demos{-webkit-mask-image:url(/assets/rl/solid/demolition.png);mask-image:url(/assets/rl/solid/demolition.png);}
+.plstats b{font-size:19px;line-height:1;}
+/* spelled-out stat labels (GOALS / SHOTS / ASSISTS / SAVES / DEMOS) */
+.plstats span{font-family:var(--label-font);font-weight:700;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);}
+.plstats b.tick{animation:statTick .5s var(--ease);}
+@keyframes statTick{35%{transform:scale(1.3);}}
+/* title-sponsor lockup — a CHILD of the boost dial, so it is physically attached to it: it rolls out
+   from BEHIND the disc (the disc paints over its right end) and is centred on the dial's axis. Being
+   a child means it follows the dial wherever it sits (raised for the ticker, hidden with it, etc.). */
+/* Rolls out along the BOTTOM of the dial (not across its middle). The end runs far enough under the
+   disc that the DISC'S EDGE is what ends the pill — otherwise its own end stops short in the open
+   next to the circle and reads as a clipped box. The disc reaches furthest left along the pill's TOP
+   row (a circle is widest at its centre), so the right padding is sized to that row, and the end is
+   fully rounded so no corner can poke out past the arc lower down. */
+.pl-spon{position:absolute;right:88px;bottom:2px;height:54px;z-index:0;display:flex;align-items:center;gap:16px;
+  padding:0 106px 0 26px;white-space:nowrap;overflow:hidden;border-radius:27px;
+  background:linear-gradient(180deg,rgba(24,24,24,.98),rgba(0,0,0,.99));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.12),inset 0 0 0 1px rgba(255,255,255,.05),0 12px 30px rgba(0,0,0,.58);
+  transform:translateX(150px);opacity:0;pointer-events:none;
+  transition:transform .6s var(--ease),opacity .35s;}
+.pl-spon.out{transform:translateX(0);opacity:1;}
+/* brand accent bar down the left inside the pill */
+.pl-spon::before{content:'';position:absolute;left:16px;top:13px;bottom:13px;width:3px;border-radius:2px;z-index:2;
+  background:var(--accent);box-shadow:0 0 10px var(--accent);}
+/* one-time sheen that sweeps across as it rolls out */
+.pl-spon::after{content:'';position:absolute;top:0;bottom:0;left:-90px;width:64px;transform:skewX(-18deg);pointer-events:none;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.22),transparent);opacity:0;}
+.pl-spon.out::after{animation:plSheen 1s .5s ease-out;}
+@keyframes plSheen{0%{left:-90px;opacity:1;}100%{left:calc(100% + 40px);opacity:0;}}
+/* label chip, divided from the logo by a hairline */
+.pl-spon span{position:relative;padding-left:14px;font-family:var(--label-font);font-weight:800;font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);}
+.pl-spon span::after{content:'';position:absolute;right:-9px;top:50%;transform:translateY(-50%);width:1px;height:22px;background:rgba(255,255,255,.16);}
+.pl-spon img{max-height:30px;max-width:168px;object-fit:contain;}
+
+/* ══ TICKER ════════════════════════════════════════════════════════════════════
+   Not a new ticker and NOT a second bar: the EXISTING ticker scene (overlay/ticker.html) runs in a
+   lane on the SAME bottom bar as the player stats, to the right of them. ticker.html draws its bar
+   along the bottom of its own 1920x1080 page, so the frame is full-page, bottom-aligned inside the
+   lane and clipped to it — the lane is exactly the ticker bar's height, so they line up. It keeps
+   every source (manual / start.gg / NXGEN / competition), its sponsor slot, brand accent + speed. */
+.tklane{flex:1 1 auto;min-width:0;position:relative;overflow:hidden;display:none;align-self:flex-end;height:55px;}   /* 55 = ticker.html's 52px bar + its 3px top rule */
+.has-ticker .tklane{display:block;}
+.tklane iframe{position:absolute;left:0;bottom:0;width:1920px;height:1080px;border:0;background:transparent;}
 
 /* ══ BOTTOM-RIGHT: boost dial ══════════════════════════════════════════════════ */
-.dial{position:absolute;right:32px;bottom:28px;width:180px;height:180px;transition:transform .5s var(--ease),opacity .4s;}
-.dial.off,.replay .dial{transform:scale(.8);opacity:0;}
-.dial svg{position:absolute;inset:0;}
-.dial .disc{fill:rgba(12,15,22,.9);}
+.dial{position:absolute;right:32px;bottom:28px;width:180px;height:180px;
+  transition:transform .5s var(--ease),opacity .4s,bottom .4s var(--ease);}
+.has-ticker .dial{bottom:70px;}   /* lifted just clear of the full-width ticker bar */
+.dial.off,.replay .dial,.kickhold .dial{transform:scale(.8);opacity:0;}
+.dial svg{position:absolute;inset:0;z-index:2;}
+.dial .disc{fill:#000000;}
 .dial .track{fill:none;stroke:rgba(255,255,255,.08);stroke-width:10;}
-.dial .arc{fill:none;stroke:var(--spec);stroke-width:10;transition:stroke-dasharray .15s linear;}
-.dial .dv{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:58px;}
-.dial .dl{position:absolute;left:0;right:0;bottom:36px;text-align:center;font-weight:700;font-size:11px;letter-spacing:.24em;color:var(--muted);}
+.dial .arc{fill:none;stroke:var(--spec);stroke-width:10;stroke-linecap:round;}
+/* faint brand-logo watermark behind the boost number */
+.dial-wm{z-index:3;position:absolute;inset:0;background-repeat:no-repeat;background-position:center;background-size:112px auto;
+  opacity:.2;pointer-events:none;}
+.dial .dv{position:absolute;inset:0;z-index:4;display:flex;align-items:center;justify-content:center;font-size:58px;}
+.dial .dl{z-index:4;position:absolute;left:0;right:0;bottom:36px;text-align:center;font-family:var(--label-font);font-weight:700;font-size:11px;letter-spacing:3px;color:var(--muted);}
 
-/* ══ REPLAY BAND ═══════════════════════════════════════════════════════════════ */
-.rband{position:absolute;left:0;right:0;bottom:0;height:150px;pointer-events:none;opacity:0;transform:translateY(100%);
-  transition:transform .55s var(--ease),opacity .3s;}
-.replay .rband{opacity:1;transform:none;}
-/* cinematic wash: team-colour glow up from the floor, plus a darkening base for legibility */
-.rband .wash{position:absolute;inset:0;
-  background:linear-gradient(0deg,rgba(6,8,13,.92) 0%,rgba(6,8,13,.4) 42%,transparent 100%),
-             linear-gradient(0deg,var(--rcol,var(--blue)),transparent 62%);}
-.rband .wash::after{content:'';position:absolute;inset:0;
-  background:radial-gradient(120% 150% at 50% 100%,rgba(255,255,255,.06),transparent 55%);}
-.rband .edge{position:absolute;left:0;right:0;bottom:0;height:4px;background:var(--rcol,var(--blue));
-  box-shadow:0 0 18px var(--rcol,var(--blue));}
-/* REPLAY tags — pill with a pulsing live dot */
-.rtag{position:absolute;bottom:34px;display:flex;align-items:center;gap:10px;height:42px;padding:0 22px;border-radius:8px;
-  font-weight:800;font-size:18px;letter-spacing:.28em;background:linear-gradient(180deg,var(--ink-2),var(--ink));
-  box-shadow:0 8px 22px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.08);}
-.rtag.l{left:34px;} .rtag.r{right:34px;}
-.rtag i{width:9px;height:9px;border-radius:50%;background:#ff2d3a;box-shadow:0 0 9px #ff2d3a;animation:blink 1.1s steps(2,start) infinite;}
-@keyframes blink{to{visibility:hidden;}}
-/* centre chip — rounded card, team-colour cap, scorer + assist + goal speed */
-.rchip{position:absolute;left:50%;bottom:30px;transform:translateX(-50%);display:flex;align-items:center;gap:26px;
-  height:56px;padding:0 30px;border-radius:10px;white-space:nowrap;
-  background:linear-gradient(180deg,var(--ink-2),var(--ink));
-  box-shadow:0 12px 30px rgba(0,0,0,.55),inset 0 3px 0 var(--rcol,var(--blue)),inset 0 1px 0 rgba(255,255,255,.06);}
-.rchip .rs{display:flex;align-items:center;gap:12px;font-weight:800;font-size:24px;text-transform:uppercase;}
-.rchip .rs img{width:34px;height:34px;object-fit:contain;filter:drop-shadow(0 2px 6px rgba(0,0,0,.5));}
-.rchip .ras{font-weight:700;font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
-  padding-left:26px;position:relative;}
-.rchip .ras::before{content:'';position:absolute;left:12px;top:50%;transform:translateY(-50%);width:1px;height:22px;background:rgba(255,255,255,.14);}
-.rchip .ras:empty{display:none;}
-.rchip .rsp{display:flex;align-items:baseline;gap:5px;font-weight:700;font-size:12px;letter-spacing:.14em;color:var(--muted);
-  padding-left:26px;position:relative;}
-.rchip .rsp::before{content:'';position:absolute;left:12px;top:50%;transform:translateY(-50%);width:1px;height:22px;background:rgba(255,255,255,.14);}
-.rchip .rsp b{font-size:26px;color:#fff;letter-spacing:0;}
+/* ══ REPLAY LOWER THIRD ════════════════════════════════════════════════════════
+   FLAT, not graded. Nothing here uses a gradient: solid black cells, one solid team-colour block
+   carrying the crest, hairline rules between cells, and a solid colour bar under the slab. The only
+   soft thing on screen is the small scrim behind it, so the bar stays legible over a bright arena
+   without washing team colour across the picture. */
+.rband{position:absolute;left:0;right:0;bottom:0;height:150px;pointer-events:none;}
+.rband .wash{position:absolute;left:0;right:0;bottom:0;height:220px;opacity:0;transition:opacity .35s ease;
+  background:linear-gradient(0deg,rgba(0,0,0,.72) 0%,rgba(0,0,0,.34) 42%,rgba(0,0,0,0) 100%);}
+.replay .rband .wash{opacity:1;}
+.rband .edge{display:none;}
+@keyframes blink{to{opacity:.15;}}
 
-/* ══ PANEL SWEEP (replay in/out + scoreboard in/out) ═══════════════════════════ */
-.sweep{position:absolute;inset:0;z-index:90;pointer-events:none;overflow:hidden;display:none;}
-.sweep.play{display:block;}
-.sweep i{position:absolute;top:-10%;bottom:-10%;left:-20%;right:-20%;transform:translateX(130%) skewX(-14deg);}
-.sweep .s1{background:radial-gradient(70% 90% at 50% 50%,rgba(255,255,255,.12),rgba(0,0,0,.35)),var(--sw-col,var(--accent));}
-.sweep .s2{background:var(--ink);}
-.sweep .s3{background:var(--sw-col,var(--accent));opacity:.55;}
-.sweep.play .s3{animation:sw var(--sw-dur,1.5s) cubic-bezier(.65,0,.35,1) both;}
-.sweep.play .s2{animation:sw var(--sw-dur,1.5s) cubic-bezier(.65,0,.35,1) 60ms both;}
-.sweep.play .s1{animation:sw var(--sw-dur,1.5s) cubic-bezier(.65,0,.35,1) 120ms both;}
-@keyframes sw{0%{transform:translateX(130%) skewX(-14deg);}36%,64%{transform:translateX(0) skewX(-14deg);}100%{transform:translateX(-130%) skewX(-14deg);}}
-.sw-skin{position:absolute;inset:0;background-size:cover;background-position:center;opacity:0;}
-.sweep.play .sw-skin{animation:swC var(--sw-dur,1.5s) linear both;}
-.sw-lock{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;opacity:0;}
-.sweep.play .sw-lock{animation:swC var(--sw-dur,1.5s) linear both;}
-@keyframes swC{0%,30%{opacity:0;}40%,60%{opacity:1;}70%,100%{opacity:0;}}
-.sw-lock img{max-height:150px;max-width:620px;object-fit:contain;filter:drop-shadow(0 8px 24px rgba(0,0,0,.4));}
-.sw-lock span{font-weight:800;font-size:64px;letter-spacing:.34em;text-transform:uppercase;padding-left:.34em;}
-.sw-lock span:empty{display:none;}
-.sweep.play .sw-lock img,.sweep.play .sw-lock span{animation:swPush var(--sw-dur,1.5s) var(--ease) both;}
-@keyframes swPush{0%,32%{transform:scale(.92);}60%{transform:scale(1);}100%{transform:scale(1.04);}}
+/* the slab: a row of flat cells, squared off, clipped in from the left */
+.rslab{position:absolute;left:0;bottom:46px;display:flex;align-items:stretch;height:92px;max-width:1180px;
+  background:linear-gradient(180deg,#161616 0%,#050505 62%,#000 100%);white-space:nowrap;
+  box-shadow:0 14px 34px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.07);
+  clip-path:inset(0 100% 0 0);transition:clip-path .5s var(--ease);}
+.replay .rslab{clip-path:inset(0 0 0 0);}
+/* solid team-colour rule along the bottom — the one piece of colour that spans the bar */
+.rslab::after{content:'';position:absolute;left:0;right:0;bottom:0;height:4px;background:var(--rcol,var(--blue));}
+/* cells rise in behind the wipe */
+.replay .rslab > *{animation:rsCell .42s var(--ease) backwards;}
+.replay .rslab > *:nth-child(2){animation-delay:.10s;}
+.replay .rslab > *:nth-child(3){animation-delay:.18s;}
+.replay .rslab > *:nth-child(4){animation-delay:.26s;}
+@keyframes rsCell{from{opacity:0;transform:translateY(12px);}}
 
-/* ══ POST-GAME SCOREBOARD ══════════════════════════════════════════════════════ */
-.board{position:absolute;inset:0;display:none;align-items:center;justify-content:center;z-index:50;}
-.board.show{display:flex;}
-.bd-bg{position:absolute;inset:0;background:radial-gradient(120% 90% at 50% 20%,rgba(22,27,38,.94),rgba(8,10,15,.97));}
-.bd-img{position:absolute;inset:0;background-size:cover;background-position:center;}
-.bd-img::after{content:'';position:absolute;inset:0;background:rgba(8,10,15,.6);}
-.bd{position:relative;width:1440px;display:flex;flex-direction:column;align-items:stretch;gap:26px;}
-.bd > *{animation:bdIn .6s var(--ease) backwards;}
-.bd > :nth-child(2){animation-delay:.08s;} .bd > :nth-child(3){animation-delay:.16s;}
-.bd > :nth-child(4){animation-delay:.24s;} .bd > :nth-child(5){animation-delay:.32s;}
-@keyframes bdIn{from{opacity:0;transform:translateY(18px);}}
-.bd-top{display:flex;align-items:center;justify-content:center;gap:22px;height:56px;}
-.bd-top img{max-height:56px;max-width:220px;object-fit:contain;}
-.bd-title{display:flex;flex-direction:column;align-items:center;gap:6px;}
-.bd-ev{font-weight:800;font-size:20px;letter-spacing:.22em;text-transform:uppercase;}
-.bd-rd{font-weight:700;font-size:13px;letter-spacing:.24em;text-transform:uppercase;color:var(--muted);}
-.bd-hero{display:grid;grid-template-columns:1fr auto 1fr;align-items:stretch;height:150px;box-shadow:inset 0 -3px 0 var(--accent);}
-.bd-team{display:flex;align-items:center;gap:26px;padding:0 34px;position:relative;overflow:hidden;background:var(--ink-2);}
-.bd-team.b{flex-direction:row-reverse;}
-.bd-team.win.a{background:linear-gradient(180deg,rgba(255,255,255,.12),rgba(0,0,0,.25)),var(--blue);}
-.bd-team.win.b{background:linear-gradient(180deg,rgba(255,255,255,.12),rgba(0,0,0,.25)),var(--orange);}
-.bd-team.lose{opacity:.72;}
-.bd-team img{width:104px;height:104px;object-fit:contain;flex:none;}
-.bd-tn{flex:1;display:flex;flex-direction:column;gap:8px;min-width:0;}
-.bd-team.b .bd-tn{align-items:flex-end;}
-.bd-name{font-weight:800;font-size:44px;line-height:1;text-transform:uppercase;white-space:nowrap;overflow:hidden;max-width:100%;}
-.bd-chip{font-weight:800;font-size:12px;letter-spacing:.24em;padding:5px 10px;background:var(--paper);color:var(--ink);width:max-content;}
-.bd-team:not(.win) .bd-chip{display:none;}
-.bd-mid{display:flex;align-items:center;background:var(--ink);}
-.bd-num{width:130px;text-align:center;font-size:92px;line-height:1;}
-.bd-fin{display:flex;flex-direction:column;align-items:center;gap:8px;padding:0 10px;}
-.bd-fin b{font-weight:800;font-size:18px;letter-spacing:.3em;padding-left:.3em;}
-.bd-fin span{font-weight:700;font-size:12px;letter-spacing:.2em;color:var(--muted);white-space:nowrap;}
-.bd-stats{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
-.bd-stats.off{display:none;}
-.tbl{background:rgba(12,15,22,.8);}
-.tr{display:grid;grid-template-columns:1fr repeat(6,70px);align-items:center;height:48px;padding:0 20px;}
-.tr+.tr{border-top:1px solid var(--line);}
-.th{height:36px;font-weight:700;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);}
-.tbl.a .th{box-shadow:inset 0 3px 0 var(--blue);} .tbl.b .th{box-shadow:inset 0 3px 0 var(--orange);}
-.th div,.tr .c{text-align:center;}
-.tr .n{font-weight:700;font-size:18px;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:10px;}
-.tr .c{font-size:19px;}
-.tr .c.s{color:#fff;} .tr .c:not(.s){color:rgba(255,255,255,.82);}
-.tr.mvp{background:rgba(255,255,255,.05);}
-.mvp-tag{font-weight:800;font-size:10px;letter-spacing:.18em;padding:3px 7px;background:var(--accent);color:#fff;flex:none;}
-.bd-rail{display:flex;align-items:center;justify-content:center;gap:40px;height:48px;}
-.bd-rail span{font-weight:700;font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:var(--muted);}
-.bd-rail img{max-height:40px;max-width:160px;object-fit:contain;}
-.bd-rail:empty{display:none;}
+/* crest sits on a SOLID team-colour block — the badge of the bar */
+.rs-crest{flex:none;width:104px;display:flex;align-items:center;justify-content:center;overflow:hidden;
+  background:#000;box-shadow:inset -1px 0 0 rgba(255,255,255,.12);}
+/* the crest fills the block (square crests go edge to edge; a wide mark still fits uncropped) */
+.rs-crest img{width:100%;height:100%;object-fit:contain;padding:7px;}
+/* who scored */
+.rs-who{display:flex;flex-direction:column;justify-content:center;gap:9px;padding:0 34px;min-width:0;}
+.rs-tag{display:flex;align-items:center;gap:11px;font-family:var(--label-font);font-weight:800;font-size:12px;
+  letter-spacing:4px;text-transform:uppercase;color:var(--rcol,var(--blue));line-height:1;}
+.rs-tag i{width:9px;height:9px;background:var(--rcol,var(--blue));animation:blink 1.2s ease-in-out infinite;}
+.rs-tag em{font-style:normal;color:rgba(255,255,255,.45);}
+.rs-name{font-weight:800;font-size:36px;line-height:1;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;}
+.rs-sub{font-family:var(--label-font);font-weight:700;font-size:12px;letter-spacing:2px;text-transform:uppercase;
+  color:var(--muted);line-height:1;}
+.rs-sub:empty{display:none;}
+/* how hard — its own cell behind a hairline */
+.rs-speed{flex:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:0 30px;
+  box-shadow:inset 1px 0 0 rgba(255,255,255,.14);}
+.rs-speed b{font-weight:800;font-size:38px;line-height:1;font-variant-numeric:tabular-nums;}
+.rs-speed span{font-family:var(--label-font);font-weight:700;font-size:11px;letter-spacing:3px;color:var(--muted);}
+.rs-speed.hidden{display:none;}
+/* sponsor — flat panel, one shade off black so the placement still reads as its own block */
+.rs-spon{flex:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;
+  padding:0 38px;background:linear-gradient(180deg,#1b1b1b,#0a0a0a);box-shadow:inset 1px 0 0 rgba(255,255,255,.14);}
+.rs-spon span{font-family:var(--label-font);font-weight:800;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);}
+.rs-spon img{max-height:36px;max-width:190px;object-fit:contain;}
+.rs-spon.hidden{display:none;}
+
+/* ══ REPLAY TRANSITIONS ════════════════════════════════════════════════════════
+   Not here any more: the transition engine + all three looks (slam / cinema / sweep) live in the
+   shared overlay/replay-fx.js, so every RL overlay runs the same timing and can use any style. This
+   layout defaults to 'sweep'; the producer's Match ▸ Teams pick overrides it, and ?fx=<style> pins
+   one per browser source. The engine mounts its own element. */
+
+/* ══ POST-GAME SCOREBOARD ══════════════════════════════════════════════════════
+   NOT a bespoke board: this frames the EXISTING post-game scoreboard (rl-hud.html?only=scoreboard),
+   so the producer's stats-screen design (Default / Glass / Block / Radar / Compare), its sponsor
+   slots and background all apply here exactly as they do on the other RL layouts. The Worlds HUD
+   only adds its own sweep in and out of it. */
+.board{position:absolute;inset:0;display:none;z-index:50;}
+.board.show{display:block;}
+.board iframe{width:1920px;height:1080px;border:0;display:block;background:transparent;}
 </style>
 </head>
 <body>
@@ -278,6 +507,7 @@ body.on-board .hud{opacity:0;}
 <div class="hud">
   <!-- TOP SCOREBUG -->
   <div id="bug" class="bug">
+    <div id="otbar" class="otbar"><img id="ot-logo" alt=""><span id="ot-lbl" class="ot-lbl">OVERTIME</span></div>
     <div id="hdr" class="hdr"><div id="hd-text" class="hd-text"><span id="hd-event" class="hd-event"></span><span id="hd-round" class="hd-round"></span></div></div>
     <div class="row">
       <div class="pwrap blue"><div class="plate blue"><span id="pn-blue" class="pname">BLUE</span></div></div>
@@ -288,83 +518,85 @@ body.on-board .hud{opacity:0;}
           <div id="clock" class="clock num"><span id="timer">5:00</span></div>
           <div id="score-orange" class="sc orange num">0</div>
         </div>
-        <div class="pips"><div id="pips-blue" class="pipset blue"></div><i class="pip-mid"></i><div id="pips-orange" class="pipset orange"></div></div>
+        <div class="pips"><div id="pips-blue" class="pipset blue"></div><i id="pip-mid" class="pip-mid"></i><div id="pips-orange" class="pipset orange"></div></div>
       </div>
       <div class="lcol orange"><div class="ltile"><img id="logo-orange" src="/assets/rl.png" alt=""></div><div id="tag-orange" class="ltag">ORNG</div></div>
       <div class="pwrap orange"><div class="plate orange"><span id="pn-orange" class="pname">ORANGE</span></div></div>
     </div>
+    <div id="tsp" class="tsp hidden"><span id="tsp-game" class="tsp-game"></span><span id="tsp-lbl" class="tsp-lbl">OVERTIME</span><img id="tsp-logo" alt=""></div>
   </div>
 
   <div id="corner-blue" class="corner blue"></div>
   <div id="corner-orange" class="corner orange"></div>
-  <div id="ptab" class="ptab panel out"></div>
+  <div id="ptab" class="ptab out">
+    <div id="ptab-cube" class="ptab-cube">
+      <div class="ptab-face pf-front">
+        <div class="ptab-hd"><span class="ptab-lbl">Partners</span></div>
+        <div class="ptab-slot"><div id="ptab-logo-a" class="ptab-logo"></div></div>
+      </div>
+      <div class="ptab-face pf-top">
+        <div class="ptab-hd"><span class="ptab-lbl">Partners</span></div>
+        <div class="ptab-slot"><div id="ptab-logo-b" class="ptab-logo"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- optional stats sidebar (series stats / league standings), RLCS-style pop-in on the right -->
+  <div id="wsb" class="wsb off">
+    <div class="wsb-hd"><div id="wsb-title" class="wsb-title">TOTAL GOALS</div><div id="wsb-sub" class="wsb-sub">ALL-TIME WORLDS</div></div>
+    <div id="wsb-rows" class="wsb-rows"></div>
+  </div>
 
   <div id="pl" class="pl off">
     <div class="cam"></div>
     <div class="plrow">
       <div id="pl-name" class="plname"></div>
       <div class="plstats panel">
-        <div><b id="st-goals" class="num">0</b><span>Goals</span></div>
-        <div><b id="st-shots" class="num">0</b><span>Shots</span></div>
-        <div><b id="st-assists" class="num">0</b><span>Assists</span></div>
-        <div><b id="st-saves" class="num">0</b><span>Saves</span></div>
-        <div><b id="st-demos" class="num">0</b><span>Demos</span></div>
+        <div><i class="sic goals"></i><b id="st-goals" class="num">0</b><span>Goals</span></div>
+        <div><i class="sic shots"></i><b id="st-shots" class="num">0</b><span>Shots</span></div>
+        <div><i class="sic assists"></i><b id="st-assists" class="num">0</b><span>Assists</span></div>
+        <div><i class="sic saves"></i><b id="st-saves" class="num">0</b><span>Saves</span></div>
+        <div><i class="sic demos"></i><b id="st-demos" class="num">0</b><span>Demos</span></div>
       </div>
+      <div id="tklane" class="tklane"><iframe id="tkf" title="Ticker" scrolling="no"></iframe></div>
     </div>
   </div>
 
+  <!-- Boost dial. The title-sponsor lockup is a CHILD of it so the two are physically joined: it
+       rolls out leftwards from behind the disc and always tracks the dial's position. -->
   <div id="dial" class="dial off">
+    <div id="pl-spon" class="pl-spon panel"><span id="pl-spon-lbl">Presented by</span><img id="pl-spon-logo" alt=""></div>
     <svg viewBox="0 0 180 180">
       <circle class="disc" cx="90" cy="90" r="86"/>
       <circle class="track" cx="90" cy="90" r="70" pathLength="100" stroke-dasharray="75 100" transform="rotate(135 90 90)"/>
       <circle id="dial-arc" class="arc" cx="90" cy="90" r="70" pathLength="100" stroke-dasharray="0 100" transform="rotate(135 90 90)"/>
     </svg>
+    <div id="dial-wm" class="dial-wm"></div>
     <div id="dial-val" class="dv num">0</div>
     <div class="dl">BOOST</div>
   </div>
 
   <div class="rband">
-    <div class="wash"></div><div class="edge"></div>
-    <div class="rtag l"><i></i><span class="rlbl">REPLAY</span></div>
-    <div class="rtag r"><span class="rlbl">REPLAY</span><i></i></div>
-    <div class="rchip panel">
-      <div class="rs"><img id="r-logo" src="/assets/rl.png" alt=""><span id="r-team">TEAM</span></div>
-      <div id="r-assist" class="ras"></div>
-      <div class="rsp"><b id="r-speed" class="num">0</b><span id="r-unit">MPH</span></div>
+    <div class="wash"></div>
+    <div class="rslab">
+      <div class="rs-crest"><img id="r-logo" src="/assets/rl.png" alt=""></div>
+      <div class="rs-who">
+        <span class="rs-tag"><i></i><span class="rlbl">REPLAY</span><em>·</em><span id="r-kind">GOAL</span></span>
+        <span id="r-team" class="rs-name">TEAM</span>
+        <span id="r-assist" class="rs-sub"></span>
+      </div>
+      <div id="r-speed-cell" class="rs-speed"><b id="r-speed" class="num">0</b><span id="r-unit">MPH</span></div>
+      <div id="r-spon" class="rs-spon hidden"><span id="r-spon-lbl">POWERED BY</span><img id="r-spon-logo" alt=""></div>
     </div>
+    <div class="edge"></div>
+  </div>
   </div>
 </div>
 
 <!-- POST-GAME SCOREBOARD -->
-<div id="board" class="board">
-  <div class="bd-bg"></div>
-  <div id="bd-img" class="bd-img hidden"></div>
-  <div class="bd">
-    <div class="bd-top">
-      <img id="bd-brand" class="hidden" alt="">
-      <div class="bd-title"><span id="bd-ev" class="bd-ev"></span><span id="bd-rd" class="bd-rd"></span></div>
-    </div>
-    <div class="bd-hero">
-      <div id="bd-a" class="bd-team a"><img id="bd-logo-a" src="/assets/rl.png" alt=""><div class="bd-tn"><span id="bd-name-a" class="bd-name">BLUE</span><span class="bd-chip">WINNER</span></div></div>
-      <div class="bd-mid">
-        <div id="bd-num-a" class="bd-num num">0</div>
-        <div class="bd-fin"><b>FINAL</b><span id="bd-series"></span></div>
-        <div id="bd-num-b" class="bd-num num">0</div>
-      </div>
-      <div id="bd-b" class="bd-team b"><img id="bd-logo-b" src="/assets/rl.png" alt=""><div class="bd-tn"><span id="bd-name-b" class="bd-name">ORANGE</span><span class="bd-chip">WINNER</span></div></div>
-    </div>
-    <div id="bd-stats" class="bd-stats"><div id="tbl-a" class="tbl a"></div><div id="tbl-b" class="tbl b"></div></div>
-    <div id="bd-rail" class="bd-rail"></div>
-  </div>
-</div>
+<div id="board" class="board"><iframe id="bd-frame" title="Post-game scoreboard" scrolling="no"></iframe></div>
 
-<!-- PANEL SWEEP -->
-<div id="sweep" class="sweep">
-  <i class="s3"></i><i class="s2"></i><i class="s1"></i>
-  <div id="sw-skin" class="sw-skin"></div>
-  <div class="sw-lock"><img id="sw-logo" class="hidden" alt=""><span id="sw-text"></span></div>
-</div>
-
+<script src="/replay-fx.js"></script>
 <script>
 'use strict';
 const el = id => document.getElementById(id);
@@ -395,7 +627,84 @@ function renderPips(id, wins, bestOf){
   const c = el(id); if (!c) return;
   const need = Math.max(1, Math.ceil((bestOf || 5) / 2));
   let h = ''; for (let i = 0; i < need; i++) h += '<i class="pip' + (i < (wins || 0) ? ' on' : '') + '"></i>';
-  if (c.innerHTML !== h) c.innerHTML = h;
+  if (c.innerHTML === h) return;
+  c.innerHTML = h;
+  // the centre mark is the SAME box as a pip (outlined, not filled), so match its width to one —
+  // pips are flex-sized, so it changes with the best-of count
+  const p0 = c.querySelector('.pip'), mid = el('pip-mid');
+  if (p0 && mid) requestAnimationFrame(() => {
+    const w = Math.round(p0.getBoundingClientRect().width);
+    if (w > 0) mid.style.width = w + 'px';
+  });
+}
+/* Boost dial — interpolate toward the target every frame so the arc + number fill/drain smoothly,
+   independent of how choppily the RL feed delivers boost updates (no CSS transition fighting it). */
+let _boostShown = 0, _boostTarget = 0, _boostRAF = null;
+function setBoost(v){ _boostTarget = clamp(v, 0, 100); if (_boostRAF == null) _boostRAF = requestAnimationFrame(tickBoost); }
+function tickBoost(){
+  const diff = _boostTarget - _boostShown;
+  if (Math.abs(diff) < 0.4) { _boostShown = _boostTarget; _boostRAF = null; }
+  else { _boostShown += diff * 0.28; _boostRAF = requestAnimationFrame(tickBoost); }
+  const dv = el('dial-val'), da = el('dial-arc');
+  if (dv) dv.textContent = Math.round(_boostShown);
+  if (da) da.setAttribute('stroke-dasharray', (_boostShown * 0.75).toFixed(2) + ' 100');
+}
+
+/* ── sponsors ───────────────────────────────────────────────────────────────── */
+const spots = () => ((currentState.brand || {}).spots) || {};
+const titleSponsor = () => spots().title || null;
+// Set a sponsor logo; a DARK logo gets a light plate (class logo-dark) so it reads on the dark panels.
+// A cross-origin image taints the canvas -> treat as light and leave it on the dark panel.
+function setSponsorImg(img, src){
+  if (!img) return;
+  if (!src) { img.removeAttribute('src'); img.classList.remove('logo-dark'); return; }
+  if (img.getAttribute('src') === src) return;
+  img.onload = () => {
+    let dark = false;
+    try {
+      const c = document.createElement('canvas'); c.width = c.height = 32;
+      const x = c.getContext('2d'); x.drawImage(img, 0, 0, 32, 32);
+      const d = x.getImageData(0, 0, 32, 32).data; let sum = 0, n = 0;
+      for (let k = 0; k < d.length; k += 4) { if (d[k+3] < 40) continue; sum += (0.2126*d[k] + 0.7152*d[k+1] + 0.0722*d[k+2]) / 255; n++; }
+      dark = n > 0 && sum / n < 0.38;
+    } catch (e) {}
+    img.classList.toggle('logo-dark', dark);
+  };
+  img.src = src;
+}
+function renderSponsors(data, isOT){
+  // title tab under the bug (always the title sponsor + GAME X OF X); OVERTIME now lives in a
+  // banner ABOVE the score, not here
+  const ot = data.overtime || {}, tsp = el('tsp');
+  root.style.setProperty('--ot-bg', ot.bg || '#d8212c'); root.style.setProperty('--ot-color', ot.color || '#ffffff');
+  tsp.classList.remove('ot');
+  setSponsorImg(el('tsp-logo'), titleSponsor()); el('tsp-logo').classList.toggle('hidden', !titleSponsor());
+  // always visible now — the tab carries GAME X OF X even with no sponsor
+  tsp.classList.remove('hidden');
+  // OVERTIME top banner — sponsor logo (OT slot, else title sponsor) + label, reference-style
+  const otb = el('otbar'), otLogo = ot.logo || titleSponsor();
+  if (otb) {
+    otb.classList.toggle('show', isOT);
+    setText('ot-lbl', (ot.label || 'OVERTIME').toUpperCase());
+    setSponsorImg(el('ot-logo'), otLogo); el('ot-logo').classList.toggle('hidden', !otLogo);
+  }
+  // replay band sponsor = the replay slot, else the title sponsor
+  const rLogo = (data.replay || {}).logo || titleSponsor();
+  setSponsorImg(el('r-spon-logo'), rLogo); el('r-spon').classList.toggle('hidden', !rLogo);
+  setSponsorImg(el('pl-spon-logo'), titleSponsor());
+  // "Presented by" wording — brand-kit label → post-game ad label → default (matches the other overlays)
+  const _pbLbl = (data.brand && data.brand.presentedLabel) || (data.scoreboardAd && data.scoreboardAd.label) || 'PRESENTED BY';
+  setText('pl-spon-lbl', _pbLbl); setText('r-spon-lbl', _pbLbl);
+  if (!data.rlSponsorRoll || !titleSponsor()) el('pl-spon').classList.remove('out');
+}
+// Title-sponsor roll-out: same producer toggle as the React HUD (Sponsors > Title sponsor roll-out).
+const SPON_EVERY_MS = 32000, SPON_HOLD_MS = 10000;
+let _sponHide = null;
+function rollSponsorOut(){
+  if (!currentState.rlSponsorRoll || !titleSponsor()) return;
+  if (mode === 'replay' || boardOn || el('pl').classList.contains('off')) return;
+  el('pl-spon').classList.add('out');
+  clearTimeout(_sponHide); _sponHide = setTimeout(() => el('pl-spon').classList.remove('out'), SPON_HOLD_MS);
 }
 
 /* ── theme: team colours (server-resolved colour mode) + brand accent + font ──── */
@@ -405,31 +714,55 @@ function applyTheme(data){
   if (t.orange && t.orange.color) { ORANGE = t.orange.color; root.style.setProperty('--orange', ORANGE); }
   const brand = data.brand || {};
   ACCENT = brand.color || BLUE; root.style.setProperty('--accent', ACCENT);
+  // Settings "Overlay Font" > brand-kit font, applied exactly as rl-hud.html applies it.
+  // BUG this was causing "letters bigger than others": --font is 'var(--main-font,Montserrat),
+  // Montserrat,Segoe UI,sans-serif' — setting --main-font to '<font>, sans-serif' put the GENERIC
+  // sans-serif ahead of the bundled Montserrat fallback, so any glyph the custom font (e.g. an
+  // unbundled/partially-installed "Industry") doesn't cover jumped straight to the OS default font
+  // instead of Montserrat — a visibly different size/design mixed into the same word. Setting only
+  // the bare family name here lets --font's own chain (custom → Montserrat → Segoe UI → sans-serif)
+  // do the fallback in the right order.
   const font = data.fontFamily || brand.font;
-  if (font) root.style.setProperty('--main-font', "'" + font + "'"); else root.style.removeProperty('--main-font');
+  if (font) root.style.setProperty('--main-font', "'" + font + "'");
+  else root.style.removeProperty('--main-font');
 }
 
-/* ── player-card event icons — flash on the meaningful events (shots fire too often to pop) ──── */
-const EVT_KEYS = ['goals', 'assists', 'saves', 'demos'];
-const EVT_ICON = {
-  goals:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.6"/><path d="M12 6.4l1.7 3.1 3.4.5-2.5 2.4.6 3.4L12 15.7l-3.2 1.6.6-3.4-2.5-2.4 3.4-.5z" fill="currentColor" stroke="none"/></svg>',
-  assists:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 10.5h9V6l7 6-7 6v-4.5H3z"/></svg>',
-  saves:  '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l8 3v6c0 5-3.5 8.9-8 11-4.5-2.1-8-6-8-11V5z"/></svg>',
-  shots:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="6.6"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><path d="M12 1.6v4M12 18.4v4M1.6 12h4M18.4 12h4"/></svg>',
-  demos:  '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1.6l2.3 5.4 5.7-1.3-3.5 4.6L22 13l-6.2.6 1.4 5.9-5.2-3.4-5.2 3.4L8.2 13.6 2 13l5.5-2.7L4 5.7l5.7 1.3z"/></svg>'
-};
-let _pstat = {};
+/* ── player-card event icons — flash a game icon on the card when a stat lands (goal/assist/save/shot/demo) ── */
+const EVT_KEYS = ['goals', 'assists', 'saves', 'shots', 'demos'];
+let _pstat = {}, _pdemoed = {};
+/* Show "<attacker> 💣 <victim>" across the attacker's card, each name on its own team's colour. */
+function fireDemoCallout(attacker, victim, players){
+  const card = [...document.querySelectorAll('.bcard')].find(c => c.children[0] && c.children[0].textContent === attacker);
+  if (!card) return;
+  const dc = card.querySelector('.dcall'); if (!dc) return;
+  const pa = players.find(p => p.name === attacker), pv = players.find(p => p.name === victim);
+  dc.style.setProperty('--dc-a', teamOf(pa) === 1 ? ORANGE : BLUE);
+  dc.style.setProperty('--dc-v', teamOf(pv) === 1 ? ORANGE : BLUE);
+  dc.children[0].textContent = attacker;
+  dc.children[2].textContent = victim;
+  dc.className = 'dcall'; void dc.offsetWidth; dc.className = 'dcall show';
+  clearTimeout(dc._t); dc._t = setTimeout(() => {
+    dc.classList.add('out');
+    setTimeout(() => { dc.className = 'dcall'; }, 320);
+  }, 2000);
+}
 function fireBcardIcon(card, k){
-  const fx = card.children[3]; if (!fx) return;
-  fx.innerHTML = EVT_ICON[k] || '';
+  const ring = card.querySelector('.bfx-ring'), fx = card.querySelector('.bfx');
+  if (!fx) return;
   fx.className = 'bfx'; void fx.offsetWidth; fx.className = 'bfx show ' + k;
-  clearTimeout(fx._t); fx._t = setTimeout(() => { fx.className = 'bfx'; }, 1650);
+  if (ring) { ring.className = 'bfx-ring'; void ring.offsetWidth; ring.className = 'bfx-ring show ' + k; }
+  card.classList.add('evt');
+  clearTimeout(fx._t); fx._t = setTimeout(() => {
+    fx.className = 'bfx'; if (ring) ring.className = 'bfx-ring'; card.classList.remove('evt');
+  }, k === 'demos' ? 1750 : 1600);
 }
 
 /* ── HUD render ───────────────────────────────────────────────────────────────── */
 let _lastScore = { blue: null, orange: null }, _plateSig = '';
 function render(data){
   applyTheme(data);
+  ReplayFX.setState(data);   // the engine reads the replay slot (style/logos/skin/label) from here
+  const tickerOn = renderTicker(data);
   const teams = data.teams || {}, game = data.game || {}, players = data.players || [];
   const tb = teams.blue || {}, to = teams.orange || {};
 
@@ -439,6 +772,7 @@ function render(data){
     _lastScore[side] = v; setText('score-' + side, v);
   });
   const isOT = !!game.isOT;
+  kickoffHoldTick(game);   // release the post-replay hold on the first real clock tick
   el('clock').classList.toggle('ot', isOT);
   // Prefer the LIVE per-tick game clock. The top-level formattedTime is only set on full_state, so
   // using it first froze the timer — it stayed truthy across every state_update tick.
@@ -452,17 +786,25 @@ function render(data){
 
   // name plates — TEAM names only
   const sig = teamName(tb, 0) + '|' + teamName(to, 1);
-  if (sig !== _plateSig) { _plateSig = sig; setText('pn-blue', teamName(tb, 0)); setText('pn-orange', teamName(to, 1)); fit('pn-blue', 38, 20); fit('pn-orange', 38, 20); }
+  if (sig !== _plateSig) {
+    _plateSig = sig;
+    setText('pn-blue', teamName(tb, 0)); setText('pn-orange', teamName(to, 1));
+    fit('pn-blue', 38, 20); fit('pn-orange', 38, 20);
+    // Match BOTH team names to the smaller fitted size so the two plates read uniform (not one big, one small).
+    const _m = Math.min(parseFloat(el('pn-blue').style.fontSize) || 38, parseFloat(el('pn-orange').style.fontSize) || 38) + 'px';
+    el('pn-blue').style.fontSize = _m; el('pn-orange').style.fontSize = _m;
+  }
 
-  // header: the always-visible slot now leads with the EVENT TITLE (falling back to round/game when
-  // no event is set); the names-mode reveal carries GAME X OF X.
+  // header: EVENT TITLE (+ round). GAME X OF X moved to the bottom next to the title sponsor, so the
+  // header no longer needs the animated names-mode reveal (that expand/contract read as jarring).
   const gameLine = data.gameLabel ? String(data.gameLabel).trim() : ('GAME ' + (game.number ?? 1) + ' OF ' + (data.bestOf || 5));
   const round = data.roundLabel ? String(data.roundLabel).trim() : '';
   const ev = String(data.eventName || '').trim();
-  const mainParts = ev ? (round ? [ev, round] : [ev]) : (round ? [round, gameLine] : [gameLine]);
+  const mainParts = ev ? (round ? [ev, round] : [ev]) : (round ? [round] : []);
   fillSep('hd-round', mainParts, false);
-  // reveal slot (kickoff/replay) — show the game line, unless it is already the main slot's fallback
-  fillSep('hd-event', ev ? [gameLine] : [], true);
+  fillSep('hd-event', [], true);   // no reveal text — GAME X OF X now lives at the bottom
+  el('hdr').classList.toggle('hd-empty', !mainParts.length);   // no event/round → hide the empty bar
+  setText('tsp-game', gameLine);   // GAME X OF X beside the title sponsor
   sizeHeader();
 
   // boost cards
@@ -471,35 +813,83 @@ function render(data){
     while (wrap.children.length > list.length) wrap.lastChild.remove();
     while (wrap.children.length < list.length) {
       const c = document.createElement('div'); c.className = 'bcard panel';
-      c.innerHTML = '<span class="bn"></span><span class="bv num"></span><i class="bbar"></i><span class="bfx"></span>'; wrap.appendChild(c);
+      c.innerHTML = '<span class="bn"></span><span class="bv num"></span><i class="bbar"></i><i class="bfx-ring"></i><span class="bfx"></span>'
+        + '<div class="dcall"><span class="dc-a"></span><i class="dc-ic"></i><span class="dc-v"></span></div>';
+      wrap.appendChild(c);
     }
     list.forEach((p, i) => {
-      const c = wrap.children[i], b = p.boost == null ? null : clamp(Math.round(p.boost), 0, 100);
+      // boost defaults to 0 (never blank) so a card at zero still shows "0" + an empty track
+      const c = wrap.children[i], b = clamp(Math.round(p.boost || 0), 0, 100);
       c.classList.toggle('spec', p.name === data.spectatedPlayer);
       c.classList.toggle('demo', !!p.isDemolished);
       if (c.children[0].textContent !== p.name) c.children[0].textContent = p.name;
-      c.children[1].textContent = b == null ? '' : b;
-      c.children[2].style.width = (b || 0) + '%';
+      c.children[1].textContent = b;
+      c.children[2].style.width = b + '%';
       // flash an event icon on a stat increment (goal/assist/save/shot/demo)
       const prev = _pstat[p.name];
-      if (prev) EVT_KEYS.forEach(k => { if ((p[k] || 0) > (prev[k] || 0)) fireBcardIcon(c, k); });
+      // demos get the pairing callout instead of the icon pop (fired off the VICTIM, who names the
+      // attacker); every other stat still pops its icon over the boost value
+      if (prev) EVT_KEYS.forEach(k => { if (k !== 'demos' && (p[k] || 0) > (prev[k] || 0)) fireBcardIcon(c, k); });
       _pstat[p.name] = { goals: p.goals || 0, assists: p.assists || 0, saves: p.saves || 0, shots: p.shots || 0, demos: p.demos || 0 };
     });
   });
-  el('ptab').style.top = (20 + Math.max(el('corner-blue').children.length, 1) * 42 + 16) + 'px';
+  // demo pairing: a player flipping to demolished carries who did it
+  players.forEach(v => {
+    const was = _pdemoed[v.name];
+    if (v.isDemolished && !was && v.attacker) fireDemoCallout(v.attacker, v.name, players);
+    _pdemoed[v.name] = !!v.isDemolished;
+  });
+  el('ptab').style.top = (20 + Math.max(el('corner-blue').children.length, 1) * 45 + 16) + 'px';
 
   // spectated player
   const sp = players.find(p => p.name === data.spectatedPlayer);
-  el('pl').classList.toggle('off', !sp); el('dial').classList.toggle('off', !sp);
+  kickoffHoldSpectate(sp);   // play is live AND we're on a player → the furniture may come back
+  // the bottom bar carries the ticker too, so it stays up for a ticker even with nobody spectated
+  el('pl').classList.toggle('off', !sp && !tickerOn);
+  document.body.classList.toggle('noplayer', !sp);
+  el('dial').classList.toggle('off', !sp);
   if (sp) {
     root.style.setProperty('--spec', teamOf(sp) === 1 ? ORANGE : BLUE);
     setText('pl-name', sp.name); fit('pl-name', 22, 16);
-    ['goals','shots','assists','saves','demos'].forEach(k => setText('st-' + k, sp[k] || 0));
-    const b = clamp(Math.round(sp.boost || 0), 0, 100);
-    setText('dial-val', b); el('dial-arc').setAttribute('stroke-dasharray', (b * 0.75).toFixed(2) + ' 100');
+    ['goals','shots','assists','saves','demos'].forEach(k => {
+      const e = el('st-' + k), v = sp[k] || 0;
+      if (e && e.textContent !== String(v)) { e.textContent = v; e.classList.remove('tick'); void e.offsetWidth; e.classList.add('tick'); }
+    });
+    setBoost(clamp(Number(sp.boost) || 0, 0, 100));
+    // faint brand-logo watermark behind the boost number
+    const _bl = (data.brand && data.brand.logo) || '';
+    const wm = el('dial-wm'); if (wm) wm.style.backgroundImage = _bl ? 'url("' + _bl + '")' : '';
   }
   renderPartners(data.brand);
+  renderSponsors(data, isOT);
+  renderSidebar(data);
   document.querySelectorAll('.rlbl').forEach(n => { n.textContent = ((data.replay || {}).label || 'REPLAY').toUpperCase(); });
+}
+// optional stats sidebar — driven entirely by state.worldsSidebar (producer toggle + rows)
+let _wsbSig = '';
+function renderSidebar(data){
+  const box = el('wsb'); if (!box) return;
+  const sb = data.worldsSidebar || {};
+  const rows = (Array.isArray(sb.rows) ? sb.rows : []).filter(r => r && (r.name != null && String(r.name).trim())).slice(0, 10);
+  const on = !!sb.visible && rows.length > 0;
+  box.classList.toggle('off', !on);
+  if (!on) return;
+  // clear it of the top boost cards on the orange side
+  box.style.top = (20 + Math.max(el('corner-orange').children.length, 1) * 45 + 16) + 'px';
+  setText('wsb-title', (sb.title || '').toUpperCase());
+  const sub = el('wsb-sub'); setText('wsb-sub', (sb.subtitle || '').toUpperCase()); sub.style.display = sb.subtitle ? '' : 'none';
+  const sig = JSON.stringify(rows.map(r => [r.rank, r.name, r.value, r.logo || '']));
+  if (sig === _wsbSig) return; _wsbSig = sig;
+  const wrap = el('wsb-rows'); wrap.innerHTML = '';
+  rows.forEach((r, i) => {
+    const row = document.createElement('div'); row.className = 'wsb-row';
+    const rk = document.createElement('span'); rk.className = 'wsb-rk'; rk.textContent = (r.rank != null ? r.rank : i + 1);
+    row.appendChild(rk);
+    if (r.logo) { const lg = document.createElement('img'); lg.className = 'wsb-lg'; lg.src = r.logo; lg.alt = ''; row.appendChild(lg); }
+    const nm = document.createElement('span'); nm.className = 'wsb-nm'; nm.textContent = r.name; row.appendChild(nm);
+    const vl = document.createElement('span'); vl.className = 'wsb-vl'; vl.textContent = (r.value != null ? r.value : ''); row.appendChild(vl);
+    wrap.appendChild(row);
+  });
 }
 function fillSep(id, parts, trailing){
   const e = el(id), sig = parts.join('') + (trailing ? '|t' : '');
@@ -508,35 +898,163 @@ function fillSep(id, parts, trailing){
   if (trailing && parts.length) e.appendChild(sepEl());
 }
 function sepEl(){ const s = document.createElement('span'); s.className = 'sep'; s.textContent = '|'; return s; }
-function sizeHeader(){ const he = el('hd-event'); he.style.maxWidth = document.body.classList.contains('names') ? he.scrollWidth + 'px' : '0px'; fitHeader(); }
-// Shrink the header text so a long event title never clips against the scorebug width.
+function sizeHeader(){
+  fitHeader();   // stable font sizing FIRST (measured at natural width), then set the reveal width
+  const he = el('hd-event');
+  he.style.maxWidth = document.body.classList.contains('names') ? he.scrollWidth + 'px' : '0px';
+}
+// Shrink the header text so a long event title never clips — but only recompute when the text/mode
+// actually changes (measuring at natural width), so the font never resizes mid reveal animation.
+let _hdSig = '';
+// Fitting order matters for how the title READS. Shrinking the type was doing all the work, which
+// left long titles at ~10px with 0.2em tracking — thin, and the wide gaps made the spacing look
+// uneven. So: widen the bar a little past the score row first (it stays centred), then tighten the
+// TRACKING, and only then step the size down — in WHOLE pixels, because half-pixel sizes rasterise
+// unevenly at this scale (that was the "not even across the text").
+const HD_MAX_BLEED = 140; // px each side, used ONLY when the type is already at its floor (a long title + round used to clip at both ends)
+let _liveRowW = 0;        // score-row width in LIVE mode (names mode widens the row, so it can't be measured then)
 function fitHeader(){
-  const hdr = el('hdr'), txt = el('hd-text'); if (!hdr || !txt) return;
-  let s = 13; txt.style.fontSize = s + 'px';
-  let g = 0; while (hdr.scrollWidth > hdr.clientWidth + 1 && s > 8 && g++ < 24) { s -= 0.5; txt.style.fontSize = s + 'px'; }
+  const hdr = el('hdr'), txt = el('hd-text'), he = el('hd-event'); if (!hdr || !txt || !he) return;
+  const sig = txt.textContent;   // fit only when the title changes — never on mode toggle (keeps size stable across expand/contract)
+  const namesMode = document.body.classList.contains('names');
+  if (namesMode && !_liveRowW) return;   // no live width known yet: retry (sig unset) when the mode returns to live
+  if (sig === _hdSig) return; _hdSig = sig;
+  const prev = he.style.maxWidth; he.style.maxWidth = 'none';   // measure the full text, not the animating clip
+  hdr.style.width = '';
+  const liveW = namesMode ? 0 : ((el('bug').querySelector('.row') || {}).offsetWidth || 0);
+  if (liveW) _liveRowW = liveW;
+  const rowW = namesMode ? _liveRowW : liveW;
+  let size = 13, track = 3;   // px, not em — see the tracking note at the top of the sheet
+  txt.style.fontSize = size + 'px'; txt.style.letterSpacing = track + 'px';
+  // An EVEN bar width keeps the translateX(-50%) centring on whole pixels (a half-pixel offset
+  // smears small tracked caps). The bar matches the row; the type does the fitting.
+  const want = Math.max(rowW, 2);
+  hdr.style.width = (Math.ceil(want / 2) * 2) + 'px';
+  const over = () => hdr.scrollWidth - hdr.clientWidth;
+  // 1 · tighten the tracking, in WHOLE pixels
+  let g = 0;
+  while (over() > 1 && track > 1 && g++ < 20) { track -= 1; txt.style.letterSpacing = track + 'px'; }
+  // 2 · then whole-pixel size steps
+  while (over() > 1 && size > 10 && g++ < 30) { size -= 1; txt.style.fontSize = size + 'px'; }
+  // 3 · still too long at the floor → widen the bar (centred) up to the bleed cap rather than clip the text
+  if (over() > 1 && HD_MAX_BLEED > 0) {
+    const extra = Math.min(over() + 2, HD_MAX_BLEED * 2);
+    hdr.style.width = (Math.ceil((want + extra) / 2) * 2) + 'px';
+  }
+  // the trailing letter-space hangs off the last glyph; pad the front by the same to re-centre
+  txt.style.paddingLeft = track + 'px';
+  he.style.maxWidth = prev;
+}
+
+/* ── ticker (the existing ticker scene, framed along the bottom) ──────────────── */
+// Mirrors ticker.html's own "is there anything to show" test so the HUD only lifts off the bottom
+// when the bar will actually be there: producer toggle on, and content for the selected source.
+function tickerHasContent(data){
+  const t = data.ticker || {};
+  if (!t.visible) return false;
+  if (spots().ticker || t.sponsor) return true;
+  const src = t.source || 'manual';
+  // ticker.html only renders live/done cards for the start.gg / NXGEN feeds, and derives competition rows from compFeed
+  const liveOrDone = (a) => (a || []).some((m) => m && (m.status === 'live' || m.status === 'done'));
+  if (src === 'startgg') return liveOrDone((data.startgg || {}).matchFeed);
+  if (src === 'nxgen')   return liveOrDone((data.nxgen || {}).matchFeed);
+  if (src === 'competition') { const cf = data.compFeed; return !!(cf && ((cf.live || []).length || (cf.upcoming || []).length || (cf.results || []).length)); }
+  if (src === 'br') return !!((t.feed || []).length || (t.messages || []).length);
+  return !!(t.messages || []).filter(Boolean).length;
+}
+// producers can drop the ticker on this source alone with the Worlds overlay toggle (Settings ▸
+// Games ▸ Rocket League ▸ Sponsors ▸ Worlds overlay), state.worldsTicker; ?ticker=off (or ?noticker)
+// on the URL still works too, for pinning it off on one specific browser source.
+const TICKER_OFF = /[?&](ticker=(0|off|false)|noticker)\b/i.test(location.search);
+function renderTicker(data){
+  const on = !TICKER_OFF && data.worldsTicker !== false && tickerHasContent(data), f = el('tkf');
+  if (on && f && !f.getAttribute('src')) f.src = '/ticker.html';   // loads on first use, then stays
+  document.body.classList.toggle('has-ticker', on);
+  return on;
 }
 
 /* ── partner tab ──────────────────────────────────────────────────────────────── */
-let _pSig = '', _pIdx = 0, _pTimer = null, _pList = [];
+let _pSig = '', _pIdx = 0, _pTimer = null, _pList = [], _pRolling = false;
 function renderPartners(brand){
   const list = ((brand && (brand.railSponsors || brand.sponsors)) || []).filter(s => s && (s.logo || s.name));
-  const sig = list.map(s => (s.name || '') + ':' + (s.logo || '').length).join('|');
+  const sig = ((brand && brand.sponsorLabel) || '') + '#' + list.map(s => (s.name || '') + ':' + (s.logo || '').length).join('|');
   if (sig === _pSig) return;
-  _pSig = sig; _pList = list; _pIdx = 0; clearInterval(_pTimer);
-  const tab = el('ptab');
+  _pSig = sig; _pList = list; _pIdx = 0; clearInterval(_pTimer); _pRolling = false;
+  const tab = el('ptab'), cube = el('ptab-cube');
+  const label = (brand && brand.sponsorLabel != null) ? brand.sponsorLabel : 'Partners';
+  document.querySelectorAll('#ptab .ptab-lbl').forEach(n => n.textContent = label);
   if (!list.length) { tab.classList.add('out'); return; }
-  showPartner();
-  if (list.length > 1) _pTimer = setInterval(() => {
-    tab.classList.add('out');
-    setTimeout(() => { _pIdx = (_pIdx + 1) % _pList.length; showPartner(); }, 550);
-  }, 9000);
-}
-function showPartner(){
-  const s = _pList[_pIdx], tab = el('ptab'); if (!s) return;
-  tab.innerHTML = '';
-  if (s.logo) { const i = document.createElement('img'); i.src = s.logo; i.alt = s.name || ''; tab.appendChild(i); }
-  else { const t = document.createElement('span'); t.textContent = s.name; tab.appendChild(t); }
+  document.querySelectorAll('#ptab .ptab-hd').forEach(n => n.classList.toggle('empty', !label && list.length <= 1));
+  // reset the cube to its resting face and mount the first two sponsors (front + the one on the top face)
+  cube.style.transition = 'none'; cube.style.transform = 'translateZ(-31px) rotateX(0deg)';
+  fillLogo('ptab-logo-a', list[0]);
+  fillLogo('ptab-logo-b', list[1 % list.length]);
   requestAnimationFrame(() => tab.classList.remove('out'));
+  // hold each sponsor a good while — the turn is the accent, not the main event
+  if (list.length > 1) _pTimer = setInterval(rollPartner, 14000);
+}
+const P_EASE = 'cubic-bezier(.34,.02,.2,1)';
+// Advance the CUBE a real quarter-turn: the front box rotates over its top edge and the top face
+// (already carrying the next sponsor) turns down into place, with visible depth — not a flat flip.
+// When it lands, the front face is re-synced and the top face is loaded with the following sponsor.
+function rollPartner(){
+  const cube = el('ptab-cube'); if (!cube || _pRolling || _pList.length < 2) return;
+  _pRolling = true;
+  cube.style.transition = 'transform .8s ' + P_EASE;
+  cube.style.transform = 'translateZ(-31px) rotateX(-90deg)';   // top face tumbles down to front
+  setTimeout(() => {
+    _pIdx = (_pIdx + 1) % _pList.length;
+    // the top face is now at front; copy it onto the front face and snap the cube back to rest so
+    // the next turn can reuse the same two faces (content is identical, so the snap is invisible)
+    fillLogo('ptab-logo-a', _pList[_pIdx]);
+    cube.style.transition = 'none'; cube.style.transform = 'translateZ(-31px) rotateX(0deg)'; void cube.offsetWidth;
+    fillLogo('ptab-logo-b', _pList[(_pIdx + 1) % _pList.length]);   // prime the top face for next time
+    _pRolling = false;
+  }, 800);
+}
+function fillLogo(id, s){
+  const box = el(id); if (!box) return;
+  box.innerHTML = '';
+  if (!s) return;
+  if (s.logo) { const i = document.createElement('img'); i.src = s.logo; i.alt = s.name || ''; box.appendChild(i); }
+  else { const t = document.createElement('span'); t.textContent = s.name; box.appendChild(t); }
+}
+
+/* ── KICKOFF HOLD ─────────────────────────────────────────────────────────────────
+   Entered when a replay ends and at the kickoff countdown. Two things must BOTH be true to release:
+     1. play has started — the match clock has ticked down at least once, and
+     2. the camera is on a PLAYER — RL holds the ball/centre cam through the countdown and the first
+        moment of play, and the cards/boost belong to a player, so they must not appear over it.
+   Without (2) the furniture flashed up while we were still on the ball cam at kickoff. A long safety
+   still exists so the HUD can never stay hidden if a player is never spectated. */
+const KICK_SAFETY_MS = 15000;
+let kickHold = false, kickHoldAt = 0, _prevGameTime = null, _kickSafety = null, _playLive = false;
+function holdForKickoff(){
+  if (kickHold) return;
+  kickHold = true; kickHoldAt = Date.now(); _prevGameTime = null; _playLive = false;   // re-baseline both tests
+  document.body.classList.add('kickhold');
+  clearTimeout(_kickSafety); _kickSafety = setTimeout(releaseKickoffHold, KICK_SAFETY_MS);
+}
+function releaseKickoffHold(){
+  clearTimeout(_kickSafety);
+  if (!kickHold) return;
+  kickHold = false; document.body.classList.remove('kickhold');
+  // Never during a legitimate board reveal/hide sweep — that one shares ReplayFX's single cover
+  // timer and depends on its own onMid firing (see showBoard/hideBoard); clearing here would cancel
+  // it right along with any actually-stuck replay cover.
+  if (!boardPending) ReplayFX.clear();   // rl-hud's hudShow safety: no cover may still be up once play has resumed
+}
+// every tick: has play actually started? (the clock ticking down = the ball was touched)
+function kickoffHoldTick(game){
+  const gt = (game && typeof game.time === 'number') ? game.time : null;
+  if (kickHold && !_playLive) {
+    if (gt != null && _prevGameTime != null && (game && game.isOT ? gt > _prevGameTime : gt < _prevGameTime)) _playLive = true;
+  }
+  _prevGameTime = gt;
+}
+// and the second half of the test: the camera has settled on a player
+function kickoffHoldSpectate(sp){
+  if (kickHold && _playLive && sp) releaseKickoffHold();
 }
 
 /* ── MODE: live (logos) / replay + kickoff (names) ────────────────────────────── */
@@ -549,7 +1067,7 @@ function setMode(m){
   document.body.classList.toggle('replay', m === 'replay');
   sizeHeader();
   if (m === 'kickoff') { _kickoffClock = (currentState.game || {}).time; _modeTimer = setTimeout(() => setMode('live'), 12000); }
-  if (m === 'replay') _modeTimer = setTimeout(() => setMode('kickoff'), 20000);
+  if (m === 'replay') { _modeTimer = setTimeout(() => setMode('kickoff'), 20000); clearTimeout(_sponHide); el('pl-spon').classList.remove('out'); }
   if (m === 'live' && wasNames) ['logo-blue', 'logo-orange'].forEach(id => { const i = el(id); i.classList.remove('punch'); void i.offsetWidth; i.classList.add('punch'); });
 }
 function showGoalBand(goal){
@@ -557,126 +1075,84 @@ function showGoalBand(goal){
   const side = Number(goal.team) === 1 ? 1 : 0, t = (currentState.teams || {})[side === 1 ? 'orange' : 'blue'] || {};
   root.style.setProperty('--rcol', side === 1 ? ORANGE : BLUE);
   setImg('r-logo', t.logo);
-  // lead with the SCORER (falls back to the team) + the assister, so the replay chip actually names
-  // who scored rather than just the team colour
-  setText('r-team', String(goal.scorer || teamName(t, side)));
-  setText('r-assist', goal.assisterName ? ('ASSIST · ' + goal.assisterName) : '');
-  const s = fmtSpeed(goal.speed); setText('r-speed', s.val); setText('r-unit', s.lbl);
+  // the slab leads with WHO scored; the team carries it when the feed has no scorer
+  const scorer = String(goal.scorer || '').trim();
+  setText('r-team', scorer || teamName(t, side));
+  setText('r-kind', 'Goal');
+  setText('r-assist', [scorer ? teamName(t, side) : '', goal.assisterName ? 'Assist · ' + goal.assisterName : '']
+    .filter(Boolean).join('   ·   '));
+  // a 0 kph goal is the feed not reporting one — drop the cell rather than printing a fake 0
+  const sp = fmtSpeed(goal.speed), hasSpeed = (goal.speed || 0) > 0;
+  setText('r-speed', sp.val); setText('r-unit', sp.lbl);
+  el('r-speed-cell').classList.toggle('hidden', !hasSpeed);
 }
 
-/* ── PANEL SWEEP ──────────────────────────────────────────────────────────────── */
-let _swTimer = null, _swMid = null;
-function sweep(opts){
-  const w = el('sweep'), dur = opts.dur || 1500;
-  w.style.setProperty('--sw-dur', dur + 'ms');
-  w.style.setProperty('--sw-col', opts.color || ACCENT);
-  const lg = el('sw-logo');
-  if (opts.logo) { lg.src = opts.logo; lg.classList.remove('hidden'); } else lg.classList.add('hidden');
-  setText('sw-text', opts.text || '');
-  const sk = el('sw-skin'); sk.style.backgroundImage = opts.skin ? 'url("' + opts.skin + '")' : '';
-  w.classList.remove('play'); void w.offsetWidth; w.classList.add('play');
-  clearTimeout(_swTimer); clearTimeout(_swMid);
-  if (opts.onMid) _swMid = setTimeout(opts.onMid, dur * 0.5);
-  _swTimer = setTimeout(() => w.classList.remove('play'), dur + 200);
-}
-const replayCfg = () => currentState.replay || {};
-const replayTransitionsOn = () => currentState.rlReplayTransitions !== false;
-function sideColor(side){ return replayCfg().colorMode === 'mono' ? '#0c0f16' : (side === 1 ? ORANGE : BLUE); }
+/* ── replay transitions — the shared engine (overlay/replay-fx.js) ────────────
+   This layout defaults to the panel 'sweep'; state.replay.style (Match ▸ Teams) overrides it and
+   ?fx=slam|cinema|sweep pins one for a single browser source. All the timing — the hold on the
+   cover until RL actually cuts to the replay, the outro on the "replay ending" cue, the safety
+   nets — lives in the engine, shared with the other overlays. */
+ReplayFX.init({ defaultStyle: 'sweep' });
+const sweep = (o) => ReplayFX.cover(o);   // one-off covers (the post-game board in/out)
 
-/* ── goal → replay cycle ──────────────────────────────────────────────────────── */
-const GOAL_TO_REPLAY_MS = 1200, REPLAY_WILLEND_DELAY_MS = 1800, REPLAY_MAX_MS = 15000;
-let goalActive = false, introDone = false, outroDone = false, goalSide = 0, introT = null, outroT = null, cycleT = null;
-function goalEvent(side, goal){
-  if (goalActive) return;
-  goalActive = true; introDone = outroDone = false; goalSide = side;
-  if (goal) showGoalBand(goal);
-  clearTimeout(introT); introT = setTimeout(playIntro, GOAL_TO_REPLAY_MS);
-  clearTimeout(cycleT); cycleT = setTimeout(() => { playOutro(); goalActive = false; }, 25000);
-}
-function playIntro(){
-  if (!goalActive || introDone) return; introDone = true; clearTimeout(introT);
-  if (replayTransitionsOn()) {
-    const rp = replayCfg(), brand = currentState.brand || {};
-    sweep({ color: sideColor(goalSide), logo: rp.logo || brand.logo, text: rp.logo || brand.logo ? '' : (rp.label || 'REPLAY'), skin: rp.skin });
-  }
-  clearTimeout(outroT); outroT = setTimeout(playOutro, REPLAY_MAX_MS);   // safety net only
-}
-function playOutro(){
-  if (!goalActive || outroDone) return; outroDone = true; clearTimeout(outroT);
-  if (!replayTransitionsOn()) return;
-  const rp = replayCfg(), brand = currentState.brand || {};
-  sweep({ color: ACCENT, logo: rp.outroLogo || brand.logo, skin: rp.skin, dur: 1300 });
-}
-
-/* ── POST-GAME SCOREBOARD ─────────────────────────────────────────────────────── */
-const SB_STATS = ['score','goals','assists','saves','shots','demos'], SB_LABELS = ['Score','Goals','Assists','Saves','Shots','Demos'];
-let boardOn = false;
-function boardData(msgData){
-  const sbd = currentState.scoreboard;
-  if (sbd && sbd.players && sbd.players.length) return { players: sbd.players, bs: sbd.blueScore, os: sbd.orangeScore, series: sbd.series || currentState.series };
-  const pc = (msgData && msgData.playerCache) || currentState.playerCache || {};
-  const g = currentState.game || {};
-  return { players: Object.values(pc), bs: g.blueScore ?? 0, os: g.orangeScore ?? 0, series: (msgData && msgData.series) || currentState.series };
-}
-function renderBoard(d){
-  const s = currentState, teams = s.teams || {}, brand = s.brand || {}, ad = s.scoreboardAd || {};
-  const bs = d.bs ?? 0, os = d.os ?? 0, aWon = bs > os, bWon = os > bs;
-  const bl = el('bd-brand'); if (brand.logo) { bl.src = brand.logo; bl.classList.remove('hidden'); } else bl.classList.add('hidden');
-  setText('bd-ev', s.eventName || '');
-  setText('bd-rd', [s.roundLabel, s.gameLabel || ('GAME ' + ((s.game || {}).number ?? 1) + ' OF ' + (s.bestOf || 5))].filter(Boolean).join('  |  '));
-  setText('bd-name-a', teamName(teams.blue, 0)); setText('bd-name-b', teamName(teams.orange, 1));
-  setImg('bd-logo-a', (teams.blue || {}).logo); setImg('bd-logo-b', (teams.orange || {}).logo);
-  setText('bd-num-a', bs); setText('bd-num-b', os);
-  const ser = d.series || { blue: 0, orange: 0 };
-  setText('bd-series', 'SERIES ' + (ser.blue ?? 0) + ' - ' + (ser.orange ?? 0));
-  el('bd-a').className = 'bd-team a' + (aWon ? ' win' : bWon ? ' lose' : '');
-  el('bd-b').className = 'bd-team b' + (bWon ? ' win' : aWon ? ' lose' : '');
-
-  const ss = s.rlStatsScreen || {};
-  el('bd-stats').classList.toggle('off', ss.showStats === false);
-  const all = (d.players || []).filter(p => p && p.name);
-  const mvp = [...all].sort((a, b) => (b.score || 0) - (a.score || 0))[0];
-  [['tbl-a', 0], ['tbl-b', 1]].forEach(([id, num]) => {
-    const list = all.filter(p => teamOf(p) === num).sort((a, b) => (b.score || 0) - (a.score || 0));
-    let h = '<div class="tr th"><div></div>' + SB_LABELS.map(l => '<div>' + l + '</div>').join('') + '</div>';
-    list.forEach(p => {
-      const isMvp = mvp && p.name === mvp.name && (aWon || bWon);
-      h += '<div class="tr' + (isMvp ? ' mvp' : '') + '"><div class="n"><span></span>' + (isMvp ? '<i class="mvp-tag">MVP</i>' : '') + '</div>' +
-        SB_STATS.map(k => '<div class="c num' + (k === 'score' ? ' s' : '') + '">' + (Number(p[k]) || 0) + '</div>').join('') + '</div>';
-    });
-    const t = el(id); t.innerHTML = h;
-    // names set as text (never HTML) — player names are user-controlled
-    [...t.querySelectorAll('.tr:not(.th) .n span')].forEach((sp, i) => { sp.textContent = list[i].name; });
-  });
-
-  const rail = el('bd-rail'); rail.innerHTML = '';
-  const partners = (brand.railSponsors || brand.sponsors || []).filter(x => x && x.logo);
-  if (partners.length) {
-    const lbl = brand.sponsorLabel == null ? 'PARTNERS' : String(brand.sponsorLabel).trim();
-    if (lbl) { const sp = document.createElement('span'); sp.textContent = lbl; rail.appendChild(sp); }
-    partners.forEach(x => { const i = document.createElement('img'); i.src = x.logo; i.alt = x.name || ''; rail.appendChild(i); });
-  }
-  const bg = ad.background || brand.scoreboardBg || null, bi = el('bd-img');
-  if (bg) { bi.style.backgroundImage = 'url("' + bg + '")'; bi.classList.remove('hidden'); } else bi.classList.add('hidden');
-  requestAnimationFrame(() => { fit('bd-name-a', 44, 22); fit('bd-name-b', 44, 22); });
+/* ── POST-GAME SCOREBOARD — the existing board, framed ────────────────────────
+   Shows overlay/rl-hud.html?only=scoreboard, the same source the producer can already route to its
+   own browser source, so every stats-screen design + sponsor slot is whatever they picked. It gets
+   its own state from the bridge; we only sweep it in and out. */
+let boardOn = false, boardPending = false, boardHiding = false, _boardSafety = null, _hideBoardDebounce = null;
+function boardFrame(){
+  const f = el('bd-frame');
+  if (f && !f.getAttribute('src')) f.src = '/rl-hud.html?only=scoreboard';
+  return f;
 }
 function showBoard(msgData, animate){
   if (currentState.rlScoreboardSeparate) return;   // producer routes the board to its own source
-  const d = boardData(msgData);
+  // Guard re-entry: the game end sends BOTH view_change scoreboard (animated) AND a full_state with
+  // view:scoreboard. Without this, the second call reset the in-flight cover and snapped the board in
+  // over the still-animating wipe. boardPending blocks that until the transition completes.
+  if (boardOn || boardPending) return;
+  boardPending = true;
+  ReplayFX.clear();                                // drop any frozen/in-flight replay cover cleanly
+  ReplayFX.reset();                                // no replay transition may fire over the board
+  clearTimeout(_boardSafety);
   const reveal = () => {
-    renderBoard(d); boardOn = true;
-    const b = el('board'); b.classList.remove('show'); void b.offsetWidth; b.classList.add('show');
+    if (!boardPending) return;                      // already revealed (onMid + the safety net below)
+    boardFrame(); boardOn = true; boardPending = false;
+    el('board').classList.add('show');
     document.body.classList.add('on-board'); setMode('live');
   };
   if (!animate) return reveal();
-  const side = d.os > d.bs ? 1 : 0, t = (currentState.teams || {})[side ? 'orange' : 'blue'] || {};
-  sweep({ color: side ? ORANGE : BLUE, logo: t.logo || (currentState.brand || {}).logo, dur: 1700, onMid: reveal });
+  const g = currentState.game || {}, sbd = currentState.scoreboard || {};
+  const bs = sbd.blueScore ?? g.blueScore ?? 0, os = sbd.orangeScore ?? g.orangeScore ?? 0;
+  const side = os > bs ? 1 : 0, t = (currentState.teams || {})[side ? 'orange' : 'blue'] || {};
+  sweep({ side: side, logo: t.logo || (currentState.brand || {}).logo, text: '', dur: 1700, onMid: reveal });
+  // SAFETY NET — this was the actual bug behind "no replay transitions are working": ReplayFX has
+  // only ONE shared cover timer, so a goal replay (or the kickoff-hold's ReplayFX.clear()) landing
+  // mid-animation here silently cancels this onMid before it fires. boardPending then never clears,
+  // and worse, if the SAME thing happens in hideBoard() below, boardOn is left stuck true forever —
+  // which makes dispatch()'s `if (!boardOn) ReplayFX.goal(...)` guards swallow every later goal for
+  // the rest of the match. Never let reveal depend solely on that one external callback.
+  _boardSafety = setTimeout(reveal, 2000);
 }
 function hideBoard(animate){
+  boardPending = false;
   if (!boardOn) { document.body.classList.remove('on-board'); return; }
-  const out = () => { boardOn = false; el('board').classList.remove('show'); document.body.classList.remove('on-board'); };
-  if (!animate) return out();
-  sweep({ color: ACCENT, logo: (currentState.brand || {}).logo, dur: 1300, onMid: out });
+  // Guard re-entry — this was the actual bug behind "plays randomly during the scoreboard / between
+  // games": unlike showBoard, this had NO in-flight guard. The live feed can (and does) re-send
+  // view_change:hud more than once while the board is still legitimately up (e.g. it mirrors a raw
+  // per-tick flag rather than only firing on change); boardOn stays true for the ~1.3s the sweep
+  // takes to play, so every redundant message re-called sweep() and RESTARTED the stinger from
+  // scratch. boardHiding blocks that until the current hide finishes.
+  if (boardHiding) return;
+  boardHiding = true;
+  clearTimeout(_boardSafety);
+  const out = () => {
+    if (!boardOn) return;                           // already hidden
+    boardOn = false; boardHiding = false; el('board').classList.remove('show'); document.body.classList.remove('on-board');
+  };
+  if (!animate) { boardHiding = false; return out(); }
+  sweep({ color: ACCENT, logo: (currentState.brand || {}).logo, text: '', dur: 1300, onMid: out });
+  _boardSafety = setTimeout(out, 1600);   // same safety net as showBoard, see above
 }
 
 /* ── dispatch ─────────────────────────────────────────────────────────────────── */
@@ -684,41 +1160,65 @@ function dispatch(msg){
   if (!msg || !msg.type) return;
   const d = msg.data || {};
   switch (msg.type) {
+    // Overlay code changed on disk — the server hashed it and told every overlay source. This
+    // overlay is standalone (no scene-base.js), so it wasn't picking these up at all; a producer
+    // had to manually clear the OBS browser source cache to see any edit. Reload only when the
+    // changed file IS this page (or the server didn't say which files — an explicit "reload all").
+    case 'reload_overlays': {
+      const files = Array.isArray(msg.files)
+        ? msg.files.map(f => String(f).replace(/\\/g, '/').toLowerCase().split('/').pop()).filter(Boolean)
+        : null;
+      const page = (location.pathname.split('/').pop() || '').toLowerCase();
+      if (!files || !files.length || files.indexOf(page) !== -1) { try { location.reload(); } catch (e) {} }
+      break;
+    }
     case 'full_state':
       currentState = { ...currentState, ...d }; render(currentState);
-      if (currentState.view === 'scoreboard') { if (!boardOn) showBoard(null, false); }
-      else if (boardOn && currentState.view === 'hud' && !goalActive) hideBoard(false);
-      if (currentState.inReplay && mode !== 'replay') { showGoalBand(currentState.currentGoal); setMode('replay'); }
+      ReplayFX.setState(currentState);
+      // same debounce as view_change 'hud' below — full_state's view is polled every tick, so a
+      // momentary 'hud' blip here is just as capable of hiding the board on noise, silently this time.
+      if (currentState.view === 'scoreboard') { clearTimeout(_hideBoardDebounce); if (!boardOn) showBoard(null, false); }
+      else if (boardOn && currentState.view === 'hud' && !ReplayFX.busy()) { clearTimeout(_hideBoardDebounce); _hideBoardDebounce = setTimeout(() => hideBoard(false), 700); }
+      // never fall back into replay mode while the board is up (that re-armed the sweeps)
+      if (currentState.inReplay && mode !== 'replay' && !boardOn) { showGoalBand(currentState.currentGoal); setMode('replay'); }
       break;
     case 'state_update':
       currentState = { ...currentState, game: d.game, players: d.players, spectatedPlayer: d.spectatedPlayer };
       render(currentState);
       if (mode === 'kickoff' && _kickoffClock != null && d.game && d.game.time != null && d.game.time !== _kickoffClock) setMode('live');
       break;
-    case 'goal_scored': goalEvent(Number(d.team) === 1 ? 1 : 0, d.goal); break;
-    case 'replay_will_end':
-      if (goalActive && !outroDone) { clearTimeout(outroT); outroT = setTimeout(playOutro, REPLAY_WILLEND_DELAY_MS); }
+    case 'goal_scored':
+      showGoalBand(d.goal || { team: d.team });
+      // reveal the team-name plates on the goal itself, RLCS-style; the engine owns the wipe
+      document.body.classList.add('names'); sizeHeader();
+      if (!boardOn) ReplayFX.goal(d.goal || { team: d.team });
       break;
+    case 'replay_will_end': ReplayFX.replayWillEnd(); break;
     case 'view_change':
       if (d.view === 'goal') {
-        const side = Number((d.goal || {}).team) === 1 ? 1 : 0;
         showGoalBand(d.goal);
-        if (!goalActive) goalEvent(side, d.goal);
-        playIntro(); setMode('replay');
+        if (!boardOn) ReplayFX.replayStart(d.goal || {});
+        setMode('replay');
       } else if (d.view === 'hud') {
-        if (mode === 'replay') { playOutro(); setMode('kickoff'); }
-        goalActive = false; clearTimeout(cycleT);
-        if (boardOn) hideBoard(true);
+        if (mode === 'replay' && !boardOn) { ReplayFX.replayEnd(); setMode('kickoff'); holdForKickoff(); }
+        else ReplayFX.reset();
+        // Debounced, not immediate: the live feed can report 'hud' for a moment right after a match
+        // ends — residual noise before the next kickoff, a game-reset race — even while the board is
+        // legitimately still meant to be up. Firing hideBoard() on every one of those blips played a
+        // full stinger sweep at random during the scoreboard hold. Only actually hide once 'hud' has
+        // stuck for a beat; a follow-up 'scoreboard' message (below) cancels the pending hide.
+        if (boardOn) { clearTimeout(_hideBoardDebounce); _hideBoardDebounce = setTimeout(() => hideBoard(true), 700); }
       } else if (d.view === 'scoreboard') {
-        clearTimeout(introT); clearTimeout(outroT); clearTimeout(cycleT); goalActive = false;
+        clearTimeout(_hideBoardDebounce);
+        ReplayFX.replayEnd({ toScoreboard: true }); releaseKickoffHold();
         showBoard(d, true);
       }
       break;
-    case 'clear_scoreboard': hideBoard(true); break;
-    case 'game_reset': hideBoard(true); _lastScore = { blue: null, orange: null }; break;
+    case 'clear_scoreboard': clearTimeout(_hideBoardDebounce); ReplayFX.reset(); hideBoard(true); break;
+    case 'game_reset': clearTimeout(_hideBoardDebounce); ReplayFX.reset(); releaseKickoffHold(); hideBoard(true); _lastScore = { blue: null, orange: null }; break;
     case 'rl_kickoff':
-      if (d.phase === 'countdown') setMode('kickoff');
-      else if (d.phase === 'live') setMode('live');
+      if (d.phase === 'countdown') { setMode('kickoff'); holdForKickoff(); }
+      else if (d.phase === 'live') { ReplayFX.reset(); releaseKickoffHold(); setMode('live'); }
       break;
   }
 }
@@ -728,7 +1228,7 @@ const HOST = (location.hostname && location.hostname !== 'localhost') ? location
 const HTTP_BASE = 'http://' + HOST + ':3000', WS_URL = 'ws://' + HOST + ':3001';
 let _wsToken = null;
 async function connect(){
-  if (_wsToken == null) { try { _wsToken = (await (await fetch(HTTP_BASE + '/api/ws-token')).json()).token || ''; } catch (e) { _wsToken = ''; } }
+  if (!_wsToken) { try { _wsToken = (await (await fetch(HTTP_BASE + '/api/ws-token')).json()).token || ''; } catch (e) { _wsToken = ''; } }   // retried after a failed fetch
   const ws = new WebSocket(WS_URL + (_wsToken ? ('?token=' + encodeURIComponent(_wsToken)) : ''));
   ws.onopen = () => { try { ws.send(JSON.stringify({ type: 'register', role: 'overlay', page: location.pathname })); ws.send(JSON.stringify({ type: 'request_state' })); } catch (e) {} };
   ws.onmessage = ({ data }) => { let m; try { m = JSON.parse(data); } catch { return; }
@@ -740,7 +1240,9 @@ async function connect(){
 /* ── dev preview ──────────────────────────────────────────────────────────────── */
 const DEV = {
   teams: { blue: { name: 'Kinetic Vortex', tag: 'KV1', logo: '/assets/rl.png', color: '#2f7bff' }, orange: { name: 'Northwest Pioneers', tag: 'NWPO', logo: '/assets/rl.png', color: '#e9a24a' } },
-  brand: { color: '#8b5cf6', sponsors: [{ name: 'Epic Games Store' }, { name: 'Partner Two' }] },
+  brand: { color: '#8b5cf6', sponsors: [{ name: 'Epic Games Store' }, { name: 'Partner Two' }],
+    spots: { title: 'data:image/svg+xml;base64,' + btoa('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="80"><rect x="4" y="14" width="40" height="52" fill="#fff"/><text x="58" y="56" font-family="Arial" font-weight="700" font-size="44" fill="#fff">sponsor</text></svg>') } },
+  rlSponsorRoll: true,
   game: { blueScore: 3, orangeScore: 2, isOT: false, time: 107, number: 5 }, series: { blue: 2, orange: 2 }, bestOf: 7,
   eventName: 'Rocket League 2026 World Championship', roundLabel: 'Playoffs | Semifinal', gameLabel: '',
   spectatedPlayer: 'Vortex',
@@ -752,16 +1254,23 @@ const DEV = {
     { name: 'Northstar', team: 1, score: 350, goals: 0, shots: 2, assists: 2, saves: 2, demos: 0, boost: 51 },
     { name: 'Westwind', team: 1, score: 220, goals: 0, shots: 1, assists: 0, saves: 4, demos: 1, boost: 12 },
   ],
-  formattedTime: '1:47'
+  formattedTime: '1:47',
+  worldsSidebar: { visible: true, title: 'Total Goals', subtitle: 'All-Time Worlds', rows: [
+    { rank: 1, name: 'Atomic', value: 111 }, { rank: 2, name: 'Kaydop', value: 109 }, { rank: 3, name: 'Turbopolsa', value: 108 },
+    { rank: 4, name: 'GarrettG', value: 107 }, { rank: 5, name: 'Trk511', value: 100 }, { rank: 6, name: 'Exotiik', value: 98 },
+    { rank: 7, name: 'JKnaps', value: 97 }, { rank: 8, name: 'Chicago', value: 92 }
+  ] }
 };
+setTimeout(rollSponsorOut, 6500); setInterval(rollSponsorOut, SPON_EVERY_MS);
 const devM = /[?&]dev\b/.test(location.search);
 if (devM) {
   const fixed = (location.search.match(/[?&]dev=(\w+)/) || [])[1];
   currentState = DEV; render(DEV);
   showGoalBand({ team: 0, speed: 105 });
   const go = m => {
-    if (m === 'board') { currentState.scoreboard = { players: DEV.players, blueScore: 3, orangeScore: 2, series: { blue: 3, orange: 2 } }; showBoard(null, !fixed); }
-    else { hideBoard(false); setMode(m); clearTimeout(_modeTimer); if (m === 'replay' && !fixed) { goalActive = true; introDone = false; goalSide = 0; playIntro(); } }
+    if (m === 'board') { currentState.scoreboard = { players: DEV.players, blueScore: 3, orangeScore: 2, series: { blue: 3, orange: 2 } }; showBoard(null, !fixed); }   // frames the real board (needs the app running)
+    else { hideBoard(false); setMode(m); clearTimeout(_modeTimer);
+      if (m === 'replay' && !fixed) { ReplayFX.setState(currentState); ReplayFX.goal({ team: 0 }); ReplayFX.replayStart({ team: 0 }); } }
   };
   if (fixed) go(fixed);
   else { const seq = ['live', 'replay', 'kickoff', 'board']; let i = 0; setInterval(() => { i = (i + 1) % seq.length; go(seq[i]); }, 4500); }
@@ -769,8 +1278,7 @@ if (devM) {
 } else connect();
 // Names are shrink-to-fit; re-measure once the web font has actually loaded (it's wider than the fallback).
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => {
-  _plateSig = ''; if (currentState.teams) render(currentState);
-  if (boardOn) { fit('bd-name-a', 44, 22); fit('bd-name-b', 44, 22); }
+  _plateSig = ''; _hdSig = ''; if (currentState.teams) render(currentState);
 });
 </script>
 </body>

@@ -639,6 +639,10 @@ function setupApp() {
     const launcher = launcherWin = createLauncherWindow();
     createControlPanel();
     setupPopoutHandler();
+    // Overlays popped out over the game (transparent, click-through) for solo casters.
+    require('./backend/game-overlay-windows').setup(app, {
+      notify: (list) => { try { if (controlPanel && !controlPanel.isDestroyed()) controlPanel.webContents.send('game-overlays-changed', list); } catch (_) { } },
+    });
     createTray();
 
     let _shown = false;

@@ -1,0 +1,3152 @@
+schema {
+  query: Query
+  mutation: Mutation
+  subscription: Subscription
+}
+
+interface CompetitionStageSettings {
+  "The id of the competition stage."
+  competitionStageId: UUID!
+}
+
+"Base class for mutation error responses."
+interface IErrorDetails {
+  "The error that ocurred. See ~\/developers\/docs\/error-codes for details."
+  errorCode: PublicApiErrorCode!
+  "Error code description."
+  errorCodeDescription: String!
+  "Detailed error message."
+  message: String!
+}
+
+"""
+Represents a game account that a user is using to participate in game activities. 
+ Most competition formats, such as a Tournaments etc, require the user to have a game account added to their profile for the corresponding game title.
+"""
+interface IGameAccount {
+  "The user that this game account belongs to."
+  user: UserProfile!
+  "The game title that this game account is associated with."
+  gameTitle: GameTitle!
+  """
+  The ID that identifies this account outside the platform, unique within the game's own ID domain.
+  Depending on the game title, this ID may often be used in other external APIs or services related to the game title.
+  """
+  id: String!
+  """
+  The name this account goes by in the game.
+  What it contains is decided by the game title, so it is not a stable identifier and its format may differ between titles — for League of Legends and Teamfight Tactics it is the Riot ID, for most other titles a bare in-game name. Null when we hold no name for the account.
+  """
+  displayName: String
+}
+
+"A activity that acts as a contribution to a leaderboard, such as tournaments or individual matches etc."
+interface ILeaderboardActivity {
+  "The type of this activity."
+  type: LeaderboardActivityType!
+  "The calculated score associated with this activity."
+  score: Float!
+  "Whether this activity was picked to be included in the total score in the leaderboard."
+  picked: Boolean!
+}
+
+"A game account on a Riot Games title, which can be addressed by Riot ID."
+interface IRiotGameAccount implements IGameAccount {
+  "The user that this game account belongs to."
+  user: UserProfile!
+  "The game title that this game account is associated with."
+  gameTitle: GameTitle!
+  """
+  The Riot ID of this account.
+  Null when we hold no Riot ID for it — most commonly a League of Legends account that was linked before Riot retired Summoner Names in 2023 and has not been used since, for which the Riot ID is no longer recoverable.
+  """
+  riotId: RiotId
+  """
+  The ID that identifies this account outside the platform, unique within the game's own ID domain.
+  Depending on the game title, this ID may often be used in other external APIs or services related to the game title.
+  """
+  id: String!
+  """
+  The name this account goes by in the game.
+  What it contains is decided by the game title, so it is not a stable identifier and its format may differ between titles — for League of Legends and Teamfight Tactics it is the Riot ID, for most other titles a bare in-game name. Null when we hold no name for the account.
+  """
+  displayName: String
+}
+
+"The tournament context of an entity. For match-specific context, see TournamentMatchContext."
+interface ITournamentContext {
+  "Reference to the tournament."
+  tournament: Tournament
+}
+
+"Represents a participant in a leaderboard and contains their score and placement in the leaderboard. A participant can be either a single user or a team; use the `... on` syntax to query subtypes."
+interface LeaderboardParticipant {
+  "List of all activities related to this participation."
+  allActivities("Returns the first _n_ elements from the list." first: Int "Returns the elements in the list that come after the specified cursor." after: String "Returns the last _n_ elements from the list." last: Int "Returns the elements in the list that come before the specified cursor." before: String): AllActivitiesConnection
+  "List of activities that was picked to contribute to total score and placement in the leaderboard."
+  pickedActivities: [ILeaderboardActivity!]!
+  "The leaderboard that this entry belongs to."
+  leaderboard: Leaderboard!
+  "The participant's current placement in the leaderboard. 1-indexed, null if they have no placement yet."
+  placement: Int
+  "Formatted string representing the participant's current score in the leaderboard. Suitable for visualizing."
+  displayScore: String!
+  "The participant's current score in the leaderboard. Null if they have no score yet."
+  score: Float
+  "Whether the participant is banned from the leaderboard."
+  banned: Boolean!
+  "If the user is banned in the leaderboard, the time at which they were banned."
+  bannedAt: DateTime
+  "Whether the participant is a team or a solo user. Note that if a single user is playing representing a persistent team, the their participation is considered as a team participation."
+  playingAsTeam: Boolean!
+  "Whether the participant is playing solo."
+  playingSolo: Boolean!
+  "The total number of activities this participant has that are related to this leaderboard."
+  totalActivitiesCount: Int!
+}
+
+"Represents the results of a match or match series."
+interface MatchResults {
+  "Whether the results are final and will propagate within the competition."
+  final: Boolean!
+  "Whether the match ended in a draw."
+  draw: Boolean!
+  "The results of the each of lineups in the match."
+  lineupResults: [MatchResult!]!
+}
+
+"A single piece of data that is part of a result. Note that the `..` syntax allows you to retrieve subclasses of this type that has relationships to it's corresponding entity."
+interface Statistic {
+  "The statistic's value ready to show to a user. Prefer this over `serializedValue` for display: it returns a clean, human-readable string for every value type, and when the game has configured a score format (e.g. a currency or time style for match scores) that formatting is already applied here. Falls back to the plain value when no special format applies. Null only when the value is missing or can't be read."
+  formattedValue: String
+  "The name of the statistic. This identifier is unique for each entity type it relates to, e.g a statistic for a lineup."
+  name: String!
+  "The display name of the statistic. This is a human readable name for the statistic."
+  displayName: String
+  "The value of the statistic. Use the `DataType` field for deserialization to most common data types."
+  serializedValue: String
+  dataType: StatisticDataType!
+}
+
+"A Stream which covers a something in an event, such as a Match in a Tournament."
+interface Stream {
+  "The broadcast that this stream is a part of."
+  broadcast: Broadcast!
+  type: StreamType!
+}
+
+"Tournaments consist of one or more stages (similar to brackets). Stages are played consecutively."
+interface TournamentStage {
+  "The number of lineups in this stage."
+  lineupCount: Int!
+  "The index of the stage within the tournament. 0-indexed."
+  index: Int!
+  "The format of the stage."
+  format: TournamentBracketFormat!
+}
+
+"The result of a user accepting a matchmaking offer."
+type AcceptMatchmakingOfferResponse {
+  "Whether the user accepted the matchmaking offer successfully."
+  success: Boolean!
+}
+
+type AddSubscriptionCorrectionCreditResponse {
+  addSubscriptionCorrectionCreditSuccess: AddSubscriptionCorrectionCreditSuccess
+  errors: [AddSubscriptionCorrectionCreditError!]
+}
+
+"Successfully force added credit to a user's subscription"
+type AddSubscriptionCorrectionCreditSuccess {
+  ok: Boolean!
+}
+
+"A connection to a list of items."
+type AllActivitiesConnection {
+  "Information to aid in pagination."
+  pageInfo: PageInfo!
+  "A list of edges."
+  edges: [AllActivitiesEdge!]
+  "A flattened list of the nodes."
+  nodes: [ILeaderboardActivity!]
+}
+
+"An edge in a connection."
+type AllActivitiesEdge {
+  "A cursor for use in pagination."
+  cursor: String!
+  "The item at the end of the edge."
+  node: ILeaderboardActivity!
+}
+
+"Provides an overview of participation\/attendance in a competition, including details of the lineups involved, the rosters, and the waiting list."
+type Attendance {
+  "List of lineups that have signed up for the competition."
+  signups: Signups! @cost(weight: "10")
+  "List of lineups that are confirmed to participate in the competition. This is null until the competition has started."
+  roster: Roster @cost(weight: "10")
+  "The number of lineups that have signed up for the competition."
+  lineupCount: Int!
+  "The number of lineups that have confirmed their participation in the competition."
+  confirmedSlotCount: Int
+  "The number of lineups that are ready."
+  readyLineupCount: Int!
+  "The maximum number of lineups that the competition supports. Null if unlimited."
+  maxLineupCount: Int
+  "The number of remaining available lineup slots before the competition is full. Null if unlimited."
+  availableSlotCount: Int
+}
+
+"A stream Broadcast which covers an event such as a Tournament."
+type Broadcast {
+  "The public name of the broadcast."
+  name: String @cost(weight: "10")
+  "The public description of the broadcast."
+  description: String @cost(weight: "10")
+  "The Streams scheduled for this broadcast."
+  streams: [Stream!]! @cost(weight: "10")
+  "The ID of the broadcast."
+  id: UUID!
+  "The URL where the broadcast is available."
+  url: String!
+}
+
+"Response from cancelling a cup successfully."
+type CancelCupResponse {
+  "The cup that was cancelled."
+  cup: Cup @cost(weight: "10")
+  errors: [CancelCupError!]
+}
+
+"Can't leave a running cup without explicitly confirming action. Use the optional 'confirmLeaveRunningCup' flag, to allow the user or team to forfeit from a running cup."
+type CantLeaveRunningCup implements IErrorDetails {
+  errorCode: PublicApiErrorCode!
+  errorCodeDescription: String!
+  message: String!
+}
+
+"The context of an entity (e.g match, result, lineup etc) within a competition."
+type CompetitionContext {
+  "If the context is within a Tournament, this property will provide the tournament context."
+  tournamentContext: ITournamentContext @cost(weight: "10")
+}
+
+"A lineup in a competition."
+type CompetitionLineup {
+  "The list of members in this lineup."
+  members: [CompetitionParticipant!]! @cost(weight: "10")
+  "The name of the lineup."
+  name: String!
+  isReady: Boolean!
+  isConfirmed: Boolean!
+  "The matchmaking rating of the lineup, if available."
+  rating: MatchmakingRating
+}
+
+type CompetitionParticipant {
+  "The ID of the user's game account."
+  gameAccountId: String @cost(weight: "10")
+  "The user profile of this member."
+  user: UserProfile!
+  captain: Boolean!
+}
+
+"Lists restrictions that users must meet to be eligible to participate in the competition."
+type CompetitionRestrictions {
+  restrictions: [CompetitionRestriction!]!
+}
+
+"A statistic which is part of a competitor result."
+type CompetitorStatistic implements Statistic {
+  "Get the competitor (match member) that the statistic is for."
+  competitor: MatchMember!
+  "The statistic's value ready to show to a user. Prefer this over `serializedValue` for display: it returns a clean, human-readable string for every value type, and when the game has configured a score format (e.g. a currency or time style for match scores) that formatting is already applied here. Falls back to the plain value when no special format applies. Null only when the value is missing or can't be read."
+  formattedValue: String @cost(weight: "10")
+  "The name of the statistic. This identifier is unique for each entity type it relates to, e.g a statistic for a lineup."
+  name: String!
+  "The display name of the statistic. This is a human readable name for the statistic."
+  displayName: String
+  "The value of the statistic. Use the `DataType` field for deserialization to most common data types."
+  serializedValue: String
+  dataType: StatisticDataType!
+}
+
+"A connection to a list of items."
+type CompetitorStatisticsConnection {
+  "Information to aid in pagination."
+  pageInfo: PageInfo!
+  "A list of edges."
+  edges: [CompetitorStatisticsEdge!]
+  "A flattened list of the nodes."
+  nodes: [CompetitorStatistic!]
+}
+
+"An edge in a connection."
+type CompetitorStatisticsEdge {
+  "A cursor for use in pagination."
+  cursor: String!
+  "The item at the end of the edge."
+  node: CompetitorStatistic!
+}
+
+"The result of a confirming a tournament match participation."
+type ConfirmMatchParticipationResponse {
+  "Whether the user successfully confirmed their participation in the tournament match."
+  success: Boolean!
+}
+
+"The result of a user confirming their participation in a tournament."
+type ConfirmTournamentParticipationResponse {
+  "Whether the user confirmed their participation in the tournament successfully."
+  success: Boolean!
+  errorCode: PublicApiErrorCode
+}
+
+"A connected external account that a user has connected to their account, typically through OAuth."
+type ConnectedAccount {
+  "The external account provider."
+  provider: ExternalAccountProvider!
+  "The external account public account ID."
+  id: String
+}
+
+"Response from creating a cup successfully."
+type CreateCupResponse {
+  "The cup that was created."
+  cup: Cup @cost(weight: "10")
+  errors: [CreateCupError!]
+}
+
+"Cups gather a large number of teams to match them into smaller, pre-configured tournaments with opponents of similar skill."
+type Cup {
+  "The cup's unique ID."
+  id: UUID!
+  "Name of the cup."
+  name: String!
+  "Description of the cup."
+  description: String!
+  "List of hosts that are hosting the cup."
+  hosts: Hosts!
+  "The current state of the cup."
+  state: CupState!
+  "Key timestamps related to the cup, such as when the cup is scheduled to start."
+  schedule: Schedule!
+  "List of restrictions users must meet to be eligible to participate in the cup."
+  restrictions: CompetitionRestrictions!
+  "Links to external resources related to the cup."
+  links: Links! @cost(weight: "10")
+  "Settings for the cup."
+  settings: CupSettings!
+  "Provides an overview of participation in a cup."
+  attendance: Attendance!
+  "The ids of tournaments created from this cup. Returns tournaments from all queues, or a single queue when queueId is provided."
+  tournamentIds(queueId: UUID skip: Int take: Int): [UUID!]! @cost(weight: "10")
+  idSuffix: String
+}
+
+"Settings related to a cup."
+type CupSettings {
+  "Competition settings for each stage of the cup. Expected length 1."
+  competitionStageSettings: [CompetitionStageSettings!]! @cost(weight: "10")
+  "The maximum number of players in each lineup."
+  maxLineupSize: Int
+  "The minimum number of players in each lineup."
+  minLineupSize: Int
+  "The minimum number of lineups required for the cup to start."
+  minLineupCount: Int
+}
+
+"The settings for a tournament stage of a cup. These settings will be used to create one or many tournaments for the cup participants in this stage."
+type CupTournamentStageSettings implements CompetitionStageSettings {
+  "The ID of the competition stage."
+  competitionStageId: UUID!
+  "The settings for the tournament."
+  settings: TournamentSettingsGroup!
+  "The tournament template for this stage. This tournament will not contain any teams but will be copied and used to create multiple tournaments."
+  template: Tournament!
+}
+
+"A connection to a list of items."
+type CupsForGameConnection {
+  "Information to aid in pagination."
+  pageInfo: PageInfo!
+  "A list of edges."
+  edges: [CupsForGameEdge!]
+  "A flattened list of the nodes."
+  nodes: [Cup!]
+}
+
+"An edge in a connection."
+type CupsForGameEdge {
+  "A cursor for use in pagination."
+  cursor: String!
+  "The item at the end of the edge."
+  node: Cup!
+}
+
+type DeactivateSubscriptionResponse {
+  deactivateSubscriptionSuccess: DeactivateSubscriptionSuccess
+  errors: [DeactivateSubscriptionError!]
+}
+
+"Successfully deactivated a subscription."
+type DeactivateSubscriptionSuccess {
+  ok: Boolean!
+}
+
+"The result of a user declining a matchmaking offer."
+type DeclineMatchmakingOfferResponse {
+  "Whether the user declined the matchmaking offer successfully."
+  success: Boolean!
+}
+
+"Response from creating a cup successfully."
+type EditCupResponse {
+  "The cup that was created."
+  cup: Cup @cost(weight: "10")
+  errors: [EditCupError!]
+}
+
+"A resource that can be embedded on an external website or application."
+type Embed {
+  "The embed url."
+  embedUrl: String!
+}
+
+type ErrorDetails implements IErrorDetails {
+  errorCode: PublicApiErrorCode!
+  errorCodeDescription: String!
+  message: String!
+}
+
+type GameAccount implements IGameAccount {
+  "The user that this game account belongs to."
+  user: UserProfile!
+  "The game title that this game account is associated with."
+  gameTitle: GameTitle! @cost(weight: "10")
+  """
+  The ID that identifies this account outside the platform, unique within the game's own ID domain.
+  Depending on the game title, this ID may often be used in other external APIs or services related to the game title.
+  """
+  id: String!
+  """
+  The name this account goes by in the game.
+  What it contains is decided by the game title, so it is not a stable identifier and its format may differ between titles — for League of Legends and Teamfight Tactics it is the Riot ID, for most other titles a bare in-game name. Null when we hold no name for the account.
+  """
+  displayName: String
+}
+
+"The player does not have a game account linked in the specified game."
+type GameAccountNotConnected implements IErrorDetails {
+  errorCode: PublicApiErrorCode!
+  errorCodeDescription: String!
+  message: String!
+}
+
+"The specific game account could not be associated with any user."
+type GameAccountNotLinked implements IErrorDetails {
+  "The external game account ID which is not associated with any user."
+  gameAccountId: String!
+  errorCode: PublicApiErrorCode!
+  errorCodeDescription: String!
+  message: String!
+}
+
+"A connection to a list of items."
+type GameAccountsConnection {
+  "Information to aid in pagination."
+  pageInfo: PageInfo!
+  "A list of edges."
+  edges: [GameAccountsEdge!]
+  "A flattened list of the nodes."
+  nodes: [IGameAccount!]
+  "Identifies the total count of items in the connection."
+  totalCount: Int! @cost(weight: "10")
+}
+
+"An edge in a connection."
+type GameAccountsEdge {
+  "A cursor for use in pagination."
+  cursor: String!
+  "The item at the end of the edge."
+  node: IGameAccount!
+}
+
+"Represents the in-game game session that is associated with an activity (e.g a match)."
+type GameSession {
+  "The match that corresponds to this game session."
+  match: Match!
+  "Statistics relating to the game session, such as results that scoring is based upon."
+  statistics: GameSessionStatisticsCollection!
+  "Information about the game session lobby."
+  lobbyInformation: LobbyInformation!
+  "When the match entered the running state on the platform. Null if the match has not started yet."
+  startedAt: DateTime
+  "When the match was resolved on the platform. This is when the result was processed, not necessarily when the in-game match ended — there may be a delay for automated integrations, and for manually reported results this reflects when the result was submitted. Also set for cancelled matches."
+  endedAt: DateTime
+  "Approximate duration in milliseconds based on platform start and resolution times. Null if the match has not been resolved."
+  durationInMilliseconds: Long
+}
+
+"A statistic which is part of a global result of a game session."
+type GameSessionStatistic implements Statistic {
+  "Get the game session that the statistic is for."
+  gameSession: GameSession! @cost(weight: "10")
+  "The statistic's value ready to show to a user. Prefer this over `serializedValue` for display: it returns a clean, human-readable string for every value type, and when the game has configured a score format (e.g. a currency or time style for match scores) that formatting is already applied here. Falls back to the plain value when no special format applies. Null only when the value is missing or can't be read."
+  formattedValue: String @cost(weight: "10")
+  "The name of the statistic. This identifier is unique for each entity type it relates to, e.g a statistic for a lineup."
+  name: String!
+  "The display name of the statistic. This is a human readable name for the statistic."
+  displayName: String
+  "The value of the statistic. Use the `DataType` field for deserialization to most common data types."
+  serializedValue: String
+  dataType: StatisticDataType!
+}
+
+"Statistics of a game session. This includes all the results of the game session, including team and competitor results. This is includes the base data that is was to calculate the scoring and match results."
+type GameSessionStatisticsCollection {
+  "Get the match that the game session statistics are for."
+  match: Match!
+  "Get the in-game game session that the statistics are for."
+  gameSession: GameSession!
+  "Statistics relating to the game session global results."
+  globalStatistics("Returns the first _n_ elements from the list." first: Int "Returns the elements in the list that come after the specified cursor." after: String "Returns the last _n_ elements from the list." last: Int "Returns the elements in the list that come before the specified cursor." before: String): GlobalStatisticsConnection @listSize(assumedSize: 200, slicingArguments: [ "first", "last" ], slicingArgumentDefaultValue: 100, sizedFields: [ "edges", "nodes" ], requireOneSlicingArgument: false) @cost(weight: "10")
+  "Get the statistics items relating to the game session lineup results."
+  lineupStatistics("Returns the first _n_ elements from the list." first: Int "Returns the elements in the list that come after the specified cursor." after: String "Returns the last _n_ elements from the list." last: Int "Returns the elements in the list that come before the specified cursor." before: String): LineupStatisticsConnection @listSize(assumedSize: 200, slicingArguments: [ "first", "last" ], slicingArgumentDefaultValue: 100, sizedFields: [ "edges", "nodes" ], requireOneSlicingArgument: false) @cost(weight: "10")
+  "Get the statistics items relating to the game session competitor results."
+  competitorStatistics("Returns the first _n_ elements from the list." first: Int "Returns the elements in the list that come after the specified cursor." after: String "Returns the last _n_ elements from the list." last: Int "Returns the elements in the list that come before the specified cursor." before: String): CompetitorStatisticsConnection @listSize(assumedSize: 200, slicingArguments: [ "first", "last" ], slicingArgumentDefaultValue: 100, sizedFields: [ "edges", "nodes" ], requireOneSlicingArgument: false) @cost(weight: "10")
+}
+
+"The game session tag describes information about how to find a a game session, including it's in-game game session ID."
+type GameSessionTag {
+  "The in-game game session ID. This is determined by the game and is unique per game session."
+  gameSessionId: String
+  "The name of the lobby that the game session is in. This may be null for some game titles."
+  lobbyName: String
+}
+
+"""
+Game specific settings that will be used in the tournament. These settings are unique for each game title and emitted as json. 
+
+Note that this may in some cases vary throughout the tournament.
+"""
+type GameSpecificSettings {
+  "JSON stored as an escaped string value holding game-title specific game settings."
+  value: String! @deprecated(reason: "Use JsonValue instead.")
+  "JSON formatted value holding game-title specific game settings."
+  jsonValue: JsonString!
+}
+
+"A game title."
+type GameTitle {
+  """
+  The ID of the game title. This ID is persistent and suitable for programmatic applications. 
+  Tip: to find the ID of a game, enable `developer mode` on the platform.
+  """
+  id: UUID!
+  "The slug of the game title. This identifier might change, so prefer using the ID for programmatic use cases."
+  slug: String!
+  "The public name of the space."
+  title: String!
+}
+
+"A connection to a list of items."
+type GlobalStatisticsConnection {
+  "Information to aid in pagination."
+  pageInfo: PageInfo!
+  "A list of edges."
+  edges: [GlobalStatisticsEdge!]
+  "A flattened list of the nodes."
+  nodes: [GameSessionStatistic!]
+}
+
+"An edge in a connection."
+type GlobalStatisticsEdge {
+  "A cursor for use in pagination."
+  cursor: String!
+  "The item at the end of the edge."
+  node: GameSessionStatistic!
+}
+
+"List of hosts of a competition."
+type Hosts {
+  "List of space hosts."
+  spaces: [Space!]! @cost(weight: "10")
+}
+
+"An image resource."
+type Image {
+  "The url where the image is hosted."
+  url: String!
+  "The image width."
+  width: Int!
+  "The image height."
+  height: Int!
+}
+
+"The number of team members is invalid for this competition."
+type InvalidTeamSize implements IErrorDetails {
+  "The team size used."
+  teamSize: Int
+  "The minimum team size."
+  minSize: Int
+  "The maximum team size."
+  maxSize: Int
+  errorCode: PublicApiErrorCode!
+  errorCodeDescription: String!
+  message: String!
+}
+
+"The result of successfully inviting a team to a tournament."
+type InviteTeamToTournamentResponse {
+  "The ID of the invitation. Inviting the same team again returns this same ID rather than creating a second invitation."
+  invitationId: UUID
+  "The ID of the tournament the invitation is for."
+  tournamentId: UUID
+  "The invited team, for a tournament played in teams."
+  socialTeamId: UUID
+  "The invited player, for a solo tournament."
+  userId: UUID
+  errors: [InviteTeamToTournamentError!]
+}
+
+"The response of the join cup mutation, indicating whether the player successfully joined and now has a participation in the cup."
+type JoinCupResponse {
+  "The user's own participation in a cup."
+  participation: OwnCupParticipation
+  errors: [JoinCupError!]
+}
+
+"The result of a joining a ladder."
+type JoinLadderResponse {
+  "Whether the user signed up to the ladder successfully."
+  success: Boolean!
+}
+
+type JoinLeaderboardResponse {
+  joinLeaderboardSuccess: JoinLeaderboardSuccess
+  errors: [JoinLeaderboardError!]
+}
+
+"The result of trying to join a leaderboard."
+type JoinLeaderboardSuccess {
+  "The leaderboard that was successfully joined."
+  leaderboard: Leaderboard! @cost(weight: "10")
+}
+
+"The result of a user joining a matchmaking queue."
+type JoinMatchmakingQueueResponse {
+  "Whether the user joined the matchmaking queue successfully."
+  success: Boolean
+  "If successful, the timestamp when the user joined the matchmaking queue."
+  dateJoined: DateTime
+  errors: [JoinMatchmakingQueueError!]
+}
+
+"A ladder is a competition that ranks players based on their best performances over a set period of time."
+type Ladder {
+  "The current placement entries in the ladder."
+  placements: [LadderPlacement!]! @cost(weight: "10") @deprecated(reason: "Use the `GetPlacementsPage` field instead.")
+  "The current placement entries in the ladder. `totalCount` counts registered competitors, including any that fail to load, so it is an upper bound on the entries reachable by paging."
+  placementsPage("Returns the elements in the list that come after the specified cursor." after: String "Returns the first _n_ elements from the list." first: Int): PlacementsPageConnection @listSize(assumedSize: 200, slicingArguments: [ "first" ], slicingArgumentDefaultValue: 10, sizedFields: [ "edges", "nodes" ], requireOneSlicingArgument: false) @cost(weight: "10")
+  "The name of the ladder."
+  name: String!
+  "Description of the ladder."
+  description: String!
+  "The current state of the ladder."
+  state: LadderState!
+  "The time when the ladder starts."
+  startDate: DateTime!
+  "The time when the ladder ends."
+  endDate: DateTime!
+  "How many matches count towards a user's position in the ladder."
+  matchCount: Int!
+}
+
+"A match that the player participated in, that is associated with a specific Ladder. The results of the match may count towards their placement in the ladder."
+type LadderMatch {
+  "The score of the match."
+  score: Float!
+  "Whether the match counts towards the placement in the ladder. If this is false, player likely played other games with higher scores that are included in their placement."
+  includedInScoring: Boolean!
+}
+
+"A users placement in a ladder."
+type LadderPlacement {
+  """
+  The in-game game account id of the corresponding user. 
+  
+  Since this is game-title specific the format might vary.
+  """
+  gameAccountId: String! @cost(weight: "10")
+  "The list of matches that counts towards this placement."
+  matches("Include matches that does not contribute to the ladder score." includeNonContributing: Boolean! = false): [LadderMatch!]! @cost(weight: "10") @deprecated(reason: "Use GetMatchesPageAsync instead.")
+  "The list of matches that counts towards this placement."
+  matchesPage("Returns the elements in the list that come after the specified cursor." after: String "Returns the first _n_ elements from the list." first: Int includeNonContributing: Boolean! = false): MatchesPageConnection @listSize(assumedSize: 200, slicingArguments: [ "first" ], slicingArgumentDefaultValue: 10, sizedFields: [ "edges", "nodes" ], requireOneSlicingArgument: false) @cost(weight: "10")
+  "The 1-indexed placement in the ladder."
+  placement: Int!
+  "The score of this placement, accumulated from the matches that counts towards the placement."
+  score: Float!
+  "The user profile of this placement."
+  user: UserProfile!
+}
+
+"A leaderboard is an asynchronous competition format that ranks players based on their best performances over a set period of time."
+type Leaderboard {
+  "All participants and their entries in the leaderboard."
+  participants("Returns the first _n_ elements from the list." first: Int "Returns the elements in the list that come after the specified cursor." after: String "Returns the last _n_ elements from the list." last: Int "Returns the elements in the list that come before the specified cursor." before: String): ParticipantsConnection @listSize(assumedSize: 30, slicingArguments: [ "first", "last" ], slicingArgumentDefaultValue: 10, sizedFields: [ "edges", "nodes" ], requireOneSlicingArgument: false) @cost(weight: "10")
+  "The ID of the leaderboard."
+  id: UUID!
+  "The name of the leaderboard."
+  name: String!
+  "Description of the leaderboard."
+  description: String!
+  "The current state of the leaderboard."
+  state: LeaderboardState!
+  "The time when the leaderboard starts."
+  startDate: DateTime!
+  "The time when the leaderboard ends."
+  endDate: DateTime!
+  "The settings for this leaderboard, including scoring settings and restrictions."
+  settings: LeaderboardSettings!
+  "Total number of competitors participating in the leaderboard."
+  totalParticipantCount: Int!
+}
+
+"A activity that acts as a contribution to a leaderboard."
+type LeaderboardActivity implements ILeaderboardActivity {
+  type: LeaderboardActivityType!
+  "The calculated score associated with this activity."
+  score: Float!
+  "Whether this activity was picked to be included in the total score in the leaderboard."
+  picked: Boolean!
+}
+
+"Settings for a leaderboard, such as scoring rules etc."
+type LeaderboardSettings {
+  "Restrictions that users must meet to be eligible to participate in the leaderboard."
+  restrictions: CompetitionRestrictions
+  "The minimum number of scoring contributions (e.g games) required to be placed in the leaderboard."
+  minContributions: Int!
+  "The maximum number of scoring contributions (e.g games) that will be counted towards your final leaderboard placement."
+  maxContributions: Int!
+}
+
+"A team participating in a leaderboard."
+type LeaderboardTeam implements LeaderboardParticipant {
+  "List of all activities related to this participation."
+  allActivities("Returns the first _n_ elements from the list." first: Int "Returns the elements in the list that come after the specified cursor." after: String "Returns the last _n_ elements from the list." last: Int "Returns the elements in the list that come before the specified cursor." before: String): AllActivitiesConnection @listSize(assumedSize: 30, slicingArguments: [ "first", "last" ], slicingArgumentDefaultValue: 10, sizedFields: [ "edges", "nodes" ], requireOneSlicingArgument: false)
+  "List of activities that was picked to contribute to total score and placement in the leaderboard."
+  pickedActivities: [ILeaderboardActivity!]!
+  "The leaderboard that this entry belongs to."
+  leaderboard: Leaderboard! @cost(weight: "10")
+  playingAsTeam: Boolean!
+  playingSolo: Boolean!
+  "The team members' user profiles."
+  members: [UserProfile!]!
+  "The participant's current placement in the leaderboard. 1-indexed, null if they have no placement yet."
+  placement: Int
+  "Formatted string representing the participant's current score in the leaderboard. Suitable for visualizing."
+  displayScore: String!
+  "The participant's current score in the leaderboard. Null if they have no score yet."
+  score: Float
+  "Whether the participant is banned from the leaderboard."
+  banned: Boolean!
+  "If the user is banned in the leaderboard, the time at which they were banned."
+  bannedAt: DateTime
+  "The total number of activities this participant has that are related to this leaderboard."
+  totalActivitiesCount: Int!
+}
+
+"A contribution from participating in a tournament."
+type LeaderboardTournamentActivity implements ILeaderboardActivity {
+  "The tournament this contribution comes from."
+  tournament: Tournament! @cost(weight: "10")
+  "The lineup that played for this contribution."
+  lineup: TournamentLineup! @cost(weight: "10")
+  type: LeaderboardActivityType!
+  "The calculated score associated with this activity."
+  score: Float!
+  "Whether this activity was picked to be included in the total score in the leaderboard."
+  picked: Boolean!
+}
+
+"A solo user who is participating in the leaderboard."
+type LeaderboardUser implements LeaderboardParticipant {
+  "List of all activities related to this participation."
+  allActivities("Returns the first _n_ elements from the list." first: Int "Returns the elements in the list that come after the specified cursor." after: String "Returns the last _n_ elements from the list." last: Int "Returns the elements in the list that come before the specified cursor." before: String): AllActivitiesConnection @listSize(assumedSize: 30, slicingArguments: [ "first", "last" ], slicingArgumentDefaultValue: 10, sizedFields: [ "edges", "nodes" ], requireOneSlicingArgument: false)
+  "List of activities that was picked to contribute to total score and placement in the leaderboard."
+  pickedActivities: [ILeaderboardActivity!]!
+  "The leaderboard that this entry belongs to."
+  leaderboard: Leaderboard! @cost(weight: "10")
+  playingAsTeam: Boolean!
+  playingSolo: Boolean!
+  "The user's profile."
+  user: UserProfile!
+  "The participant's current placement in the leaderboard. 1-indexed, null if they have no placement yet."
+  placement: Int
+  "Formatted string representing the participant's current score in the leaderboard. Suitable for visualizing."
+  displayScore: String!
+  "The participant's current score in the leaderboard. Null if they have no score yet."
+  score: Float
+  "Whether the participant is banned from the leaderboard."
+  banned: Boolean!
+  "If the user is banned in the leaderboard, the time at which they were banned."
+  bannedAt: DateTime
+  "The total number of activities this participant has that are related to this leaderboard."
+  totalActivitiesCount: Int!
+}
+
+"A connection to a list of items."
+type LeaderboardsConnection {
+  "Information to aid in pagination."
+  pageInfo: PageInfo!
+  "A list of edges."
+  edges: [LeaderboardsEdge!]
+  "A flattened list of the nodes."
+  nodes: [OwnLeaderboardParticipation!]
+  "Identifies the total count of items in the connection."
+  totalCount: Int! @cost(weight: "10")
+}
+
+"An edge in a connection."
+type LeaderboardsEdge {
+  "A cursor for use in pagination."
+  cursor: String!
+  "The item at the end of the edge."
+  node: OwnLeaderboardParticipation!
+}
+
+type LeaveCupResponse {
+  success: Boolean
+  errors: [LeaveCupError!]
+}
+
+"The result of a user leaving a ladder."
+type LeaveLadderResponse {
+  "Whether the user successfully left the ladder."
+  success: Boolean!
+}
+
+type LeaveLeaderboardResponse {
+  leaveLeaderboardSuccess: LeaveLeaderboardSuccess
+  errors: [LeaveLeaderboardError!]
+}
+
+"Leaderboard leave action success response."
+type LeaveLeaderboardSuccess {
+  "The leaderboard that was left."
+  leaderboard: Leaderboard! @cost(weight: "10")
+}
+
+"The result of a user leaving a matchmaking queue."
+type LeaveMatchmakingQueueResponse {
+  "Whether the user successfully left the matchmaking queue."
+  success: Boolean!
+}
+
+"The result of a user leaving a tournament."
+type LeaveTournamentResponse {
+  "Whether the user successfully left the tournament."
+  success: Boolean!
+}
+
+"A statistic which is part of a lineup result."
+type LineupStatistic implements Statistic {
+  "Get the match lineup that the statistic is for."
+  lineup: MatchLineup!
+  "The statistic's value ready to show to a user. Prefer this over `serializedValue` for display: it returns a clean, human-readable string for every value type, and when the game has configured a score format (e.g. a currency or time style for match scores) that formatting is already applied here. Falls back to the plain value when no special format applies. Null only when the value is missing or can't be read."
+  formattedValue: String @cost(weight: "10")
+  "The name of the statistic. This identifier is unique for each entity type it relates to, e.g a statistic for a lineup."
+  name: String!
+  "The display name of the statistic. This is a human readable name for the statistic."
+  displayName: String
+  "The value of the statistic. Use the `DataType` field for deserialization to most common data types."
+  serializedValue: String
+  dataType: StatisticDataType!
+}
+
+"A connection to a list of items."
+type LineupStatisticsConnection {
+  "Information to aid in pagination."
+  pageInfo: PageInfo!
+  "A list of edges."
+  edges: [LineupStatisticsEdge!]
+  "A flattened list of the nodes."
+  nodes: [LineupStatistic!]
+}
+
+"An edge in a connection."
+type LineupStatisticsEdge {
+  "A cursor for use in pagination."
+  cursor: String!
+  "The item at the end of the edge."
+  node: LineupStatistic!
+}
+
+"A connection to a list of items."
+type LineupsConnection {
+  "Information to aid in pagination."
+  pageInfo: PageInfo!
+  "A list of edges."
+  edges: [LineupsEdge!]
+  "A flattened list of the nodes."
+  nodes: [CompetitionLineup!]
+  "Identifies the total count of items in the connection."
+  totalCount: Int! @cost(weight: "10")
+}
+
+"An edge in a connection."
+type LineupsEdge {
+  "A cursor for use in pagination."
+  cursor: String!
+  "The item at the end of the edge."
+  node: CompetitionLineup!
+}
+
+"List of resources related to a competition, such as links to an overview page or image resources."
+type Links {
+  "Competition logo image."
+  logo(size: LogoSize! = MEDIUM): Image
+  "Competition banner image."
+  banner(size: BannerSize! = MEDIUM): Image
+  "Competition thumbnail image."
+  thumbnail(size: ThumbnailSize! = MEDIUM): Image
+  "Link to the competition's overview page."
+  overviewUrl: String!
+}
+
+"The game session tag describes information about how to find a a game session, including it's in-game game session ID."
+type LobbyInformation {
+  "The in-game game session ID. This is determined by the game and is unique per game session."
+  gameSessionId: String @cost(weight: "10")
+  "The name of the lobby that the game session is in. This may be null for some game titles."
+  lobbyName: String
+}
+
+"Represents a League of Legends game account that a user is using to participate in LoL competition activities."
+type LolGameAccount implements IGameAccount & IRiotGameAccount {
+  "The user that this game account belongs to."
+  user: UserProfile!
+  "The game title that this game account is associated with."
+  gameTitle: GameTitle! @cost(weight: "10")
+  "The League of Legends game realm this summoner is for."
+  realm: LolGameRealm!
+  """
+  The Riot ID of this account.
+  Null when we hold no Riot ID for it — most commonly a League of Legends account that was linked before Riot retired Summoner Names in 2023 and has not been used since, for which the Riot ID is no longer recoverable.
+  """
+  riotId: RiotId
+  """
+  The ID that identifies this account outside the platform, unique within the game's own ID domain.
+  Depending on the game title, this ID may often be used in other external APIs or services related to the game title.
+  """
+  id: String!
+  """
+  The name this account goes by in the game.
+  What it contains is decided by the game title, so it is not a stable identifier and its format may differ between titles — for League of Legends and Teamfight Tactics it is the Riot ID, for most other titles a bare in-game name. Null when we hold no name for the account.
+  """
+  displayName: String
+}
+
+"A match, either standalone or part of a larger competition format such as a tournament."
+type Match {
+  "The list of lineups in the match."
+  lineups: [MatchLineup!]!
+  "The results of the match."
+  results: MatchResults!
+  "The tournament context of the match, if the match is part of a tournament."
+  tournamentContext: TournamentMatchContext @cost(weight: "10") @deprecated(reason: "Use CompetitionContext instead.")
+  "The unique identifier of the match."
+  id: UUID!
+  "The current state of the match."
+  state: MatchState!
+  "The public name of the match."
+  name: String!
+  """
+  Numbers of minutes the players have to go to the match lobby after the match starts. 
+  If set to 0 the match will start without players going to the match screen.
+  """
+  maximumLobbyMinutes: Int!
+  "If not set to 0, players must join the in-game lobby during this period to avoid losing on walkover."
+  maximumGoToGameMinutes: Int!
+  "Information about how to find a a game session, including it's in-game game session ID."
+  gameSessionTag: GameSessionTag! @deprecated(reason: "Use GameSession instead.")
+  "The in-game game session corresponding to this match."
+  gameSession: GameSession!
+  "Statistics for this match, including game session statistics."
+  statistics: MatchStatisticsCollection!
+  "The competition context of the match."
+  context: CompetitionContext!
+}
+
+"A lineup is one or many players playing together in this match."
+type MatchLineup {
+  "The members in this match lineup."
+  members: [MatchMember!]!
+  "Get statistics corresponding to this lineup."
+  statistics("Returns the first _n_ elements from the list." first: Int "Returns the elements in the list that come after the specified cursor." after: String "Returns the last _n_ elements from the list." last: Int "Returns the elements in the list that come before the specified cursor." before: String): StatisticsConnection @listSize(assumedSize: 30, slicingArguments: [ "first", "last" ], slicingArgumentDefaultValue: 10, sizedFields: [ "edges", "nodes" ], requireOneSlicingArgument: false) @cost(weight: "10")
+  "The lineup number, 0-indexed."
+  number: Int!
+  "Whether the lineup missed the ready check."
+  missedReadyCheck: Boolean!
+  "The lineup name."
+  lineupName: String!
+  "If determined, the resulting position of the lineup in the match."
+  position: Int @deprecated(reason: "Use MatchResult instead.")
+  "If determined, the 1-indexed placement of the lineup in the match. 1 corresponds to first place."
+  placement: Int @deprecated(reason: "Use MatchResult instead.")
+  "If determined, the resulting score of the lineup in the match."
+  score: Int @deprecated(reason: "Use MatchResult instead.")
+}
+
+"A member of a match lineup."
+type MatchMember {
+  """
+  The in-game game account id of the member. 
+  
+  Since this is game-title specific the format might vary.
+  """
+  gameAccountId: String! @cost(weight: "10")
+  "Get statistics corresponding to this lineup."
+  statistics("Returns the first _n_ elements from the list." first: Int "Returns the elements in the list that come after the specified cursor." after: String "Returns the last _n_ elements from the list." last: Int "Returns the elements in the list that come before the specified cursor." before: String): StatisticsConnection @listSize(assumedSize: 30, slicingArguments: [ "first", "last" ], slicingArgumentDefaultValue: 10, sizedFields: [ "edges", "nodes" ], requireOneSlicingArgument: false) @cost(weight: "10")
+  "The competition context for the memeber, e.g the match and their lineup etc."
+  context: CompetitionContext!
+  "The user profile of this member."
+  user: UserProfile!
+  "Whether the user has confirmed their participation in the match."
+  confirmedParticipation: Boolean!
+}
+
+"Represents match results, such as score and position, associated with a user or lineup within a competition."
+type MatchResult {
+  "Reference to the value-format spec that applies to this match score. Non-null only when the match resolved with a pinned format (or the game currently has one configured) AND the format is active (carries at least one of decimal places, prefix, suffix). Tournament matches always return null (series-win counts)."
+  scoreFormatId: UUID @cost(weight: "10")
+  "Score rendered as a display string. When the game has an active value format configured (or pinned on this match), prefix + decimal-scaled body + suffix is applied — i18n-key prefix\/suffix are resolved server-side against the backend translation pack (English today). Otherwise the raw integer is returned as an invariant string so consumers don't need to fall back to `score` for un-formatted matches. Null only when there is no score (e.g. unresolved) or when the score is not a measured value (tournament series)."
+  formattedScore: String @cost(weight: "10")
+  "Whether the score is final, propagating the competition."
+  final: Boolean!
+  "The score value."
+  score: Int
+  "If determined, the resulting position of the lineup in the match. Deprecated: use the 1-indexed `placement`. `position` has mixed indexing — 0-indexed in tournament lineup results, 1-indexed in versus results and in game lineup results."
+  position: Int @deprecated(reason: "Use the 1-indexed `placement` instead. `position` has mixed (0-\/1-) indexing across result types.")
+  "If determined, the 1-indexed placement of the lineup in the match. 1 corresponds to first place. Derived from the match outcome, so an abandoned or disqualified lineup is placed last even in a walkover with no games played."
+  placement: Int
+  """
+  The lineup number that the result belongs to. A user is always assigned a team number, even if they are playing solo. 
+  See TournamentMatchContext for additional info. 0-indexed.
+  """
+  lineupNumber: Int!
+  "The competition context of the result, e.g the match, which team it belongs to etc."
+  context: CompetitionContext!
+}
+
+"A series of matches between the same lineups or players, typically describing when a competition has a best-of-N setup. If a match is cancelled, a match series can be extended with additional matches."
+type MatchSeries {
+  "Ordered list of matches in this match series."
+  matches(includeFailed: Boolean! = false): [Match!]! @cost(weight: "10")
+  "Specific game settings used for this match series. This can differ from the default game settings configured on the tournament."
+  gameSettings: GameSpecificSettings @cost(weight: "10") @deprecated(reason: "Use GameSessionSettings instead.")
+  "Specific game settings used for this match series. This can differ from the default game settings configured on the tournament."
+  gameSessionSettings: JSON @cost(weight: "10") @deprecated(reason: "Use game specific settings instead.")
+  "The tournament that this match series is a part of."
+  tournament: Tournament! @cost(weight: "10") @deprecated(reason: "Use Context instead.")
+  "The competition context of the match series."
+  context: CompetitionContext! @cost(weight: "10")
+  "List of lineups in the match series."
+  lineups: [TournamentLineup]! @cost(weight: "10")
+  "The results of the match series."
+  results: MatchResults! @cost(weight: "10")
+  title: String!
+  labels: [TournamentNodeLabel!]!
+  "The streams covering this series."
+  streams: [Stream!]! @cost(weight: "10")
+  id: UUID!
+  "The ordinal number of the match series in the tournament."
+  ordinal: Int!
+  "The current state of the match series."
+  state: MatchSeriesState!
+  "The number of lineups in each match of the match series."
+  lineupCount: Int!
+  "The time when the match series started. Null if the match series has not started yet."
+  startedAt: DateTime
+  "The best-of setting used for this match series. For example, \"best of 3\" means that the first team to win 2 matches wins the match series."
+  bestOf: Int!
+  "The scheduled start time of the first match of the series. May be null."
+  scheduledStartTimeAt: DateTime
+}
+
+"A connection to a list of items."
+type MatchSeriesPageConnection {
+  "Information to aid in pagination."
+  pageInfo: PageInfo!
+  "A list of edges."
+  edges: [MatchSeriesPageEdge!]
+  "A flattened list of the nodes."
+  nodes: [MatchSeries!]
+}
+
+"An edge in a connection."
+type MatchSeriesPageEdge {
+  "A cursor for use in pagination."
+  cursor: String!
+  "The item at the end of the edge."
+  node: MatchSeries!
+}
+
+"A Stream which covers a MatchSeries in a Tournament."
+type MatchSeriesStream implements Stream {
+  matchSeries: MatchSeries! @cost(weight: "10")
+  "The broadcast that this stream is a part of."
+  broadcast: Broadcast! @cost(weight: "10")
+  type: StreamType!
+}
+
+"Statistics of a match, including the statistics of it's corresponding in-game session."
+type MatchStatisticsCollection {
+  "Get the match that the game session statistics are for."
+  match: Match!
+  "Statistics for the corresponding in-game session."
+  gameSessionStatistics: GameSessionStatisticsCollection!
+}
+
+"A connection to a list of items."
+type MatchesPageConnection {
+  "Information to aid in pagination."
+  pageInfo: PageInfo!
+  "A list of edges."
+  edges: [MatchesPageEdge!]
+  "A flattened list of the nodes."
+  nodes: [LadderMatch!]
+}
+
+"An edge in a connection."
+type MatchesPageEdge {
+  "A cursor for use in pagination."
+  cursor: String!
+  "The item at the end of the edge."
+  node: LadderMatch!
+}
+
+"""
+An offer for an available match or tournament, resulting from a matching in a matchmaking queue. 
+
+The user should be prompted to either accept or decline the offer. If enough players accept, the offer then points to the competition (e.g tournament) that is created as a result.
+"""
+type MatchmakingOffer {
+  "The tournament that can be created when the offer is accepted by all."
+  tournament: Tournament @cost(weight: "10")
+  "The match that can be created when the offer is accepted by all."
+  match: Match @cost(weight: "10")
+  queue: MatchmakingQueue @cost(weight: "10")
+  "The offer needs to be accepted by."
+  responseDeadlineAt: DateTime!
+  "The state of this offer, when this is Open the offer needs to be accepted."
+  state: MatchmakingOfferState!
+  "The number of people that has accepted this offer."
+  acceptedParticipantCount: Int!
+  "Total number of people that needs to accept the offer."
+  participantCount: Int!
+}
+
+"A match or tournament matchmaking queue."
+type MatchmakingQueue {
+  "Queue logo image."
+  logo(size: LogoSize! = MEDIUM): Image
+  "The settings of the matchmaking queue, configurable by the organizer."
+  settings: MatchmakingSettings! @cost(weight: "10")
+  "The current users participation in the queue. This can be used to render a personal view of the queue."
+  participation: OwnMatchmakingQueueParticipation @authorize(policy: "PAT") @cost(weight: "10")
+  "The matchmaking queue unique identifier."
+  id: UUID!
+  "The public name of the queue."
+  name: String!
+  "Description of the queue."
+  description: String
+  "Whether the queue is open for users to join."
+  open: Boolean!
+  "Number of users currently in waiting the queue."
+  waitingCount: Int!
+  "The type of competitions that the matchmaking queue produces once players are matched together."
+  queueType: MatchmakingQueueType!
+  idSuffix: String
+}
+
+"The matchmaking rating of a lineup."
+type MatchmakingRating {
+  "The rating value."
+  value: Float!
+}
+
+"Various settings related to matchmaking queue, including the game settings."
+type MatchmakingSettings {
+  "In the case of tournament matchmaking queues, the default settings of the resulting tournaments."
+  getTournamentQueueSettings: TournamentSettingsGroup
+  matchQueueSettings: String
+  gameSessionSettings: JSON
+}
+
+"A summary of a user's current matchmaking activity. Can be used to find if the user is currently active in a matchmaking queue or has any active matchmaking offers."
+type MatchmakingSummary {
+  "Return the matchmaking queue the user is either queueing or participating in a competition as a result of matchmaking. If the user is not part of any matchmaking activity, this will be null."
+  joinedQueue: MatchmakingQueue @cost(weight: "10")
+  "Lists all active matchmaking offers for the user. Only active offers, that are not concluded or failed, are not included."
+  offers: [MatchmakingOffer!]! @cost(weight: "10")
+  idSuffix: String
+}
+
+"Contains information relating to the current user."
+type Me {
+  "Get info about matchmaking queues user is part of"
+  matchmaking(filter: OwnMatchmakingFilterInput): MatchmakingSummary @cost(weight: "10")
+  "Get tournaments which the current user is part of."
+  ownTournaments(filter: OwnTournamentsInput): [Tournament!]! @cost(weight: "10") @deprecated(reason: "Use GetOwnTournamentParticipations instead.")
+  "Get get tournament participations for current tournaments."
+  ownTournamentParticipations(filter: OwnTournamentsInput): [OwnTournamentParticipation!]! @cost(weight: "10") @deprecated(reason: "Use 'tournaments' instead.")
+  "Get get tournament participations for current tournaments."
+  tournaments(filter: OwnTournamentsInput "Returns the first _n_ elements from the list." first: Int "Returns the elements in the list that come after the specified cursor." after: String "Returns the last _n_ elements from the list." last: Int "Returns the elements in the list that come before the specified cursor." before: String): TournamentsConnection @listSize(assumedSize: 30, slicingArguments: [ "first", "last" ], slicingArgumentDefaultValue: 10, sizedFields: [ "edges", "nodes" ], requireOneSlicingArgument: false) @cost(weight: "10")
+  "Get user's own leaderboard participations."
+  leaderboards("Returns the first _n_ elements from the list." first: Int "Returns the elements in the list that come after the specified cursor." after: String "Returns the last _n_ elements from the list." last: Int "Returns the elements in the list that come before the specified cursor." before: String): LeaderboardsConnection @listSize(assumedSize: 30, slicingArguments: [ "first", "last" ], slicingArgumentDefaultValue: 10, sizedFields: [ "edges", "nodes" ], requireOneSlicingArgument: false) @cost(weight: "10")
+  "Get Ladders which the current user is part of."
+  ownLadders(filter: OwnLaddersInput): [Ladder!]! @cost(weight: "10") @deprecated(reason: "Ladders are replaced by `leaderboards` throughout the API.")
+  "Get participation in cups which the current user is part of."
+  ownCupParticipation: [OwnCupParticipation!]! @cost(weight: "10") @deprecated(reason: "Use '\/me\/cups' or '\/me\/currentCups' instead.")
+  "Get cups which the current user is part of."
+  currentCups: [OwnCupParticipation!]! @cost(weight: "10")
+  "Search among this user's cups."
+  cups(filters: SearchOwnCupsFiltersInput! limit: Int skip: Int descending: Boolean): [OwnCupParticipation!]! @cost(weight: "10")
+  "The profile of the current user."
+  user: UserProfile!
+}
+
+"The result of a multi-team (N vs N) match."
+type MultiTeamMatchResults implements MatchResults {
+  "Whether the results are final and will propagate within the competition."
+  final: Boolean!
+  "Whether the match ended in a draw."
+  draw: Boolean!
+  "The results of the each of lineups in the match."
+  lineupResults: [MatchResult!]!
+}
+
+type Mutation {
+  "Join a cup with a set of players."
+  joinCup(input: JoinCupInput!): JoinCupResponse! @authorize(policy: "PAT") @cost(weight: "10")
+  "Leave a cup."
+  leaveCup(input: LeaveCupInput!): LeaveCupResponse! @authorize(policy: "PAT") @cost(weight: "10")
+  """
+  Creates a cup as a user or via a BOT user (recommended).
+  The cup can be hosted by a specific space if the user or BOT is a space admin.
+  Simple cups can be created directly using parameters, while complex setups can utilize a pre-created templates.
+  """
+  createCup(input: CreateCupInput!): CreateCupResponse! @authorize(policy: "BOT|PAT") @cost(weight: "10")
+  "Edit an existing cup."
+  editCup(input: EditCupInput!): EditCupResponse! @authorize(policy: "BOT|PAT") @cost(weight: "10")
+  "Allows you to start a cup directly."
+  startCup(input: StartCupInput!): StartCupResponse! @authorize(policy: "BOT|PAT") @cost(weight: "10")
+  "Allows you to cancel a cup."
+  cancelCup(input: CancelCupInput!): CancelCupResponse! @authorize(policy: "BOT|PAT") @cost(weight: "10")
+  "Let user join a ladder."
+  joinLadder(input: JoinLadderInput!): JoinLadderResponse! @authorize(policy: "PAT") @cost(weight: "10") @deprecated(reason: "Use leaderboard mutations instead.")
+  "Let user leave a ladder."
+  leaveLadder(input: LeaveLadderInput!): LeaveLadderResponse! @authorize(policy: "PAT") @cost(weight: "10") @deprecated(reason: "Use leaderboard mutations instead.")
+  "Let user join a leaderboard by ID. Note that only some leaderboards require the user joining explicitly to participate in the leaderboard."
+  joinLeaderboard(input: JoinLeaderboardInput!): JoinLeaderboardResponse! @authorize(policy: "PAT") @cost(weight: "10")
+  "Let user leave a leaderboard by ID."
+  leaveLeaderboard(input: LeaveLeaderboardInput!): LeaveLeaderboardResponse! @authorize(policy: "PAT") @cost(weight: "10")
+  "Let a user join a matchmaking queue."
+  joinMatchmakingQueue(input: JoinMatchmakingQueueInput!): JoinMatchmakingQueueResponse! @authorize(policy: "PAT") @cost(weight: "10")
+  "Let a user leave a matchmaking queue."
+  leaveMatchmakingQueue(input: LeaveMatchmakingQueueInput!): LeaveMatchmakingQueueResponse! @authorize(policy: "PAT") @cost(weight: "10")
+  """
+  Let a user accept a matchmaking offer. 
+  
+  If enough players accept they will be part of the resulting competition.
+  """
+  acceptMatchmakingOffer(input: AcceptMatchmakingOfferInput!): AcceptMatchmakingOfferResponse! @authorize(policy: "PAT") @cost(weight: "10")
+  """
+  Let a user decline a matchmaking offer. 
+  
+  Declining an offer will not put them back into the matchmaking queue. If the user times out however, they will be put back into the queue automatically.
+  """
+  declineMatchmakingOffer(input: DeclineMatchmakingOfferInput!): DeclineMatchmakingOfferResponse! @authorize(policy: "PAT") @cost(weight: "10")
+  "Force add credit to a user's subscription."
+  addSubscriptionCorrectionCredit(input: AddSubscriptionCorrectionCreditInput!): AddSubscriptionCorrectionCreditResponse! @authorize(policy: "BOT") @cost(weight: "10")
+  "Force cancel renewal and immediately deactivate a subscription."
+  deactivateSubscription(input: DeactivateSubscriptionInput!): DeactivateSubscriptionResponse! @authorize(policy: "BOT") @cost(weight: "10")
+  "Let a user sign up to a tournament, putting them on the waiting list."
+  signupTournament(input: SignupTournamentInput!): SignupTournamentResponse! @authorize(policy: "PAT") @cost(weight: "10")
+  "Let a user leave a tournament."
+  leaveTournament(input: LeaveTournamentInput!): LeaveTournamentResponse! @authorize(policy: "PAT") @cost(weight: "10")
+  "Let a user confirm their participation in a tournament before the tournament starts. Players that don't confirm their participation will not play in the tournament."
+  confirmTournamentParticipation(input: ConfirmTournamentParticipationInput!): ConfirmTournamentParticipationResponse! @authorize(policy: "PAT") @cost(weight: "10")
+  "Let a user confirm their participation in a tournament match. If the tournament is configured to require this step, failing to confirm participation will result in a walkover."
+  confirmMatchParticipation(input: ConfirmMatchParticipationInput!): ConfirmMatchParticipationResponse! @authorize(policy: "PAT") @cost(weight: "10")
+  "Set pre-seeds for tournament lineups."
+  setTournamentPreSeed(input: SetTournamentPreSeedInput!): SetTournamentPreSeedResponse! @authorize(policy: "BOT|PAT") @cost(weight: "10")
+  """
+  Invite a team to a tournament, so that they are able to sign up to it.
+  
+  An invitation does not enter the team into the tournament. It clears them to sign up to a tournament that is invite-only; someone on the team still has to sign up, and nothing is added to the bracket until they do.
+  
+  Inviting the same team twice succeeds and returns the first invitation, so retrying is safe.
+  
+  Requires admin rights in the Space hosting the tournament. Grant those before the tournament is created. If the tournament already exists, an organizer must afterwards use Refresh on the host row under Manage > Hosting for the new rights to apply to it.
+  """
+  inviteTeamToTournament(input: InviteTeamToTournamentInput!): InviteTeamToTournamentResponse! @authorize(policy: "BOT|PAT") @cost(weight: "10")
+}
+
+"Resource not found."
+type NotFound implements IErrorDetails {
+  "The ID of the resource."
+  resourceId: String
+  errorCode: PublicApiErrorCode!
+  errorCodeDescription: String!
+  message: String!
+}
+
+"The user's own participation in a cup."
+type OwnCupParticipation {
+  "The team the user is participating in the cup with."
+  ownTeam: CompetitionLineup @cost(weight: "10")
+  "The user's own participation in the current tournament within the cup, in case one is created. If the cup is not for tournaments, this property will be null."
+  currentTournamentParticipation: OwnTournamentParticipation @cost(weight: "10") @deprecated(reason: "Use 'tournamentParticipation' instead.")
+  """
+  The user's tournament participation within the cup, if the tournament is created. 
+  Null if the tournament is not created, or the cup is configured to create other competition types.
+  """
+  tournamentParticipation: OwnTournamentParticipation @cost(weight: "10")
+  "The cup that the user is participating in."
+  cup: Cup @cost(weight: "10")
+  "Description of whether the user is eligible to join the competition."
+  eligibility: OwnEligibility @cost(weight: "10")
+}
+
+"""
+A summary of whether a user meets the requirements (restrictions) to participate in a competition. 
+
+If a user is not eligible to play, please refer to the documentation of each unmet restriction to determine a course of action. For example, if the user does not have a game account linked, the user must connect and verify their game account.
+"""
+type OwnEligibility {
+  "List of restrictions that the user has met."
+  metRestrictions: [CompetitionRestriction!]! @cost(weight: "10")
+  "List of restrictions that the user has not met. Refer to the documentation of each restriction to determine a course of action. Some restrictions may require redirecting the user to Challengermode to meet them."
+  unmetRestrictions: [CompetitionRestriction!]! @cost(weight: "10")
+  "Whether the user is eligible to participate in the competition. If false, see the list of unmet restrictions for details."
+  eligible: Boolean! @cost(weight: "10")
+  idSuffix: String
+}
+
+"Represents a user's own participation in a leaderboard."
+type OwnLeaderboardParticipation {
+  "The leaderboard participation (entry) of this user."
+  participation: LeaderboardParticipant!
+  "The leaderboard that the user is participating in."
+  leaderboard: Leaderboard! @cost(weight: "10")
+  "The user's profile."
+  user: UserProfile!
+}
+
+"A users participation in a matchmaking queue. This can be used to render a personal view of the queue."
+type OwnMatchmakingQueueParticipation {
+  """
+  The users active offers, if any are available. 
+  
+  This can both be used to render when a new offer is available and to find the corresponding competition if one has been created (e.g a tournament).
+  """
+  offer: MatchmakingOffer @cost(weight: "10")
+  "Whether the user is currently queueing. Note that receiving an offer sets this to false while awaiting the player's answer. If the offer fails, players that accepted it will automatically queue again."
+  queueing: Boolean!
+  "The time the user joined the queue."
+  joinedAt: DateTime
+}
+
+"A user's own participation in a tournament. This can be used to render personal views of a tournament."
+type OwnTournamentParticipation {
+  "Whether the user has signed up for the tournament."
+  signedUp: Boolean! @cost(weight: "10")
+  """
+  Whether the user has confirmed their participation in the tournament. 
+  
+   To let the user confirm their participation, use `Mutation::confirmTournamentParticipation`. 
+  
+   For all available actions, refer to `OwnTournamentParticipation::lobbyFeedback`.
+  """
+  confirmed: Boolean! @cost(weight: "10")
+  "Whether the user has a tournament match running."
+  matchRunning: Boolean! @cost(weight: "10")
+  "The current match user is playing in, if any."
+  currentMatch: Match @cost(weight: "10")
+  "The matchseries that your lineup has played in or is currently playing in."
+  matchseries: [MatchSeries!]! @cost(weight: "10")
+  "Whether the users participation in the tournament is completed. If this is null, the user has upcoming matches."
+  participationComplete: Boolean! @cost(weight: "10")
+  "Whether the user is currently waiting for their next match."
+  waitingForNextMatch: Boolean! @cost(weight: "10")
+  "Personalized feedback for the current user, detailing the available actions that the user can currently perform in the tournament e.g sign up to the tournament or confirm their participation."
+  lobbyFeedback: TournamentLobbyFeedback! @cost(weight: "10")
+  "The in-game ID of the player which the current user is participating with in the tournament. This is game-title specific so the format may vary."
+  gameAccountId: String @cost(weight: "10")
+  "Whether the user is currently on the waiting list of the tournament."
+  onWaitingList: Boolean! @cost(weight: "10")
+  "If available, the final placement of the user's lineup in this tournament. This is only available if the tournament is completed."
+  placement: TournamentLineupPlacement @cost(weight: "10")
+  tournament: Tournament! @cost(weight: "10") @deprecated(reason: "Use CompetitionContext instead.")
+  "The competition context of the user's participation in the tournament."
+  context: CompetitionContext!
+  "Description of whether the user is eligible to join the competition."
+  eligibility: OwnEligibility @cost(weight: "10")
+  tournamentId: UUID! @deprecated(reason: "Use CompetitionContext instead.")
+}
+
+"Information about pagination in a connection."
+type PageInfo {
+  "Indicates whether more edges exist following the set defined by the clients arguments."
+  hasNextPage: Boolean!
+  "Indicates whether more edges exist prior the set defined by the clients arguments."
+  hasPreviousPage: Boolean!
+  "When paginating backwards, the cursor to continue."
+  startCursor: String
+  "When paginating forwards, the cursor to continue."
+  endCursor: String
+}
+
+"A connection to a list of items."
+type ParticipantsConnection {
+  "Information to aid in pagination."
+  pageInfo: PageInfo!
+  "A list of edges."
+  edges: [ParticipantsEdge!]
+  "A flattened list of the nodes."
+  nodes: [LeaderboardParticipant!]
+}
+
+"An edge in a connection."
+type ParticipantsEdge {
+  "A cursor for use in pagination."
+  cursor: String!
+  "The item at the end of the edge."
+  node: LeaderboardParticipant!
+}
+
+"A connection to a list of items."
+type PlacementsPageConnection {
+  "Information to aid in pagination."
+  pageInfo: PageInfo!
+  "A list of edges."
+  edges: [PlacementsPageEdge!]
+  "A flattened list of the nodes."
+  nodes: [LadderPlacement!]
+  "Identifies the total count of items in the connection."
+  totalCount: Int! @cost(weight: "10")
+}
+
+"An edge in a connection."
+type PlacementsPageEdge {
+  "A cursor for use in pagination."
+  cursor: String!
+  "The item at the end of the edge."
+  node: LadderPlacement!
+}
+
+"The player is a member of another team."
+type PlayerInOtherTeam implements IErrorDetails {
+  "The external game account ID of the player."
+  gameAccountId: String!
+  errorCode: PublicApiErrorCode!
+  errorCodeDescription: String!
+  message: String!
+}
+
+"Response for successfully pre-seeding a lineup in a tournament."
+type PreSeedLineupResponse {
+  "List of lineup IDs that were successfully pre-seeded."
+  affectedLineupIds: [UUID!]!
+}
+
+type Query {
+  "Get a Broadcast by it's ID."
+  broadcast("The ID of the broadcast." id: UUID!): Broadcast! @authorize(policy: "BOT|PAT") @cost(weight: "10")
+  """
+  Get a match by ID. 
+  
+  A match can be part  of a larger competition type such as a tournament or matchmaking queue, or created as a custom game.
+  """
+  match(matchId: UUID!): Match! @authorize(policy: "BOT|PAT") @cost(weight: "10")
+  "Description of whether the user is eligible to join the competition."
+  ownCupEligibility(input: CanPlayInCupInput!): OwnEligibility @authorize(policy: "PAT") @cost(weight: "10")
+  "Get a cup by its ID."
+  cup(id: UUID!): Cup @authorize(policy: "BOT|PAT") @cost(weight: "10")
+  "Search for cups."
+  searchCups(filters: SearchCupsFiltersInput! limit: Int skip: Int descending: Boolean): [Cup!]! @authorize(policy: "BOT|PAT") @cost(weight: "10")
+  "Search for cups based on search input critera."
+  cupsForGame(input: CupsForGameInput! "Returns the elements in the list that come after the specified cursor." after: String "Returns the first _n_ elements from the list." first: Int): CupsForGameConnection @authorize(policy: "BOT|PAT") @listSize(assumedSize: 200, slicingArguments: [ "first" ], slicingArgumentDefaultValue: 10, sizedFields: [ "edges", "nodes" ], requireOneSlicingArgument: false) @cost(weight: "10") @deprecated(reason: "Use 'searchCups' instead.")
+  "Get a game title."
+  gameTitle("Identifier for the game." game: GameIdentifierInput!): GameTitle! @authorize(policy: "BOT|PAT") @cost(weight: "10")
+  "Get leaderboard by ID."
+  leaderboard(id: UUID!): Leaderboard! @authorize(policy: "BOT|PAT") @cost(weight: "10")
+  "Find match making queues in a specific game title."
+  matchmakingQueuesForGame(gameSlug: String!): [MatchmakingQueue!]! @authorize(policy: "BOT|PAT") @cost(weight: "10")
+  "Find matchmaking queue by ID."
+  matchmakingQueue(queueId: UUID!): MatchmakingQueue @authorize(policy: "BOT|PAT") @cost(weight: "10")
+  """
+  Get the authenticated user's profile. 
+  
+  This can be used as a starting point to find the activities (e.g. tournaments) the user is participating in.
+  """
+  me: Me! @authorize(policy: "BOT|PAT")
+  "Get a Space by its slug."
+  space("Identifier for the Space." space: SpaceIdentifierInput "Case-insensitive slug for the Space, i.e `~\/s\/{slug}`" slug: String @deprecated(reason: "Use space identifier instead.")): Space! @authorize(policy: "BOT|PAT") @cost(weight: "10")
+  "Get the active subscriptions that grant a specific perk to a user."
+  userActiveSubscriptionsByPerk("The user ID to check active subscriptions for." userId: UUID! "The subscription catalog ID for context." catalogId: UUID! "The subscription perk ID to check for." perkId: UUID!): UserActiveSubscriptionsByPerkResponse @authorize(policy: "BOT") @cost(weight: "10")
+  "Get a team by ID."
+  team("The public ID of the team, (`~\/teams\/<team-id>`)." id: UUID!): Team! @authorize(policy: "BOT|PAT") @cost(weight: "10")
+  "Find ladders in a specific game title."
+  laddersForGame(input: LaddersForGameInput!): [Ladder!]! @authorize(policy: "BOT|PAT") @cost(weight: "10") @deprecated(reason: "Use leaderboard queries instead.")
+  "Find ladders in a specific Space."
+  laddersForSpace(input: LaddersForSpaceInput!): [Ladder!]! @authorize(policy: "BOT|PAT") @cost(weight: "10") @deprecated(reason: "Use leaderboard queries instead.")
+  "Get ladder by ID."
+  ladder(ladderId: UUID!): Ladder! @authorize(policy: "BOT|PAT") @cost(weight: "10") @deprecated(reason: "Use leaderboard queries instead.")
+  "Summarizes whether a user meets the requirements to participate in the tournament."
+  ownTournamentEligibility(input: CanPlayInTournamentInput!): OwnEligibility @authorize(policy: "PAT") @cost(weight: "10")
+  "Find tournaments in a specific game title."
+  tournamentsForGame(input: TournamentsForGameInput!): [Tournament!]! @authorize(policy: "BOT|PAT") @cost(weight: "10")
+  "Find tournaments in a specific Space."
+  tournamentsForSpace(input: TournamentsForSpaceInput!): [Tournament!]! @authorize(policy: "BOT|PAT") @cost(weight: "10")
+  "Get tournament by ID."
+  tournament(tournamentId: UUID!): Tournament @authorize(policy: "BOT|PAT") @cost(weight: "10")
+  "Get tournament lineup by ID."
+  tournamentLineup(id: UUID!): TournamentLineup @authorize(policy: "BOT|PAT") @cost(weight: "10")
+  "Get a match series by ID."
+  matchSeries(matchSeriesId: UUID!): MatchSeries! @authorize(policy: "BOT|PAT") @cost(weight: "10")
+  "Get a user by their user ID, as found on `~\/users\/<user-id>`."
+  user(userId: UUID!): UserProfile! @authorize(policy: "BOT|PAT") @cost(weight: "10")
+}
+
+"A Riot Games account identifier. Riot retired Summoner Names in 2023, and the Riot ID is how Riot's own APIs have addressed an account since — see https:\/\/developer.riotgames.com\/apis#account-v1."
+type RiotId {
+  "The part of the Riot ID before the '#'. Not unique on its own."
+  gameName: String!
+  "The part of the Riot ID after the '#', without the '#' itself."
+  tagLine: String!
+  "The full Riot ID, in 'gameName#tagLine' form."
+  value: String!
+}
+
+"List of lineups that are going to play or have played in the competition."
+type Roster {
+  "If seeded the teams that are playing will be returned, otherwise the list of teams that are ready to play will be returned."
+  lineups("Returns the first _n_ elements from the list." first: Int "Returns the elements in the list that come after the specified cursor." after: String "Returns the last _n_ elements from the list." last: Int "Returns the elements in the list that come before the specified cursor." before: String): LineupsConnection @listSize(assumedSize: 50, slicingArguments: [ "first", "last" ], slicingArgumentDefaultValue: 10, sizedFields: [ "edges", "nodes" ], requireOneSlicingArgument: false) @cost(weight: "10")
+}
+
+"Key timestamps related to the competition, such as registration windows, confirmation windows and scheduled start times."
+type Schedule {
+  "When the competition is scheduled to start."
+  scheduledStartTimeAt: DateTime
+  "Whether the competition scheduled start time has passed."
+  scheduledStartTimePassed: Boolean!
+  "Whether the competition has started."
+  started: Boolean!
+  "Whether the competition has ended."
+  ended: Boolean!
+  "When registrations open. If null, the registration start time is considered open ended."
+  registrationOpensAt: DateTime
+  "When registrations close. If null, the close time is considered open ended."
+  registrationClosesAt: DateTime
+  "Whether the registration window is currently open. Registration refers to the process of signing up i.e registering to a competition.Deternmined by the values of RegistrationOpensAt and RegistrationClosesAt."
+  registrationWindowOpen: Boolean!
+  "Whether the competition requires teams confirm their participation to secure their spot in the competition."
+  confirmationNeeded: Boolean!
+  "When the confirmation window opens."
+  confirmationWindowOpenAt: DateTime
+  "When the confirmation window closes."
+  confirmationWindowCloseAt: DateTime
+  "Whether the confirmation window is currently open.Determined by the values of ConfirmationNeeded, ConfirmationWindowOpenAt and ConfirmationWindowCloseAt."
+  confirmationWindowOpen: Boolean!
+  "When the competition allows players to ready up. If null, the start time is considered open-ended and players may ready up at any point until the close time."
+  readyWindowOpenAt: DateTime
+  "When the competition no longer allows players to ready up. If null, the close time is considered open-ended and players may join at any time after the start time."
+  readyWindowCloseAt: DateTime
+  "Whether the ready-up window is currently open. Determined by the values of ReadyWindowOpenAt and ReadyWindowCloseAt."
+  readyWindowOpen: Boolean!
+  "When the competition actually started."
+  startedAt: DateTime
+  "When the competition ended."
+  endedAt: DateTime
+  "When true, teams will automatically be marked as ready (and checked-in if applicable) when they join the competition."
+  automaticReady: Boolean!
+}
+
+type SetTournamentPreSeedResponse {
+  preSeedLineupResponse: PreSeedLineupResponse
+  errors: [SetTournamentPreSeedError!]
+}
+
+"The result of a user signing up to a tournament."
+type SignupTournamentResponse {
+  "Whether the user signed up to the tournament successfully."
+  success: Boolean!
+  errorCode: PublicApiErrorCode
+}
+
+"List of all lineups that signed up for the competition."
+type Signups {
+  "The lineups that signed up for this competition."
+  lineups("Returns the first _n_ elements from the list." first: Int "Returns the elements in the list that come after the specified cursor." after: String "Returns the last _n_ elements from the list." last: Int "Returns the elements in the list that come before the specified cursor." before: String): LineupsConnection @listSize(assumedSize: 50, slicingArguments: [ "first", "last" ], slicingArgumentDefaultValue: 10, sizedFields: [ "edges", "nodes" ], requireOneSlicingArgument: false) @cost(weight: "10")
+}
+
+"A community."
+type Space {
+  "Space logo image."
+  logo(size: LogoSize! = MEDIUM): Image
+  "Space banner image."
+  banner(size: BannerSize! = MEDIUM): Image
+  "The list of Broadcasts that are managed through this Space."
+  broadcasts: [Broadcast!]! @cost(weight: "10")
+  "Public ID of the space. This is permanent and suitable for automation purposes, e.g creating a competition hosted within a specific space."
+  id: UUID!
+  "The public name of the space."
+  name: String!
+  "Description of the space."
+  description: String!
+  "The slug of the space."
+  slug: String!
+  "Whether the space is verified."
+  verified: Boolean!
+}
+
+"Response from starting a cup successfully."
+type StartCupResponse {
+  "The cup that was started."
+  cup: Cup @cost(weight: "10")
+  errors: [StartCupError!]
+}
+
+"A connection to a list of items."
+type StatisticsConnection {
+  "Information to aid in pagination."
+  pageInfo: PageInfo!
+  "A list of edges."
+  edges: [StatisticsEdge!]
+  "A flattened list of the nodes."
+  nodes: [CompetitorStatistic!]
+}
+
+"An edge in a connection."
+type StatisticsEdge {
+  "A cursor for use in pagination."
+  cursor: String!
+  "The item at the end of the edge."
+  node: CompetitorStatistic!
+}
+
+type Subscription {
+  """
+  Subscribe to a matchmaking queue updates. 
+  
+  This data can be used to render a users participation in a matchmaking queue, such as their current queue status and available matchmaking offers.
+  """
+  matchmakingQueueUpdated(gameSlug: String): MatchmakingQueue! @authorize(policy: "BOT|PAT") @cost(weight: "10")
+  "Subscribe to updates in a specific space."
+  spaceUpdated("Identifier for the Space." space: SpaceIdentifierInput "Case-insensitive slug for the Space, i.e `~\/s\/{slug}`" slug: String @deprecated(reason: "Use space identifier instead.")): Space! @authorize(policy: "BOT|PAT") @cost(weight: "10")
+  "Subscribe to updates in a specific tournament."
+  tournamentUpdated(id: UUID!): Tournament! @authorize(policy: "BOT|PAT") @cost(weight: "10")
+  "Subscribe to all tournaments in a specific game title."
+  tournamentForGameUpdated(gameSlug: String!): Tournament! @authorize(policy: "BOT|PAT") @cost(weight: "10")
+  "Subscribe to all tournaments in a specific Space."
+  tournamentForSpaceUpdated(spaceId: UUID!): Tournament! @authorize(policy: "BOT|PAT") @cost(weight: "10")
+  """
+  Subscribe to a user's participation in a tournament. 
+  
+  This data can be used render the users own participation throughout the tournament, for example if they can perform a specific action on the tournament.
+  """
+  tournamentParticipationUpdated(gameSlug: String!): TournamentParticipationUpdate! @authorize(policy: "BOT|PAT") @cost(weight: "10")
+}
+
+"A persistent team."
+type Team {
+  "The team logo image."
+  logo(size: LogoSize! = MEDIUM): Image
+  "The team banner image."
+  banner(size: BannerSize! = MEDIUM): Image
+  "The ID of the team."
+  id: UUID!
+  "The public name of the team."
+  name: String!
+  "The public description of the team."
+  description: String!
+  "Whether the team is verified."
+  verified: Boolean!
+}
+
+"Represents a Teamfight Tactics game account that a user is using to participate in TFT competition activities."
+type TftGameAccount implements IGameAccount & IRiotGameAccount {
+  "The user that this game account belongs to."
+  user: UserProfile!
+  "The game title that this game account is associated with."
+  gameTitle: GameTitle! @cost(weight: "10")
+  """
+  The Riot ID of this account.
+  Null when we hold no Riot ID for it — most commonly a League of Legends account that was linked before Riot retired Summoner Names in 2023 and has not been used since, for which the Riot ID is no longer recoverable.
+  """
+  riotId: RiotId
+  """
+  The ID that identifies this account outside the platform, unique within the game's own ID domain.
+  Depending on the game title, this ID may often be used in other external APIs or services related to the game title.
+  """
+  id: String!
+  """
+  The name this account goes by in the game.
+  What it contains is decided by the game title, so it is not a stable identifier and its format may differ between titles — for League of Legends and Teamfight Tactics it is the Riot ID, for most other titles a bare in-game name. Null when we hold no name for the account.
+  """
+  displayName: String
+}
+
+"Tournaments have players or teams compete directly against each other in a series of matches typically arranged in a bracket format."
+type Tournament {
+  "A description of the current tournament."
+  description: String! @cost(weight: "10")
+  "The stages of this tournament, played consecutively. This provides the overall structure of the tournament."
+  stages(fromIndex: Int toIndex: Int): [TournamentStage!]! @cost(weight: "10")
+  "All match series that are a part of the tournament."
+  matchSeries: [MatchSeries!]! @cost(weight: "10") @deprecated(reason: "Use `stages` instead.")
+  "List of the Spaces hosting this tournament."
+  hosts: Hosts!
+  "Provides an overview of participation in a tournament, including details of the players and teams involved, the roster, and the waiting list."
+  attendance: TournamentAttendance!
+  "Key timestamps related to the tournament, such as the start time and the opening of the confirmation window."
+  schedule: TournamentSchedule!
+  "Lists restrictions that users must meet to be eligible to participate in the competition."
+  competitionRestrictions: CompetitionRestrictions!
+  "List of restrictions for joining the tournament."
+  restrictions: TournamentRestrictions! @deprecated(reason: "Use competitionRestrictions instead.")
+  "Links to external resources related to the tournament."
+  links: TournamentLinks! @cost(weight: "10")
+  "The source cup when this tournament was created from a cup. Null for tournaments that are not cup-backed."
+  cup: Cup @cost(weight: "10")
+  "The participation status of the current user."
+  ownParticipation: OwnTournamentParticipation @authorize(policy: "PAT") @cost(weight: "10")
+  "The streams covering this tournament."
+  streams: [Stream!]! @cost(weight: "10")
+  "Get which game title this tournament is for."
+  gameTitle: GameTitle! @cost(weight: "10")
+  "The tournament's unique ID."
+  id: UUID!
+  "The name of the tournament."
+  name: String
+  "Current state of the tournament."
+  state: TournamentState!
+  "The contact address for the organiser."
+  contactUrl: String!
+  "Settings for how the current tournament and matches are run."
+  settings: TournamentSettingsGroup!
+  idSuffix: String
+}
+
+"Provides a overview of participation\/attendance in a tournament, including details of the players and teams involved, the roster, and the waiting list."
+type TournamentAttendance {
+  "The number of remaining available lineup slots before tournament is full. For total number of slots, see TournamentSettings"
+  availableSlotCount: Int!
+  "The number of confirmed lineups. This is the number of lineups that confirmed their participation."
+  confirmedLineupCount: Int!
+  "Lists lineups and users who have signed up to tournament."
+  signups: TournamentSignup!
+  "Lists lineups and users who is confirmed to participate in tournament. This is null before the tournament is started."
+  roster: TournamentRoster
+  "Lists lineups and users who are on the waiting list."
+  waitingList: TournamentWaitingList!
+}
+
+"A bracket consists of multiple rounds of match series and creates the structure of a tournament."
+type TournamentBracket {
+  "A descriptive name for the bracket."
+  title: String!
+  "A list of labels that describe the bracket."
+  labels: [TournamentNodeLabel!]!
+  "The number of rounds in the bracket."
+  roundCount: Int!
+  "The list of rounds in the bracket."
+  rounds: [TournamentRound!]!
+  "The tournament that the bracket belongs to."
+  tournament: Tournament! @cost(weight: "10") @deprecated(reason: "Use CompetitionContext instead.")
+  "The tournament context of the bracket."
+  context: CompetitionContext!
+  "The stage that the bracket belongs to."
+  stage: TournamentStage @cost(weight: "10")
+}
+
+"The tournament context of an entity. For match-specific context, see TournamentMatchContext."
+type TournamentContext implements ITournamentContext {
+  "Reference to the tournament."
+  tournament: Tournament @cost(weight: "10")
+}
+
+"In elimination stages, such as single and double elimination, teams get eliminated from the competition after a set number of losses."
+type TournamentEliminationStage implements TournamentStage {
+  "The brackets in this stage."
+  brackets: [TournamentBracket!]! @cost(weight: "10")
+  "The number of lineups in this stage."
+  lineupCount: Int!
+  "The index of the stage within the tournament. 0-indexed."
+  index: Int!
+  "The format of the stage."
+  format: TournamentBracketFormat!
+}
+
+"Settings related to the format of the tournament and its stages and brackets."
+type TournamentFormatSettings {
+  "The list of bracket formats the tournament consists of."
+  bracketFormats: [TournamentBracketFormat!]!
+  "A descriptive name for the tournament format."
+  description: String!
+}
+
+"A group within a tournament's group stage."
+type TournamentGroup {
+  "A descriptive name for the group."
+  title: String!
+  "The current state of the group."
+  state: TournamentGroupState!
+  "List of all match series in this group."
+  matchSeries: [MatchSeries!]! @cost(weight: "10") @deprecated(reason: "Use GetMatchSeriesPageAsync instead.")
+  matchSeriesPage("Returns the elements in the list that come after the specified cursor." after: String "Returns the first _n_ elements from the list." first: Int): MatchSeriesPageConnection @listSize(assumedSize: 200, slicingArguments: [ "first" ], slicingArgumentDefaultValue: 10, sizedFields: [ "edges", "nodes" ], requireOneSlicingArgument: false) @cost(weight: "10")
+  "The group number. 1-indexed."
+  number: Int!
+  "The number of lineups in this group."
+  lineupCount: Int!
+  "Number of encounters played in this group."
+  encounterCount: Int!
+  "The number of lineups advancing to the next tournament stage."
+  advancingLineupCount: Int!
+}
+
+"Group stages divide the participants into groups to compete against each other, typically in a round-robin format."
+type TournamentGroupStage implements TournamentStage {
+  "The number of groups in the group stage."
+  groupCount: Int! @cost(weight: "10")
+  "The groups in the group stage."
+  groups: [TournamentGroup!]! @cost(weight: "10")
+  "The number of lineups in this stage."
+  lineupCount: Int!
+  "The index of the stage within the tournament. 0-indexed."
+  index: Int!
+  "The format of the stage."
+  format: TournamentBracketFormat!
+}
+
+"A lineup consists of one or many players playing together in a tournament."
+type TournamentLineup {
+  "The team logo for this lineup. This will be available primarily if the lineup has a registered Team."
+  logo(size: LogoSize!): Image @cost(weight: "10")
+  "The team banner image."
+  banner(size: BannerSize! = MEDIUM): Image @cost(weight: "10")
+  "Get the persistent team that the lineup is playing as, if any."
+  team: Team @cost(weight: "10")
+  "All members of this lineup."
+  members: [TournamentLineupMember]! @cost(weight: "10")
+  """
+  The placement in the tournament for this lineup. 
+  
+  If no results are available yet this will be null.
+  """
+  placement: TournamentLineupPlacement @cost(weight: "10")
+  "The participation status of the lineup."
+  participationStatus: TournamentLineupParticipation!
+  "The ID of the lineup."
+  id: UUID!
+  """
+  The name of the tournament lineup. It may be sourced from a Challengermode team or party.
+  The value returned here is a snapshot, but it is not immutable - it might be adjusted when the name of a team changes globally, or it might not.
+  """
+  name: String!
+  "Denotes if a lineup has been disqualified from the tournament. A disqualified lineup will concede all matches, and disappear from the bracket entirely."
+  disqualified: Boolean!
+  "A team's tournament seed is its ranking or placement in the tournament bracket, determined by automatic factors or manual input, to ensure fair and balanced matchups.This number is 1-indexed where lower means better. A team will always have a seed if they are part of the roster and the tournament has started."
+  seed: Int
+  "A manual seed value that can be used during manual seeding to set the team's actual seed. 1-indexed."
+  preSeed: Int
+}
+
+"A member of a tournament lineup."
+type TournamentLineupMember {
+  """
+  The in-game game account id of the member. 
+  
+  Since this is game-title specific the format might vary.
+  """
+  gameAccountId: String! @cost(weight: "10")
+  "A summary of member current status and available actions."
+  lobbyFeedback: TournamentLobbyFeedback! @cost(weight: "10")
+  "Whether the member is captain of the team."
+  captain: Boolean!
+  "The lineup role of the member"
+  role: String! @deprecated
+  "Whether the user has confirmed their participation."
+  confirmedTournamentParticipation: Boolean!
+  "The user profile of this member."
+  user: UserProfile!
+}
+
+"A lineups current participation status in a tournament."
+type TournamentLineupParticipation {
+  "Whether the lineup has a ongoing match in the tournament."
+  matchRunning: Boolean! @cost(weight: "10")
+  "Whether the lineups participation in the tournament is complete."
+  participationComplete: Boolean! @cost(weight: "10")
+  "Whether the lineup is waiting for their next match in the tournament."
+  waitingForNextMatch: Boolean! @cost(weight: "10")
+  "The start time of the next match scheduled for the lineup in the tournament."
+  nextMatchScheduledAt: DateTime @cost(weight: "10")
+}
+
+"""
+Placement for a team in the tournament. 
+
+Depending on the resolution of the tournament this is a range. E.g. If the tournament doesn't have bronze medal match, the semifinalist loosers will both have placement 3-4.
+"""
+type TournamentLineupPlacement {
+  "The best placement in the placement range."
+  bestPlacement: Int!
+  "The worst placement in the placement range."
+  worstPlacement: Int!
+  "A display text showing the placement range in which the team performed."
+  displayPlacement: String!
+}
+
+"List of resources related to a tournament, such as links to the tournament overview page or image resources."
+type TournamentLinks {
+  "A thumbnail image."
+  thumbnail(size: ThumbnailSize!): Image
+  "Tournament logo image."
+  logo(size: LogoSize! = MEDIUM): Image
+  "Tournament banner image."
+  banner(size: BannerSize! = MEDIUM): Image
+  "Link to the tournament overview page."
+  overviewUrl: String!
+  "An embed for a tournament overview."
+  overviewEmbed: Embed!
+  "An embed for vizualising matches."
+  matchesOverviewEmbed: Embed!
+}
+
+"""
+Description of lobby feedback for a user in a tournament. 
+
+Use this to determine what feedback to show to the user if they view a tournament.
+"""
+type TournamentLobbyFeedback {
+  "The current updated list of available actions for the user in the tournament."
+  allowedActions: [AllowedTournamentAction!]!
+  "Translation key that can be used to describe the current state."
+  feedbackTranslationKey: String!
+  "If the first action has a deadline, this time shows when it will expire."
+  timer: DateTime
+}
+
+"The tournament context of a match , such as its position in the tournament."
+type TournamentMatchContext implements ITournamentContext {
+  "The stage number of this match in the tournament."
+  stageNumber: Int! @cost(weight: "10")
+  "The round number of this match in the tournament."
+  roundNumber: Int! @cost(weight: "10")
+  "If relevant, the specific lineup in this context."
+  lineup: MatchLineup @cost(weight: "10")
+  "If relevant, the member specific in this context."
+  member: MatchMember @cost(weight: "10")
+  "Reference to the tournament."
+  tournament: Tournament @cost(weight: "10")
+}
+
+"""
+Description of when a users participation in a tournament is updated. 
+
+This data can be used to inform the user that their participation in the tournament is updated, for example when it is time for them to confirm their participation.
+"""
+type TournamentParticipationUpdate {
+  "The updated participation status of the current user."
+  ownParticipation: OwnTournamentParticipation @authorize(policy: "PAT") @cost(weight: "10")
+  tournamentId: UUID!
+  idSuffix: String
+}
+
+"Lists restrictions that are required in order to participate in a tournament."
+type TournamentRestrictions {
+  restrictions: [TournamentRestriction!]!
+}
+
+"Lists lineups and members that are confirmed to be playing in tournament."
+type TournamentRoster {
+  "The number of users participating in the tournament."
+  userCount: Int! @cost(weight: "10")
+  "The number of lineups participating in the tournament."
+  lineupCount: Int! @cost(weight: "10")
+  "The lineups participating in the tournament."
+  lineups(limit: Int): [TournamentLineup!]! @cost(weight: "10")
+}
+
+"A round in a tournament, consisting of a number of match series. Rounds appear in elimination brackets, as well as in round-robin groups and swiss stages."
+type TournamentRound {
+  "The round number. 0-indexed."
+  roundNumber: Int!
+  "Number of matches in round. May be a placeholder number for format types such as swiss where the number of matches is variable."
+  matchCount: Int! @cost(weight: "10")
+  "List of all match series in this round."
+  matchesSeries: [MatchSeries!]! @cost(weight: "10") @deprecated(reason: "Use matchSeries")
+  "List of all match series in this round."
+  matchSeries: [MatchSeries!]! @cost(weight: "10")
+  "Gets a page of matchseries for this round."
+  matchSeriesPage("Returns the elements in the list that come after the specified cursor." after: String "Returns the first _n_ elements from the list." first: Int): MatchSeriesPageConnection @listSize(assumedSize: 200, slicingArguments: [ "first" ], slicingArgumentDefaultValue: 10, sizedFields: [ "edges", "nodes" ], requireOneSlicingArgument: false) @cost(weight: "10")
+  "The number of lineups in this round."
+  lineupCount: Int! @cost(weight: "10")
+  "The number of advancing teams in this round."
+  advancingLineupCount: Int! @cost(weight: "10")
+  "Whether this is the last round in its stage or bracket."
+  isLastRound: Boolean!
+  "A descriptive name for the bracket."
+  title: String!
+  "A list of labels that describe the round."
+  labels: [TournamentNodeLabel!]!
+}
+
+type TournamentSchedule {
+  "When the tournament is scheduled to start."
+  scheduledStartTimeAt: DateTime
+  "When the tournament confirmation window opens."
+  confirmationWindowOpenAt: DateTime
+  "When the tournament confirmation window opens for players who has fast pass."
+  earlyConfirmationWindowOpenAt: DateTime @deprecated(reason: "TODO: remove. This shouldn't be included here. We wanted to remove this complexity.")
+  "Shows if the tournament allows for early confirmation when available."
+  allowEarlyConfirmation: Boolean! @deprecated(reason: "TODD: remove. This shouldn't be included here. We wanted to remove this complexity.")
+  "When the tournament actually started."
+  startedAt: DateTime
+  "When the tournament concluded."
+  endedAt: DateTime
+}
+
+"""
+List of settings related to the tournament. 
+
+These settings are configurable by the tournament organizer.
+"""
+type TournamentSettingsGroup {
+  "Settings relating to the tournament itself, such as the number of available slots in the tournament."
+  tournamentSettings: TournamentSpecificSettings!
+  "Game specific settings that will be used in the tournament. Note that this may in some cases vary throughout the tournament."
+  gameSettings: GameSpecificSettings @deprecated(reason: "Use GameSessionSettings instead.")
+  "JSON formatted value holding game-title specific game settings."
+  gameSessionSettings: JSON
+}
+
+"Overview of the players and lineups that have signed up to this tournament."
+type TournamentSignup {
+  "The number of players that have signed up to this tournament."
+  userCount: Int! @cost(weight: "10")
+  "The number of lineups that have signed up to this tournament."
+  lineupCount: Int! @cost(weight: "10")
+  "The lineups that have signed up to this tournament."
+  lineups(limit: Int skip: Int): [TournamentLineup!]! @cost(weight: "10")
+}
+
+"Tournament settings, configurable by the tournament organizer."
+type TournamentSpecificSettings {
+  formatSettings: TournamentFormatSettings! @cost(weight: "10")
+  "The maximum number of lineups that the tournament supports."
+  maxLineupCount: Int!
+  "The maximum number of players in each lineup."
+  maxLineupSize: Int!
+  "The tournament bracket format."
+  format: TournamentFormat!
+}
+
+"Swiss is a non-elimination format where participants of similar record face each other in a number of rounds."
+type TournamentSwissStage implements TournamentStage {
+  "The number of rounds in the Swiss stage. Note that this number may be variable."
+  roundCount: Int! @cost(weight: "10")
+  "The created rounds in the Swiss stage. *Note that advancing teams count is not yet supported."
+  rounds: [TournamentRound!]! @cost(weight: "10")
+  "The number of lineups in this stage."
+  lineupCount: Int!
+  "The index of the stage within the tournament. 0-indexed."
+  index: Int!
+  "The format of the stage."
+  format: TournamentBracketFormat!
+}
+
+"Lists the lineups that have signed up but that do not yet have a confirmed spot in the tournament."
+type TournamentWaitingList {
+  "The number of lineups on the waiting list."
+  lineupCount: Int! @cost(weight: "10")
+  "The list of lineups on the waiting list."
+  lineups(limit: Int): [TournamentLineup!]! @cost(weight: "10")
+}
+
+"A connection to a list of items."
+type TournamentsConnection {
+  "Information to aid in pagination."
+  pageInfo: PageInfo!
+  "A list of edges."
+  edges: [TournamentsEdge!]
+  "A flattened list of the nodes."
+  nodes: [OwnTournamentParticipation!]
+  "Identifies the total count of items in the connection."
+  totalCount: Int! @cost(weight: "10")
+}
+
+"An edge in a connection."
+type TournamentsEdge {
+  "A cursor for use in pagination."
+  cursor: String!
+  "The item at the end of the edge."
+  node: OwnTournamentParticipation!
+}
+
+"Object representing a competition restriction that a specific user did not meet when trying to perform an action related to a competition."
+type UnmetRestriction {
+  "The user ID that did not meet the restriction."
+  userId: UUID!
+  "The restriction that was not met by the user."
+  restriction: CompetitionRestriction!
+}
+
+type UserActiveSubscriptionsByPerkResponse {
+  userId: UUID!
+  catalogId: UUID!
+  perkId: UUID!
+  subscriptionIds: [UUID!]
+}
+
+"A user profile."
+type UserProfile {
+  "Whether this is a BOT user."
+  bot: Boolean! @cost(weight: "10")
+  "The user's profile URL."
+  profileUrl: String! @cost(weight: "10")
+  "When the user joined the platform."
+  createdAt: DateTime! @cost(weight: "10")
+  "The user's own description of themselves."
+  biography: String! @cost(weight: "10")
+  "The user's username."
+  username: String! @cost(weight: "10")
+  "The user's profile picture."
+  profilePicture(size: LogoSize! = MEDIUM): Image @cost(weight: "10")
+  "User statistics of their platform activity."
+  statistics: UserStatistics @cost(weight: "10")
+  "A list of the external accounts that the user has connected to their account. Note that the user may decide to hide specific connected accounts."
+  connectedAccounts: [ConnectedAccount!]! @cost(weight: "10")
+  "List of all the game accounts that the user has added to their account and is ready to participate in competitions in."
+  gameAccounts("Returns the first _n_ elements from the list." first: Int "Returns the elements in the list that come after the specified cursor." after: String "Returns the last _n_ elements from the list." last: Int "Returns the elements in the list that come before the specified cursor." before: String): GameAccountsConnection @listSize(assumedSize: 20, slicingArguments: [ "first", "last" ], slicingArgumentDefaultValue: 10, sizedFields: [ "edges", "nodes" ], requireOneSlicingArgument: false) @cost(weight: "10")
+  "Whether or not the user is banned."
+  banned: Boolean! @cost(weight: "10")
+  "The user's user ID."
+  id: UUID!
+  "The user's user ID."
+  userId: UUID! @deprecated(reason: "Use `id` instead.")
+}
+
+"Global statistics about the user's platform activity. This is helpful to infer overall commitment and reliability."
+type UserStatistics {
+  "Total number of competitive matches played. This is helpful to infer overall commitment."
+  totalPlayedChallenges: Int!
+  "Ratio of number of played games to number of won games."
+  playWinRate: Float!
+  "Average placement in multi-team games."
+  placementRate: Float!
+  "The ratio of number of games signed up for to number of games played. This is helpful to infer reliability."
+  playRate: Float!
+}
+
+"Represents a VALORANT game account that a user is using to participate in VALORANT competition activities."
+type ValorantGameAccount implements IGameAccount & IRiotGameAccount {
+  "The user that this game account belongs to."
+  user: UserProfile!
+  "The game title that this game account is associated with."
+  gameTitle: GameTitle! @cost(weight: "10")
+  """
+  The Riot ID of this account.
+  Null when we hold no Riot ID for it — most commonly a League of Legends account that was linked before Riot retired Summoner Names in 2023 and has not been used since, for which the Riot ID is no longer recoverable.
+  """
+  riotId: RiotId
+  """
+  The ID that identifies this account outside the platform, unique within the game's own ID domain.
+  Depending on the game title, this ID may often be used in other external APIs or services related to the game title.
+  """
+  id: String!
+  """
+  The name this account goes by in the game.
+  What it contains is decided by the game title, so it is not a stable identifier and its format may differ between titles — for League of Legends and Teamfight Tactics it is the Riot ID, for most other titles a bare in-game name. Null when we hold no name for the account.
+  """
+  displayName: String
+}
+
+"A versus (1v1) match result."
+type VersusMatchResults implements MatchResults {
+  "The result of the left side lineup, corresponding to team number 0."
+  leftSideResult: MatchResult
+  "The result of the right side lineup, corresponding to team number 1."
+  rightSideResult: MatchResult
+  "Whether the results are final and will propagate within the competition."
+  final: Boolean!
+  "Whether the match ended in a draw."
+  draw: Boolean!
+  "The results of the each of lineups in the match."
+  lineupResults: [MatchResult!]!
+}
+
+union AddSubscriptionCorrectionCreditError = NotFound | ErrorDetails
+
+union CancelCupError = ErrorDetails
+
+union CreateCupError = ErrorDetails
+
+union DeactivateSubscriptionError = NotFound | ErrorDetails
+
+union EditCupError = ErrorDetails
+
+union InviteTeamToTournamentError = ErrorDetails | NotFound
+
+union JoinCupError = ErrorDetails | NotFound | GameAccountNotLinked | PlayerInOtherTeam | InvalidTeamSize
+
+union JoinLeaderboardError = ErrorDetails | NotFound
+
+union JoinMatchmakingQueueError = GameAccountNotConnected
+
+union LeaveCupError = CantLeaveRunningCup | NotFound
+
+union LeaveLeaderboardError = ErrorDetails | NotFound
+
+union SetTournamentPreSeedError = ErrorDetails | NotFound
+
+union StartCupError = ErrorDetails
+
+input AcceptMatchmakingOfferInput {
+  queueId: UUID!
+}
+
+input AddSubscriptionCorrectionCreditInput {
+  "The user ID to add credit for."
+  userId: UUID!
+  "The subscription plan ID for applying the subscription credit."
+  planId: UUID!
+}
+
+input CanPlayInCupInput {
+  "The ID of the cup to check."
+  cupId: UUID!
+}
+
+input CanPlayInTournamentInput {
+  "The ID of the tournament to check."
+  tournamentId: UUID!
+}
+
+input CancelCupInput {
+  "The ID of the cup to cancel."
+  cupId: UUID!
+}
+
+"Returns only completed tournaments."
+input CompletedTournamentSelectorInput {
+  "Returns only tournaments completed after this date."
+  tournamentsAfter: DateTime!
+}
+
+input ConfirmMatchParticipationInput {
+  matchId: UUID!
+}
+
+input ConfirmTournamentParticipationInput {
+  tournamentId: UUID!
+}
+
+input CreateCupInput {
+  "The public name of the cup. By default minimum length of 3 and maximum length of 100."
+  name: String!
+  "The public description of the cup. By default maximum length of 4000."
+  description: String
+  "An external ID can be used to guarantee idempotency (strongly recommended)."
+  externalId: String
+  "Parameters that define the competitions the cup will generate."
+  competitionParameters: CupCompetitionParametersInput!
+  "When the registration window should open. If not provided, players can register at any time."
+  registrationWindowOpenAt: DateTime
+  "Time at which the cup should start automatically. Specify in UTC RFC3339 compliant format, e.g 2025-05-05T13:10:20Z."
+  scheduledStartTimeAt: DateTime
+  "Teams will automatically be set to ready and checked-in after joining the cup lobby. Caution: this will bypass restriction settings. Defaults to true."
+  autoForceReady: Boolean = true
+  "The minimum number of teams required for the cup to start. Defaults to 8."
+  minimumTeamCount: Int
+  "The game you want to create a cup for. Optional if you are creating the cup from a template."
+  game: GameIdentifierInput
+  """
+  The Space hosting the Cup. 
+  Note that for BOT access, your bot must have admin rights in said space. This is configurable in the application dashboard or in your spaces under 'Roles'. 
+  Optional if you are creating the cup from a template.
+  """
+  space: SpaceIdentifierInput
+}
+
+"Parameters for the competitions that the cup should produce."
+input CupCompetitionParametersInput @oneOf {
+  "Parameterized the cup to create tournaments."
+  tournamentParameters: CupTournamentParametersInput
+}
+
+"Filter by the current state of a cup."
+input CupStateFilterInput {
+  "List of spaces to include in filter."
+  states: [CupState!]!
+}
+
+"""
+Parameters for creating a cup which produces tournaments. 
+You can use this to create a cup tournament from scratch, or when customizing from a pre-configured template.
+"""
+input CupTournamentParametersInput {
+  """
+  Tournament template ID, when creating the cup from an existing template on Challengermode. 
+  Recommended for advanced configuration. 
+  Templates for your cups can be found in your space settings under `Tournament Templates` -> `Cups`.
+  """
+  templateId: UUID
+  "The required size of each lineup. Must be compatible with the game."
+  teamSize: Int
+  "Allows you to override or patch game settings for the competition blueprint that will be used in the cup."
+  gameSettings: TournamentGameSettingsInput
+}
+
+input CupsForGameInput {
+  "The slug of the target game title, for example `lol`."
+  gameSlug: String
+  "Number of cups to fetch."
+  first: Int @deprecated(reason: "Use property on CupsForGame instead")
+  "Cursor to start after."
+  after: String @deprecated(reason: "Use property on CupsForGame instead")
+  "Filter by the state of the cup. By default Upcoming and Running cups will be searched."
+  stateFilter: [CupState!]
+}
+
+input DeactivateSubscriptionInput {
+  "The subscription ID to deactivate."
+  subscriptionId: UUID!
+}
+
+input DeclineMatchmakingOfferInput {
+  queueId: UUID!
+}
+
+input EditCupInput {
+  "The ID of the cup to edit."
+  cupId: UUID!
+  "The public name of the cup. By default minimum length of 3 and maximum length of 100."
+  name: OptionalInputOfStringInput
+  "The team size that should be used."
+  teamSize: OptionalInputOfInt32Input
+  "The public description of the cup. By default maximum length of 4000."
+  description: OptionalInputOfStringInput
+  "The time at which registrations open."
+  registrationWindowOpenAt: OptionalInputOfNullableOfDateTimeInput
+  "The time at which the cup should start automatically."
+  scheduledStartTimeAt: OptionalInputOfNullableOfDateTimeInput
+}
+
+"Unique identifier for a game title."
+input GameIdentifierInput @oneOf {
+  "The Game Integration ID of the game, as found in your application dashboard."
+  gameIntegrationId: UUID
+  """
+  The slug of the game title
+  Prefer using ID if you are building a worker or script for automation.
+  """
+  slug: String
+  "The unique identifier of the game title."
+  id: UUID
+}
+
+"Filter by json values set as in-game settings."
+input GameSettingFilterInput {
+  "Path to the setting in the json structure."
+  path: String!
+  "Value to filter by."
+  value: String!
+}
+
+"Filter by game title."
+input GameTitleFilterInput {
+  "List of game titles to filter by."
+  gameTitles: [GameIdentifierInput!]!
+}
+
+"""
+Parameters for inviting a team to a tournament.
+
+Pass `socialTeamId` for a tournament played in teams, or one player in `players` for a solo tournament. Which of the two applies follows from the tournament, and passing the other one is rejected rather than ignored.
+"""
+input InviteTeamToTournamentInput {
+  "The ID of the tournament to invite to."
+  tournamentId: UUID!
+  "The team to invite. Required for tournaments played in teams. The team must already exist on Challengermode."
+  socialTeamId: UUID
+  "The player to invite. Required for solo tournaments, and must hold exactly one user ID."
+  players: [UUID!]
+}
+
+input JoinCupInput {
+  "The ID of the cup to join."
+  cupId: UUID!
+  """
+  The game account IDs of the players to join the cup with. 
+  If provided, the authenticated user's own game account must be included. 
+   If not provided, the user will join solo with their primary game account.
+  """
+  gameAccountIds: [String!]
+  "Optional. Team name that the lineup will use throughout the cup."
+  teamName: String
+  "Optional. External numerical rating of the team."
+  teamRating: Float
+  "Optional. Place the team in a bucket where it is only matched with teams in the same bucket."
+  teamBucket: Long
+}
+
+input JoinLadderInput {
+  ladderId: UUID!
+}
+
+input JoinLeaderboardInput {
+  "The ID of the leaderboard to join"
+  leaderboardId: UUID!
+}
+
+input JoinMatchmakingQueueInput {
+  queueId: UUID!
+}
+
+"Search parameters for searching ladders for a specific game title."
+input LaddersForGameInput {
+  "The slug of the target game title, for example `lol`."
+  gameSlug: String!
+}
+
+"Search parameters for searching tournaments for a specific Space."
+input LaddersForSpaceInput {
+  "The ID of the target space."
+  spaceId: UUID!
+}
+
+input LeaveCupInput {
+  "The ID of the cup to leave."
+  cupId: UUID!
+  "Optional. If true the user or team will be allowed to forfeit, leaving a running cup."
+  confirmLeaveRunningCup: Boolean! = false
+}
+
+input LeaveLadderInput {
+  ladderId: UUID!
+}
+
+input LeaveLeaderboardInput {
+  "The ID of the leaderboard to leave"
+  leaderboardId: UUID!
+}
+
+input LeaveMatchmakingQueueInput {
+  queueId: UUID!
+}
+
+input LeaveTournamentInput {
+  tournamentId: UUID!
+}
+
+"Returns only upcoming and ongoing tournaments."
+input OpenTournamentSelectorInput {
+  "Returns only upcoming tournaments that haven't started yet."
+  excludeRunning: Boolean
+}
+
+"Represents an input field that is optional, utilized to be ablet to explicitly set nullable values."
+input OptionalInputOfInt32Input {
+  "The value of the field."
+  value: Int!
+}
+
+"Represents an input field that is optional, utilized to be ablet to explicitly set nullable values."
+input OptionalInputOfNullableOfDateTimeInput {
+  "The value of the field."
+  value: DateTime
+}
+
+"Represents an input field that is optional, utilized to be ablet to explicitly set nullable values."
+input OptionalInputOfStringInput {
+  "The value of the field."
+  value: String!
+}
+
+"Filter own ladders to limit the results returned."
+input OwnLaddersInput {
+  "Filters the ladders to only ongoing or completed. Omit filter for both."
+  onlyOngoing: Boolean
+  "Filters the ladders to only for the specified games."
+  gameSlugs: [String!]
+}
+
+"Filter parameters when fetching own matchmaking games for the current user."
+input OwnMatchmakingFilterInput {
+  "Filter by game title slug"
+  gameSlug: String!
+}
+
+"Filter own tournaments to limit the results returned."
+input OwnTournamentsInput {
+  "Filters the tournaments to only ongoing or completed. Omit filter for both"
+  onlyOngoing: Boolean
+  "Filter tournament that ended after specific date (or started in case on ongoing)."
+  tournamentsAfter: DateTime
+  "Filter to only specified tournaments."
+  tournamentIds: [UUID!]
+  "Filter to only specified game titles."
+  gameSlugs: [String!]
+}
+
+"The pre-seed data for a team in a tournament."
+input PreSeedInput {
+  "The lineup ID of the team to pre-seed."
+  lineupId: UUID!
+  "The seed value for the team. 1-indexed. This can be used later with manual seeding when the actual seeds are assigned."
+  seed: Int
+}
+
+"List of available filters for searching for cups for a specific user."
+input SearchCupsFiltersInput {
+  "Filter by cup state."
+  stateFilter: CupStateFilterInput
+  "Filter by when the cup started."
+  startedAtFilter: StartedAtFilterInput
+  "Filter by game title."
+  gameTitleFilter: GameTitleFilterInput
+  "Filter by space host."
+  spaceFilter: SpaceFilterInput
+  "Filter by participating users."
+  userFilter: UserFilterInput
+}
+
+"List of available filters for searching for cups for a specific user."
+input SearchOwnCupsFiltersInput {
+  "Filter by cup state."
+  stateFilter: CupStateFilterInput
+  "Filter by when the cup started."
+  startedAtFilter: StartedAtFilterInput
+  "Filter by game title."
+  gameTitleFilter: GameTitleFilterInput
+  "Filter by space host."
+  spaceFilter: SpaceFilterInput
+}
+
+input SetTournamentPreSeedInput {
+  "The pre-seed for lineups in the tournament."
+  preSeeds: [PreSeedInput!]!
+}
+
+"""
+Parameters for letting a user sign up for a tournament. 
+
+After they have signed up to the tournament, the user still needs to confirm their participation when the tournament confirmation window opens. Refer to `OwnTournamentParticipation::lobbyFeedback` to see whether the user can confirm their participation.
+"""
+input SignupTournamentInput {
+  "The ID of the tournament the player should sign up to."
+  tournamentId: UUID!
+  socialTeamId: UUID
+  "Optional name of the temporary team that will sign up for the tournament."
+  teamName: String
+  "The User IDs of the players who will sign up for the tournament as a team."
+  players: [UUID!]!
+}
+
+"Filter by Space."
+input SpaceFilterInput {
+  "List of spaces to include in filter."
+  spaces: [SpaceIdentifierInput!]!
+}
+
+"Identifier for a space by either ID or slug."
+input SpaceIdentifierInput @oneOf {
+  "The ID of the space, as found in settings."
+  id: UUID
+  """
+  The slug of the space, e.g https://challengermode.com/s/{space-slug}. 
+  Prefer using ID if you are building a worker or script for automation.
+  """
+  slug: String
+}
+
+input StartCupInput {
+  "The ID of the cup to start."
+  cupId: UUID!
+}
+
+"""
+Filter by start date and time.
+Allows a maximum of 1 year window.
+Note that the default window is 30 days if only one side of the range is provided.
+"""
+input StartedAtFilterInput {
+  """
+  Only include cups that started before this date and time. 
+  If 'After' is not provided, 'After' defaults to 30 days before this date.
+  """
+  before: DateTime
+  """
+  Only include cups that started after this date and time. 
+  If 'Before' is not provided, 'Before' defaults to 30 days after this date.
+  """
+  after: DateTime
+}
+
+"Input object for overriding settings in a tournament, for example when using a tournament template."
+input TournamentGameSettingsInput {
+  "The new settings to apply. Must follow the game settings schema defined by the game."
+  value: JSON!
+  "How to apply each game setting override, based on the existing value."
+  updateMethod: JsonUpdateMethod
+  "Where in the tournament to apply the settings override."
+  locations: [TournamentGameSettingsLocation!]!
+}
+
+"Filters tournament results based on their state."
+input TournamentStateFilterInput @oneOf {
+  "Returns only upcoming and ongoing tournaments."
+  openTournamentSelector: OpenTournamentSelectorInput
+  "Returns only completed tournaments."
+  completedTournamentSelector: CompletedTournamentSelectorInput
+}
+
+"Search parameters for searching tournaments for a specific game title."
+input TournamentsForGameInput {
+  "The slug of the target game title, for example `lol`."
+  gameSlug: String!
+  "Filter parameters for the kind of tournaments to search for."
+  tournamentFilter: TournamentStateFilterInput!
+  "Filter parameters for the game settings of the tournaments."
+  gameSettingFilters: [GameSettingFilterInput!]
+  "Whether to include invite-only tournaments, which are excluded by default. No permissions required — check competitionRestrictions to tell them apart."
+  includeInviteOnly: Boolean
+  "Whether to include unlisted tournaments, which are excluded by default. Based on the Space permissions granted to your user — or to your application's bot user — e.g. as co-admin."
+  includeUnlisted: Boolean
+}
+
+"Search parameters for searching tournaments for a specific Space."
+input TournamentsForSpaceInput {
+  "The ID of the target Space."
+  spaceId: UUID!
+  "Filter parameters for the kind of tournaments to search for."
+  tournamentFilter: TournamentStateFilterInput!
+  "Filter parameters for the game settings of the tournaments."
+  gameSettingFilters: [GameSettingFilterInput!]
+  "Whether to include invite-only tournaments, which are excluded by default. No permissions required — check competitionRestrictions to tell them apart."
+  includeInviteOnly: Boolean
+  "Whether to include unlisted tournaments, which are excluded by default. Based on the Space permissions granted to your user — or to your application's bot user — e.g. as co-admin."
+  includeUnlisted: Boolean
+}
+
+"Filter that allows filtering users by their external Game Account ID."
+input UserFilterByGameAccountIdInput {
+  "List of game account IDs to filter by."
+  gameAccountIds: [String!]!
+}
+
+"Filter that allows filtering users by their user ID."
+input UserFilterByIdInput {
+  "List of user IDs to filter by."
+  userIds: [UUID!]!
+}
+
+"Filter by user."
+input UserFilterInput @oneOf {
+  "Filter by user IDs."
+  userIdFilter: UserFilterByIdInput
+  "Filter by game account IDs."
+  gameAccountIdFilter: UserFilterByGameAccountIdInput
+}
+
+"List of available actions for a user in a tournament."
+enum AllowedTournamentAction {
+  "No action is available."
+  NONE
+  "The user can sign up to the tournament. To let the user sign up, call `Mutation::signupTournament`"
+  SIGN_UP
+  "The user should confirm their participation in the tournament. Call `Mutation::confirmTournamentParticipation`"
+  CONFIRM
+  "The user should confirm their participation in their current match. Call `Mutation::confirmMatchParticipation`"
+  CONFIRM_MATCH
+  "The user can leave the tournament. To let the user leave, call `Mutation::leaveTournament`"
+  LEAVE
+}
+
+"Defines when a policy shall be executed."
+enum ApplyPolicy {
+  "Before the resolver was executed."
+  BEFORE_RESOLVER
+  "After the resolver was executed."
+  AFTER_RESOLVER
+  "The policy is applied in the validation step before the execution."
+  VALIDATION
+}
+
+"The size of a thumbnail image"
+enum BannerSize {
+  "150 * 600"
+  SMALL
+  "300 * 1200"
+  MEDIUM
+  "600 * 2400"
+  LARGE
+}
+
+"A restriction may prohibit users from participating in a competition."
+enum CompetitionRestriction {
+  "A restriction not (yet) described in the public API. These should be rare and only apply to specific Spaces. Direct users to the platform to fulfill these."
+  OTHER
+  "Users must fill in KYC (know your customer) information. Direct them to the platform."
+  KYC
+  "Users must verify their phone number. Direct them to the platform."
+  VERIFIED_PHONE_NUMBER
+  "The competition has an entry fee which must be paid."
+  ENTRY_FEE
+  "Users must connect a specific external account (e.g Discord) to their profile. Direct them to the platform."
+  CONNECTION
+  "Users must have a specific subscription to the hosting Space. Direct them to the platform."
+  SUBSCRIPTION
+  "Users must fill in a survey. Direct them to the platform."
+  SURVEY
+  "Users must have a game account linked. Verify the users account again using one of the available account linking methods in the game integration API."
+  LINKED_GAME_ACCOUNT
+  "Users must be ranked within the range specified by the organizer."
+  RANK
+  "Users must not be banned."
+  USER_NOT_BANNED
+  "Users must have received and accepted an invitation."
+  INVITATION
+  """
+  Some competitions formats, such as Leaderboards, support users joining implicitly only based on their play activity. 
+  This restriction indicates that users must explicitly join the competition to participate.
+  """
+  JOIN
+  "Users must follow the hosting Space. Direct them to the platform."
+  FOLLOW_SPACE
+}
+
+"The state of a cup."
+enum CupState {
+  UNKNOWN
+  "The cup is not listed on the website."
+  UNLISTED
+  "The cup is scheduled to start in the future."
+  UPCOMING
+  "The cup is currently running."
+  RUNNING
+  "The cup is completed."
+  COMPLETED
+  "The cup is canceled."
+  CANCELED
+}
+
+"External account provider that users can connect to their account."
+enum ExternalAccountProvider {
+  "Steam account IDs are formatted as SteamId64, see https:\/\/developer.valvesoftware.com\/wiki\/SteamID for details."
+  STEAM
+  DISCORD
+  TWITCH
+  KRAFTON
+  EA
+}
+
+"Available methods when applying JSON overrides to an existing json value."
+enum JsonUpdateMethod {
+  "Overrides will completely overwrite, replacing any existing values with the new ones."
+  REPLACE
+  "Overrides will be applied as a merge patch, for details of merge behaviour refer to RFC 7386."
+  MERGE
+}
+
+"The state of a ladder."
+enum LadderState {
+  UNKNOWN
+  "Ladder is created but not yet joinable."
+  NEW
+  "Ladder is open and joinable, but not started."
+  OPEN
+  "Running and collecting game results."
+  RUNNING
+  "Finished collecting results and setting the final positions."
+  FINISHED
+  "Ladder is cancelled."
+  CANCELLED
+}
+
+"The type of activity contributing to a leaderboard."
+enum LeaderboardActivityType {
+  "The type of this activity is not specified."
+  UNSPECIFIED
+  "A contribution from participating in a tournament."
+  TOURNAMENT
+}
+
+"The state of a leaderboard."
+enum LeaderboardState {
+  UNKNOWN
+  "Leaderboard is created but not yet joinable."
+  NEW
+  "Leaderboard is open and joinable, but not started."
+  OPEN
+  "Running and collecting game results."
+  RUNNING
+  "Finished collecting results and setting the final positions."
+  FINISHED
+  "Leaderboard is cancelled."
+  CANCELLED
+}
+
+"The size of a thumbnail image"
+enum LogoSize {
+  "32 * 32"
+  SMALL
+  "64 * 64"
+  MEDIUM
+  "128 * 128"
+  LARGE
+  "256 * 256"
+  EXTRA_LARGE
+}
+
+"Represents a League of Legends game realm."
+enum LolGameRealm {
+  "Unknown or unspecified League of Legends realm."
+  UNKNOWN
+  "Brazilian League of Legends realm."
+  BR
+  "European Nordic & East League of Legends realm."
+  EUNE
+  "European West League of Legends realm."
+  EUW
+  "North American League of Legends realm."
+  NA
+  "Korean League of Legends realm."
+  KR
+  "Latin America North League of Legends realm."
+  LAN
+  "Latin America South League of Legends realm."
+  LAS
+  "Oceanian League of Legends realm."
+  OCE
+  "Russian League of Legends realm."
+  RU
+  "Turkish League of Legends realm."
+  TR
+  "Global League of Legends realm, used for cross-region services."
+  GLOBAL
+  "Japanese League of Legends realm."
+  JP
+  "Public Beta Environment for League of Legends, used for testing."
+  PBE
+  "Philippine League of Legends realm."
+  PH
+  "Singaporean League of Legends realm."
+  SG
+  "Thai League of Legends realm."
+  TH
+  "Taiwanese League of Legends realm."
+  TW
+  "Vietnamese League of Legends realm."
+  VN
+  "Middle East League of Legends realm."
+  ME
+}
+
+"The state of a match series."
+enum MatchSeriesState {
+  UNKNOWN
+  "The match series has been created and some \"parameters\" (game settings, teams) are known. Playing has not yet begun, either because parameters are missing or because it needs to be started manually."
+  WAITING
+  "The match series is currently running and some matches have been created."
+  RUNNING
+  "The match series is paused. If the match involves several games, there may be some time in between each game (to allow for player substitutions, short breaks etc)."
+  PAUSED
+  "The match series is completed and the result of this match has been decided."
+  COMPLETED
+  "The result of this match was discarded, and \"no opponent\" was propagated."
+  NULLIFIED
+}
+
+"The state of a match."
+enum MatchState {
+  UNKNOWN
+  "The match series is created and is in a lobby state where players are joining."
+  LOBBY
+  "All players have joined and the first match in the match series is starting. In some cases admins may force-start a match series."
+  STARTING
+  "The match series is running and one or more matching have been created."
+  RUNNING
+  "The match series is completed and results have been propagated."
+  COMPLETED
+  "The match series was cancelled, either because not enough players joined or because an admin cancelled it."
+  CANCELLED
+}
+
+"The state of a matchmaking offer. Open, Accepted and Playing are considered active states and will generally include the offer in ongoing active offer listings."
+enum MatchmakingOfferState {
+  "The offer is open and the users need to either accept or decline."
+  OPEN
+  "The offer has been accepted and a competition is being created."
+  ACCEPTED
+  "The corrpesonding competition has been created and the users are playing."
+  PLAYING
+  "The offer is completed and the competition has been concluded."
+  COMPLETED
+  "The offer has failed and users have been requeued into the matchmaking queue."
+  FAILED
+}
+
+"The type of competitions that the matchmaking queue produces once players are matched together."
+enum MatchmakingQueueType {
+  "A standard matchmaking queue where the queue produces invidiual matches."
+  MATCH
+  """
+  A tournament matchmaking queue where the queue produces tournaments. 
+  
+  See `MatchmakingSettings::tournamentQueueSettings` for tournament specific settings.
+  """
+  TOURNAMENT
+}
+
+enum PublicApiErrorCode {
+  UNKNOWN
+  UNAUTHORIZED
+  NOT_FOUND
+  REQUEST_TIMEOUT
+  INTERNAL_SERVICE_ERROR
+  MISSING_API_VERSION
+  INVALID_API_VERSION
+  INVALID_API_NAME
+  APP_NOT_APPROVED
+  INVALID_TIME_ZONE_ID
+  APP_DEACTIVATED
+  INVALID_GAME_STATE
+  TOKEN_EXPIRED
+  BAD_ARGUMENTS
+  FEATURE_NOT_ENABLED
+  REQUIRED_PARAMTER_NULL_OR_EMPTY
+  VALIDATION_ERROR
+  GAME_ACCOUNT_ALREADY_LINKED
+  TOURNAMENT_STATE_DISALLOWS_ACTION
+  TEAM_SIZE_NOT_CORRECT
+  ACTION_NOT_ALLOWED
+  TOURNAMENT_IP_RESTRICTED
+  TOURNAMENT_REQUIRES_RESERVATION
+  TOURNAMENT_TIER_RESTRICTED
+  O_AUTH_UNSUPPORTED_GRANT_TYPE
+  O_AUTH_TOKEN_EXCHANGE_ERROR
+  O_AUTH_ASSERTION_MISSING
+  O_AUTH_CLIENT_NOT_FOUND
+  O_AUTH_ASSERTION_GRANT_PROVIDER_NOT_AUTHORIZED
+  O_AUTH_ASSERTION_VALIDATION_FAILED
+  O_AUTH_USER_CODE_MISSING
+  O_AUTH_USER_CODE_WRONG
+  EMAIL_INVALID
+  EMAIL_CLAIMED
+  CREATE_USERNAME_FAILED
+  COUNTRY_INVALID
+  PLAYER_IN_OTHER_TEAM
+  COMPETITION_STATE_INVALID
+  INVALID_TEAM_SIZE
+  RESTRICTION_NOT_MET
+  REGISTRATION_CLOSED
+  TOO_FEW_TEAMS
+  NO_RUNNING_LADDER
+  ALREADY_JOINED_LADDER
+  USER_BANNED
+  GAME_INTEGRATION_NOT_CONFIGURED
+  GAME_ACCOUNT_NOT_LINKED
+  INVALID_GAME_SETTINGS
+}
+
+"The available data types for statistic items."
+enum StatisticDataType {
+  "The value is of unknown type."
+  UNKNOWN
+  "The value is a string."
+  STRING
+  "The value is a integer."
+  INTEGER
+  "The value is a double."
+  DOUBLE
+  "The value is a boolean."
+  BOOLEAN
+  "The value is a decimal."
+  DECIMAL
+}
+
+"Different types of streams target different kinds of entities, such as a stream streaming a MatchSeries in a Tournament."
+enum StreamType {
+  UNKNOWN
+  MATCH_SERIES
+}
+
+"The size of a thumbnail image"
+enum ThumbnailSize {
+  "180 * 320"
+  SMALL
+  "360 * 640"
+  MEDIUM
+  "720 * 1280"
+  LARGE
+}
+
+"Format of brackets within a tournament or tournament stage."
+enum TournamentBracketFormat {
+  "Unknown bracket format."
+  UNKNOWN
+  "Custom bracket format."
+  OTHER
+  "The most common bracket format. Participants are eliminated after one loss."
+  SINGLE_ELIMINATION
+  "Participants are eliminated after losing two matches. Losers in the upper bracket get a 2nd chance in the lower bracket, with the option to work their way back into the grand finals."
+  DOUBLE_ELIMINATION
+  "A non-elimination format where participants compete against opponents with similar records each round."
+  SWISS
+  "In round-robin, participants play against every other player or team in their group for a specified number of encounters."
+  ROUND_ROBIN
+}
+
+"The format of the tournament and its stages and brackets."
+enum TournamentFormat {
+  UNKNOWN
+  "Tournament consisting of multiple bracket formats."
+  OTHER
+  "Tournament with only a single elimination bracket."
+  SINGLE_ELIMINATION
+  "Tournament with only a double elimination bracket."
+  DOUBLE_ELIMINATION
+  "Tournament with only a Swiss bracket."
+  SWISS
+  "Tournament with a round-robin bracket."
+  ROUND_ROBIN
+}
+
+"Available methods when applying game settings to a tournament"
+enum TournamentGameSettingsLocation {
+  "The default settings, used for all matches without explicit override of game settings."
+  DEFAULT_SETTINGS
+  "All matches that already have explicit overrides for game settings."
+  MATCH_SERIES_WITH_OVERRIDES
+  "All settings across the whole competition. (DEFAULT_SETTINGS|MATCH_SERIES_WITH_OVERRIDES)"
+  EVERYWHERE
+}
+
+"Current state of the tournament group."
+enum TournamentGroupState {
+  UNKNOWN
+  "Playing has not yet begun, either because teams are missing or because it needs to be started manually."
+  WAITING
+  "Playing is in progress."
+  RUNNING
+  "The group has concluded playing but requires tiebreaking."
+  TIED
+  "The result of this group has been decided."
+  COMPLETED
+}
+
+"Labels used to describe tournament nodes, such as brackets, matches, rounds, etc."
+enum TournamentNodeLabel {
+  "The upper bracket of a double elimination stage. Teams that lose in this bracket are sent to the lower bracket."
+  DOUBLE_ELIMINATION_UPPER_BRACKET
+  "The lower bracket of a double elimination stage.Teams that lose in this bracket are eliminated from the tournament."
+  DOUBLE_ELIMINATION_LOWER_BRACKET
+  "The grand finals bracket of a double elimination stage."
+  DOUBLE_ELIMINATION_FINALS_BRACKET
+  "A single elimination bracket."
+  SINGLE_ELIMINATION_BRACKET
+  "A bracket using a swiss format - a non-elimination format where players compete against opponents with similar records each round."
+  SWISS_BRACKET
+  "A bracket with round robin format, where each team or player plays against every other team or player in their group for a specified number of encounters."
+  ROUND_ROBIN_BRACKET
+  "The final match of a tournament bracket."
+  FINALS_MATCH
+  "A semi-finals match of a tournament bracket."
+  SEMI_FINALS_MATCH
+  "The bronze match of a tournament bracket."
+  BRONZE_MATCH
+  "The final round of a tournament bracket."
+  FINALS_ROUND
+  "The semi-finals round of a tournament bracket."
+  SEMI_FINALS_ROUND
+  "The quarter-finals round of a tournament bracket."
+  QUARTER_FINALS_ROUND
+}
+
+"Available restrictions which may prohibit a user from participating in a tournament."
+enum TournamentRestriction {
+  "The tournament has another restriction which is not described in the public API. This may be restrictions that only apply to specific Spaces. Direct them to the platform."
+  OTHER
+  "The user must fill in KYC (know your customer) information in order to participate in the tournament. Direct them to the platform."
+  KYC
+  "The user must verify their phone number in order to participate in the tournament. Direct them to the platform."
+  VERIFIED_PHONE_NUMBER
+  "The tournament has an entry fee which must be paid in order to participate in the tournament."
+  ENTRY_FEE
+  "The user must connect a specific external account to their profile. Direct them to the platform."
+  CONNECTION
+  "The tournament is only accessible by users with a specific subscription. Direct them to the platform."
+  SUBSCRIPTION
+  "The user must fill in a survey in order to participate in the tournament. Direct them to the platform."
+  SURVEY
+}
+
+"The state of a tournament."
+enum TournamentState {
+  UNKNOWN
+  "Tournament is created but only visible to organizers."
+  UNLISTED
+  "Tournament is listed and users can signup and confirm their participation."
+  OPEN
+  "Tournament is ready to start."
+  STARTING
+  "Tournament is running."
+  RUNNING
+  "Results are available and final team placements are known."
+  COMPLETED
+  "Tournament is cancelled or removed."
+  CANCELLED
+}
+
+"The authorize directive."
+directive @authorize("The name of the authorization policy that determines access to the annotated resource." policy: String "Roles that are allowed to access the annotated resource." roles: [String!] "Defines when when the authorize directive shall be applied.By default the authorize directives are applied during the validation phase." apply: ApplyPolicy! = BEFORE_RESOLVER) repeatable on OBJECT | FIELD_DEFINITION
+
+"The purpose of the `cost` directive is to define a `weight` for GraphQL types, fields, and arguments. Static analysis can use these weights when calculating the overall cost of a query or response."
+directive @cost("The `weight` argument defines what value to add to the overall cost for every appearance, or possible appearance, of a type, field, argument, etc." weight: String!) on SCALAR | OBJECT | FIELD_DEFINITION | ARGUMENT_DEFINITION | ENUM | INPUT_FIELD_DEFINITION
+
+"The purpose of the `@listSize` directive is to either inform the static analysis about the size of returned lists (if that information is statically available), or to point the analysis to where to find that information."
+directive @listSize("The `assumedSize` argument can be used to statically define the maximum length of a list returned by a field." assumedSize: Int "The `slicingArguments` argument can be used to define which of the field's arguments with numeric type are slicing arguments, so that their value determines the size of the list returned by that field. It may specify a list of multiple slicing arguments." slicingArguments: [String!] "The `slicingArgumentDefaultValue` argument can be used to define a default value for a slicing argument, which is used if the argument is not present in a query." slicingArgumentDefaultValue: Int "The `sizedFields` argument can be used to define that the value of the `assumedSize` argument or of a slicing argument does not affect the size of a list returned by a field itself, but that of a list returned by one of its sub-fields." sizedFields: [String!] "The `requireOneSlicingArgument` argument can be used to inform the static analysis that it should expect that exactly one of the defined slicing arguments is present in a query. If that is not the case (i.e., if none or multiple slicing arguments are present), the static analysis may throw an error." requireOneSlicingArgument: Boolean! = true) on FIELD_DEFINITION
+
+"""
+The `@oneOf` directive is used within the type system definition language
+ to indicate:
+
+ - an Input Object is a Oneof Input Object, or
+ - an Object Type's Field is a Oneof Field.
+"""
+directive @oneOf on INPUT_OBJECT
+
+"The `@specifiedBy` directive is used within the type system definition language to provide a URL for specifying the behavior of custom scalar definitions."
+directive @specifiedBy("The specifiedBy URL points to a human-readable specification. This field will only read a result for scalar types." url: String!) on SCALAR
+
+"The `DateTime` scalar represents an ISO-8601 compliant date time type, 2019-12-31T23:59:59.9999999Z."
+scalar DateTime @specifiedBy(url: "https:\/\/www.graphql-scalars.com\/date-time")
+
+scalar JSON
+
+"A scalar type representing a JSON string."
+scalar JsonString
+
+"The `Long` scalar type represents non-fractional signed whole 64-bit numeric values. Long can represent values between -(2^63) and 2^63 - 1."
+scalar Long
+
+"The `UUID` scalar represents a unique identifier and is formatted as 32 digit string guids separated by hyphens 00000000-0000-0000-0000-000000000000."
+scalar UUID

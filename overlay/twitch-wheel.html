@@ -6,6 +6,7 @@
   <title>Twitch Giveaway Wheel</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
+    html { height: 100%; }   /* body's 100% needs this, or the wheel sits at the top with the pointer clipped */
     body {
       background: transparent;
       font-family: 'Inter', sans-serif;
@@ -34,39 +35,27 @@
       transition: transform 0.05s linear;
     }
 
-    .wheel-segment {
+    /* Wedges are painted by a conic-gradient on #wheel (sized to the prize count); each label sits
+       on a full-size layer rotated to the middle of its wedge. */
+    .wheel-label {
       position: absolute;
-      width: 100%;
-      height: 100%;
-      clip-path: polygon(50% 50%, 50% 0%, 100% 0%);
-      transform-origin: 50% 50%;
-    }
-
-    .segment-fill {
-      width: 100%;
-      height: 100%;
+      inset: 0;
       display: flex;
-      align-items: center;
       justify-content: center;
-      clip-path: polygon(50% 50%, 50% 0%, 100% 0%);
-      font-size: 13px;
-      font-weight: 700;
-      text-shadow: 0 2px 4px rgba(0,0,0,0.8);
-      position: relative;
+      padding-top: 9%;
+      pointer-events: none;
     }
-
-    .segment-label {
-      position: absolute;
-      transform: translateX(60px) rotate(var(--rotation));
-      transform-origin: 0 0;
-      white-space: nowrap;
-      font-size: 11px;
-      font-weight: 600;
+    .wheel-label span {
+      max-width: 30%;
+      height: fit-content;
+      font-size: 12px;
+      font-weight: 700;
       letter-spacing: 0.05em;
       text-transform: uppercase;
-      max-width: 80px;
       text-align: center;
       line-height: 1.2;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+      overflow-wrap: anywhere;
     }
 
     .wheel-pointer {
@@ -208,20 +197,14 @@
     const wheel = document.getElementById('wheel');
     const segmentAngle = 360 / prizes.length;
 
-    wheel.innerHTML = prizes.map((prize, i) => {
-      const rotation = segmentAngle * i;
-      const color = COLORS[i % COLORS.length];
-
-      return `
-        <div class="wheel-segment" style="transform: rotate(${rotation}deg);">
-          <div class="segment-fill" style="background: ${color};">
-            <div class="segment-label" style="--rotation: ${segmentAngle / 2}deg;">
-              ${prize.name}
-            </div>
-          </div>
-        </div>
-      `;
-    }).join('');
+    // One wedge per prize, starting at the top (0deg) and running clockwise — the same geometry
+    // calculateWinnerIndex() assumes. The old fixed 45deg clip-path was only right for 8 prizes.
+    wheel.style.background = 'conic-gradient(' + prizes.map((p, i) =>
+      COLORS[i % COLORS.length] + ' ' + (segmentAngle * i) + 'deg ' + (segmentAngle * (i + 1)) + 'deg').join(', ') + ')';
+    const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+    wheel.innerHTML = prizes.map((prize, i) =>
+      '<div class="wheel-label" style="transform: rotate(' + (segmentAngle * i + segmentAngle / 2) + 'deg);"><span>' + escHtml(prize.name) + '</span></div>'
+    ).join('');
   }
 
   function calculateWinnerIndex(prizes, targetRotation) {
@@ -264,7 +247,7 @@
 
     // Map participant to prize index
     const winner = participants[winnerIdx];
-    let prizeIndex = prizes.findIndex(p => p.name === winner.prizePreference || p.id);
+    let prizeIndex = prizes.findIndex(p => p.name === winner.prizePreference || (p.id && p.id === winner.prizePreference));   // was `|| p.id` — always truthy, so every winner got prize 0
 
     if (prizeIndex === -1) {
       prizeIndex = Math.floor(Math.random() * prizes.length);

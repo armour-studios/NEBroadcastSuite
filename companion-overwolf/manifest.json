@@ -6,7 +6,7 @@
     "author": "Armour Studios",
     "version": "0.2.0",
     "minimum-overwolf-version": "0.240.0",
-    "description": "Relays Overwatch, Marvel Rivals and Rainbow Six Siege live game data to NE Broadcast Suite",
+    "description": "Relays Overwatch, Marvel Rivals and Valorant live game data to NE Broadcast Suite",
     "icon": "icon.png"
   },
   "permissions": [
@@ -27,7 +27,8 @@
       "type": "dedicated",
       "game_ids": [
         10844,
-        24890
+        24890,
+        21640
       ]
     },
     "launch_events": [
@@ -36,7 +37,8 @@
         "event_data": {
           "game_ids": [
             10844,
-            24890
+            24890,
+            21640
           ]
         },
         "start_minimized": true

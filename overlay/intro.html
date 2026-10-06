@@ -241,6 +241,7 @@
     .lh-role-badge { font-size: 9px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase;
       padding: 4px 9px; border-radius: 3px; color: rgba(255,255,255,.7); flex-shrink: 0;
       background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12); white-space: nowrap; }
+    .lh-role-ico { width: 11px; height: 11px; margin-right: 5px; vertical-align: -2px; }
     .lh-role-badge.is-cap { background: linear-gradient(135deg, var(--duo-accent), var(--duo-accent2)); color: #fff; border-color: transparent; }
 
     /* Real name line — shown when intro.showRealName is enabled */
@@ -300,7 +301,7 @@
     .lh-row.is-cap .lh-status-badge.badge-starter {
       background: linear-gradient(135deg, color-mix(in srgb, var(--duo-accent) 30%, transparent), color-mix(in srgb, var(--duo-accent2) 30%, transparent));
       border-color: color-mix(in srgb, var(--duo-accent) 45%, transparent);
-      color: var(--duo-accent);
+      color: var(--duo-accent-ink, var(--duo-accent));
     }
     .lh-status-badge.badge-sub {
       background: rgba(246,173,85,.12);
@@ -541,7 +542,7 @@
       } else {
         logoEl.style.display = 'none'; logoBgEl.style.display = 'none';
         logoInitEl.style.display = '';
-        logoInitEl.textContent = (team.name || 'T')[0].toUpperCase();
+        logoInitEl.textContent = (Array.from(String(team.name || 'T').trim())[0] || 'T').toUpperCase();   // whole code point, not half an emoji
       }
       el('lh-tname').textContent = (team.name || 'TEAM').toUpperCase();
       el('lh-right-lbl').textContent = (intro.title || 'Starting Lineup');
@@ -675,9 +676,10 @@
         else { statusLabel = 'Starter'; statusClass = 'badge-starter'; }
 
         // Role badge next to name — only for non-trivial role labels
+        const roleIcon = SceneBase.roleIcon(data.activeGame, role, data);
         const showRoleBadge = role && !/^(starter|sub|substitute|alternate|alt|reserve|stand-in|standin)$/i.test(role);
         const roleBadgeHtml = showRoleBadge
-          ? `<span class="lh-role-badge${isCap ? ' is-cap' : ''}">${esc(role)}</span>`
+          ? `<span class="lh-role-badge${isCap ? ' is-cap' : ''}">${roleIcon ? `<img class="lh-role-ico" src="${roleIcon}" alt="">` : ''}${esc(role)}</span>`
           : '';
 
         // Country from start.gg via playerProfiles

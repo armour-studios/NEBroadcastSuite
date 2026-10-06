@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<!--
+  brawlhalla.html — Brawlhalla scoreboard (1v1 singles and 2v2 doubles).
+
+  Driven by full_state via scene-base.js (:3001 bridge), same as every other scene:
+    teams.blue/orange    → the two sides — player gamertag, org/prefix, country, accent colour
+    series.blue/orange   → set score (games won)
+    brawlhalla.*         → mode ('1v1' | '2v2'), startStocks, per-side stocks + legends, and the
+                           `card` on each seat: the player's RANKED IDENTITY from the official API
+    activePlayer.{blue,orange} → which roster member shows (multi-entrant entries)
+    eventName / bestOf / roundLabel → the info bar
+    casters / brand.*Sponsors → the bottom talent-and-partners chip
+
+  WHAT IS LIVE AND WHAT IS NOT — the whole design turns on this:
+    · STOCKS and the LEGEND on screen are PRODUCER-DRIVEN. Brawlhalla ships no GSI, no spectator
+      API and no "currently playing" endpoint, so nothing can read them off the game. Same deal as
+      Smash: the producer clicks them down on each KO.
+    · The RANK CHIPS are real data — ELO, tier, peak, global/region rank and season W/L pulled
+      from api.brawlhalla.com (see backend/brawlhalla.js). They refresh on a link/refresh action,
+      not per frame, because that API is career stats, not live match state.
+    A board with no cards is a CORRECT board — it just has no rank chips. Nothing here waits on a
+    fetch, and a failed lookup never blanks a chip that is already on air.
+
+  LAYOUT — one bar, centre-out, brand mark on the seam:
+    [ ORG / NAME  flag ][stocks][score]  (logo)  [score][stocks][ flag  NAME / ORG ]
+    [ tier · ELO · rank ]      [ EVENT · BEST OF ]      [ rank · ELO · tier ]
+  2v2 splits each plate into two seats (one row per player, each with their own legend + stocks)
+  and pools the pair's stocks for the game-over rule.
+
+  Legend art is OPTIONAL: assets/brawlhalla/legends/icon/<slug>.png resolved from free text via
+  brawlhalla-legends.js. With no art installed the plate draws a clean weapon-pair chip instead,
+  so the board is correct on a fresh install.
+
+  Query params: ?info=0 drops the info bar · ?rank=0 hides the rank chips · ?legend=0 hides legend
+                art/names · ?w=1280 board width · ?top=N vertical offset · ?rail=0 / ?casters=0 /
+                ?sponsors=0 control the bottom chip · ?anim=0 cuts the entrance (stills/harness).
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="/fonts.css">
+  <style>
+    :root {
+      --a: #f24b3a;       /* player 1 accent — Brawlhalla's own P1 red  */
+      --b: #2f7de1;       /* player 2 accent — P2 blue                  */
+      --ink: #f4f7fb;
+      --plate: rgba(11, 13, 20, .94);
+      --plate-2: rgba(17, 20, 30, .94);
+      --bar-h: 72px;      /* the match bar (also bounds the brand mark) */
+      --bar2-h: 30px;     /* the context bar                            */
+      --gutter: 236px;    /* centre column the brand mark lives in      */
+      --seam: 4px;
+      --brand-y: 17px;    /* set from JS — see the note in render()     */
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 1920px; height: 1080px; overflow: hidden; background: transparent;
+      font-family: 'Rajdhani', 'Inter', system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased; text-transform: uppercase; color: var(--ink);
+    }
+
+    /* ── Entrance: opens from the centre outward, ~0.8s, punchable mid-set ── */
+    @keyframes bh-drop { from { opacity: 0; transform: translateX(-50%) translateY(-18px); }
+                         to   { opacity: 1; transform: translateX(-50%) translateY(0); } }
+    @keyframes wipe-l  { from { opacity: 0; clip-path: inset(0 0 0 100%); }
+                         to   { opacity: 1; clip-path: inset(0 0 0 0); } }
+    @keyframes wipe-r  { from { opacity: 0; clip-path: inset(0 100% 0 0); }
+                         to   { opacity: 1; clip-path: inset(0 0 0 0); } }
+    @keyframes wipe-m  { from { opacity: 0; clip-path: inset(0 50% 0 50%); }
+                         to   { opacity: 1; clip-path: inset(0 0 0 0); } }
+    /* MUST end on the transform the element itself uses: animation-fill-mode:both keeps the last
+       keyframe applied forever, so a `to` without the -50%/-50% re-parks the mark off-centre. */
+    @keyframes pop     { from { opacity: 0; transform: translate(-50%, -50%) scale(.72); }
+                         to   { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+
+    /* ── Stage ─────────────────────────────────────────────────────────── */
+    .bh {
+      position: absolute; top: var(--bh-top, 14px); left: 50%; transform: translateX(-50%);
+      display: grid;
+      grid-template-columns: 1fr var(--gutter) 1fr;
+      grid-template-rows: var(--bar-h) var(--bar2-h);
+      row-gap: var(--seam);
+      width: var(--bh-w, 1280px);
+      opacity: 0;
+      /* ONE shadow for the whole graphic — per-element slabs read as separate raised boxes. */
+      filter: drop-shadow(0 10px 26px rgba(0, 0, 0, .52));
+    }
+    .bh.show { animation: bh-drop .4s cubic-bezier(.2, .8, .3, 1) both; }
+    .bh:not(.show) .p, .bh:not(.show) .brandmark, .bh:not(.show) .ctx { opacity: 0; }
+    .bh.show .p--a     { animation: wipe-l .48s cubic-bezier(.2, .8, .3, 1) .12s both; }
+    .bh.show .p--b     { animation: wipe-r .48s cubic-bezier(.2, .8, .3, 1) .12s both; }
+    .bh.show .brandmark{ animation: pop    .44s cubic-bezier(.2, 1.5, .4, 1) .02s both; }
+    .bh.show .ctx      { animation: wipe-m .42s cubic-bezier(.2, .8, .3, 1) .34s both; }
+    body.no-anim .bh, body.no-anim .bh * { animation: none !important; }
+    body.no-anim .bh.show, body.no-anim .bh.show * { opacity: 1; }
+
+    /* ── Bar 1: the player plate ────────────────────────────────────────── */
+    .p {
+      grid-row: 1; position: relative; display: flex; align-items: stretch; overflow: hidden;
+      background: linear-gradient(90deg, var(--pc-deep) 0%, var(--pc) 66%, var(--pc-lite) 100%);
+      box-shadow: inset 0 0 0 2px rgba(0, 0, 0, .55);
+    }
+    .p--a { grid-column: 1; --pc: var(--a); --pc-deep: var(--a-deep); --pc-lite: var(--a-lite); }
+    .p--b { grid-column: 3; --pc: var(--b); --pc-deep: var(--b-deep); --pc-lite: var(--b-lite);
+            background: linear-gradient(270deg, var(--pc-deep) 0%, var(--pc) 66%, var(--pc-lite) 100%);
+            flex-direction: row-reverse; }
+    /* accent keyline along the top edge */
+    .p::after { content: ''; position: absolute; top: 2px; left: 2px; right: 2px; height: 1px;
+                background: rgba(255, 255, 255, .26); z-index: 4; pointer-events: none; }
+
+    /* Ghosted behind the inner half of the plate. Kept low and narrow on purpose: at full
+       opacity the render fought the gamertag for the eye and washed out the stock pips, which
+       are the one thing on this board that has to be readable at a glance. */
+    .por { position: absolute; top: 0; bottom: 0; width: 152px; z-index: 0; pointer-events: none;
+           opacity: .24; background-repeat: no-repeat; background-size: cover; }
+    .p--a .por { right: 86px; background-position: 50% 18%;
+                 -webkit-mask-image: linear-gradient(90deg, transparent, #000 46%, #000 78%, transparent); }
+    .p--b .por { left: 86px; background-position: 50% 18%;
+                 -webkit-mask-image: linear-gradient(270deg, transparent, #000 46%, #000 78%, transparent); }
+    .por.is-hidden { display: none; }
+
+    /* Identity block: gamertag over org. */
+    .who { position: relative; z-index: 2; flex: 1 1 auto; min-width: 0;
+           display: flex; flex-direction: column; justify-content: center; gap: 1px; padding: 0 18px; }
+    .p--b .who { align-items: flex-end; text-align: right; }
+    .tag  { font-size: 31px; font-weight: 700; letter-spacing: .012em; line-height: 1.02;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+            text-shadow: 0 2px 6px rgba(0, 0, 0, .5); }
+    .org  { font-size: 15px; font-weight: 600; letter-spacing: .1em; opacity: .74; line-height: 1;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+    .org:empty { display: none; }
+
+    /* 2v2: two seats stacked inside one plate. */
+    .seats { position: relative; z-index: 2; flex: 1 1 auto; min-width: 0;
+             display: flex; flex-direction: column; justify-content: center; padding: 4px 16px; gap: 2px; }
+    .seat { display: flex; align-items: center; gap: 9px; min-width: 0; }
+    .p--b .seat { flex-direction: row-reverse; }
+    .seat-tag { font-size: 20px; font-weight: 700; line-height: 1.05;
+                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .seat-ico { width: 26px; height: 26px; border-radius: 5px; flex: 0 0 auto; object-fit: cover;
+                background: rgba(0, 0, 0, .35); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .18); }
+    .seat-ico.is-hidden { display: none; }
+    .seat-pips { display: flex; gap: 3px; margin-left: auto; flex: 0 0 auto; }
+    .p--b .seat-pips { margin-left: 0; margin-right: auto; }
+
+    .flag { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; flex: 0 0 auto;
+            align-self: center; box-shadow: 0 0 0 2px rgba(0, 0, 0, .35); }
+    .flag.is-hidden { display: none; }
+
+    /* Stock pips — the legend's portrait when there is art, an accent dot when there is not.
+       The pips sit directly over the ghosted portrait, so they carry their OWN dark pill and a
+       ring each: stocks remaining is the one number on this board that has to read instantly, and
+       without the backing they disappeared into whichever legend happened to be behind them. */
+    .pips { position: relative; z-index: 2; display: flex; align-items: center; gap: 5px;
+            margin: 0 10px; padding: 0 9px; flex: 0 0 auto; align-self: center;
+            background: rgba(0, 0, 0, .34); border-radius: 999px; height: 32px; }
+    .pip { width: 21px; height: 21px; border-radius: 50%; background: rgba(255, 255, 255, .92);
+           box-shadow: 0 0 0 2px rgba(0, 0, 0, .5), 0 1px 3px rgba(0, 0, 0, .45);
+           background-size: cover; background-position: 50% 28%; }
+    .pip.spent { opacity: .18; filter: grayscale(1); }
+    .pip--sm { width: 15px; height: 15px; box-shadow: 0 0 0 1px rgba(0, 0, 0, .5); }
+
+    /* Score cap at the inner edge. */
+    .score { position: relative; z-index: 3; flex: 0 0 86px; display: grid; place-items: center;
+             font-size: 46px; font-weight: 700; line-height: 1;
+             background: linear-gradient(180deg, rgba(0, 0, 0, .34), rgba(0, 0, 0, .58));
+             box-shadow: inset 1px 0 0 rgba(255, 255, 255, .14); }
+
+    /* ── Centre gutter + brand mark ─────────────────────────────────────── */
+    .gut { grid-column: 2; grid-row: 1; position: relative;
+           background: linear-gradient(180deg, var(--plate), var(--plate-2));
+           box-shadow: inset 0 0 0 2px rgba(0, 0, 0, .5); }
+    .brandmark {
+      position: absolute; left: 50%; top: calc(50% + var(--brand-y));
+      transform: translate(-50%, -50%); z-index: 6;
+      display: grid; place-items: center; width: 168px; height: 92px;
+    }
+    .brandmark img { max-width: 100%; max-height: 100%; object-fit: contain;
+                     filter: drop-shadow(0 3px 10px rgba(0, 0, 0, .6)); }
+    .vs { font-size: 27px; font-weight: 700; letter-spacing: .16em; opacity: .5; }
+
+    /* ── Bar 2: ONE context bar across the whole width ───────────────────
+       Deliberately not three columns matching bar 1: the centre gutter is 236px, and a round
+       label plus the format plus the best-of does not fit in it — it clipped to "BRAN…". One bar
+       lets the middle take the room the rank chips aren't using. */
+    .ctx { grid-row: 2; grid-column: 1 / -1; display: grid;
+           grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px; padding: 0 16px;
+           background: linear-gradient(180deg, var(--plate), var(--plate-2));
+           box-shadow: inset 0 0 0 2px rgba(0, 0, 0, .5); font-size: 13px; letter-spacing: .06em; }
+    .bh.no-info .ctx { visibility: hidden; }
+    .ctx-side { display: flex; align-items: center; gap: 9px; min-width: 0; overflow: hidden; }
+    .ctx-side--b { justify-content: flex-end; }
+    .ctx-mid { display: flex; align-items: center; gap: 9px; white-space: nowrap; }
+    .chip { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+    .chip .k { opacity: .5; font-size: 11px; }
+    .chip .v { font-weight: 700; }
+    /* The tier chip carries its tier's colour as a leading bar, so Valhallan reads instantly. */
+    .tier { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; white-space: nowrap; }
+    .tier::before { content: ''; width: 4px; height: 14px; border-radius: 2px;
+                    background: var(--tier-c, #7d8590); }
+    .ctx .ev { font-weight: 700; letter-spacing: .1em; }
+    .ctx .bo { opacity: .55; }
+    .sep { opacity: .22; margin: 0 1px; }
+  </style>
+</head>
+<body>
+  <div class="bh" id="bh">
+    <div class="p p--a" id="pA">
+      <div class="por" id="porA"></div>
+      <div class="who" id="whoA"><div class="tag" id="tagA">PLAYER 1</div><div class="org" id="orgA"></div></div>
+      <div class="seats is-hidden" id="seatsA" style="display:none"></div>
+      <img class="flag is-hidden" id="flagA" alt="">
+      <div class="pips" id="pipsA"></div>
+      <div class="score" id="scoreA">0</div>
+    </div>
+
+    <div class="gut">
+      <div class="brandmark" id="brand"><div class="vs">VS</div></div>
+    </div>
+
+    <div class="p p--b" id="pB">
+      <div class="por" id="porB"></div>
+      <div class="who" id="whoB"><div class="tag" id="tagB">PLAYER 2</div><div class="org" id="orgB"></div></div>
+      <div class="seats is-hidden" id="seatsB" style="display:none"></div>
+      <img class="flag is-hidden" id="flagB" alt="">
+      <div class="pips" id="pipsB"></div>
+      <div class="score" id="scoreB">0</div>
+    </div>
+
+    <div class="ctx">
+      <div class="ctx-side ctx-side--a" id="ctxA"></div>
+      <div class="ctx-mid" id="ctxM"></div>
+      <div class="ctx-side ctx-side--b" id="ctxB"></div>
+    </div>
+  </div>
+
+  <script src="/scene-base.js"></script>
+  <script src="/brawlhalla-legends.js"></script>
+  <script src="/caster-rail.js"></script>
+  <script>
+    const QP = new URLSearchParams(location.search);
+    const SHOW_INFO = QP.get('info') !== '0';
+    const SHOW_RANK = QP.get('rank') !== '0';
+    const SHOW_LEGEND = QP.get('legend') !== '0';
+    if (QP.get('anim') === '0') document.body.classList.add('no-anim');
+    const el = (id) => document.getElementById(id);
+    const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const FLAG_BASE = '/fgc/static/flags/flags/1x1/';
+    const BL = (typeof BrawlhallaLegends !== 'undefined') ? BrawlhallaLegends : null;
+
+    // Tint ramp for a side's accent. Kept in JS rather than CSS color-mix(): the app runs on
+    // Electron 18 (Chrome 100), where color-mix() does not exist — a known trap in this codebase.
+    function ramp(hex, k) {
+      const h = String(hex || '').replace('#', '');
+      const n = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
+      const v = parseInt(n.length === 6 ? n : '888888', 16);
+      let r = (v >> 16) & 255, g = (v >> 8) & 255, b = v & 255;
+      if (k < 0) { const t = -k; r = Math.round(r * (1 - t)); g = Math.round(g * (1 - t)); b = Math.round(b * (1 - t)); }
+      else { r = Math.round(r + (255 - r) * k); g = Math.round(g + (255 - g) * k); b = Math.round(b + (255 - b) * k); }
+      return 'rgb(' + r + ',' + g + ',' + b + ')';
+    }
+
+    // The legend on a seat: the producer's pick, else the player's most-played legend from their
+    // ranked card. The card is a PRIOR, never live truth — it says what they usually play, which
+    // is right far more often than blank is, and a producer pick always wins.
+    function legendFor(pick, card) {
+      if (pick) return BL ? BL.resolve(pick) : null;
+      const top = card && card.legends && card.legends[0];
+      return (top && BL) ? BL.resolve(top.id) : null;
+    }
+
+    function pipHtml(lg, filled, small) {
+      const art = (lg && SHOW_LEGEND) ? BL.iconUrl(lg.slug) : '';
+      const cls = 'pip' + (small ? ' pip--sm' : '') + (filled ? '' : ' spent');
+      // An <img> would draw a broken-image icon when no art pack is installed; a background-image
+      // that 404s just stays the plain accent dot, which is the fallback we want.
+      return '<div class="' + cls + '"' + (art ? ' style="background-image:url(' + art + ')"' : '') + '></div>';
+    }
+
+    function renderPips(node, lg, left, start, small) {
+      const n = Math.max(0, Math.min(9, start));
+      let out = '';
+      for (let i = 0; i < n; i++) out += pipHtml(lg, i < left, small);
+      node.innerHTML = out;
+    }
+
+    // One side's rank chips: tier, ELO (with peak), rank, season W/L. Every piece is skipped when
+    // the card doesn't have it, so a partial card still renders cleanly.
+    function rankChips(card, mode) {
+      if (!card || !SHOW_RANK) return '';
+      const bits = [];
+      if (card.tier) {
+        bits.push('<span class="tier" style="--tier-c:' + (BL ? BL.tierColor(card.tier) : '#7d8590') + '">' + esc(card.tier) + '</span>');
+      }
+      if (card.rating) {
+        bits.push('<span class="chip"><span class="k">ELO</span><span class="v">' + card.rating + '</span>'
+          + (card.peakRating > card.rating ? '<span class="k">PEAK ' + card.peakRating + '</span>' : '') + '</span>');
+      }
+      const rank = card.regionRank || card.globalRank;
+      if (rank) {
+        bits.push('<span class="chip"><span class="k">' + (card.regionRank ? esc(card.region || 'REGION') : 'WORLD') + '</span><span class="v">#' + rank + '</span></span>');
+      }
+      if (card.games) {
+        bits.push('<span class="chip"><span class="k">' + (mode === 'ranked_3v3' ? '3V3' : '1V1') + '</span><span class="v">' + card.wins + '-' + card.losses + '</span></span>');
+      }
+      return bits.join('<span class="sep">/</span>');
+    }
+
+    function seatHtml(seat, side, start) {
+      const lg = legendFor(seat.legend, seat.card);
+      const icon = (lg && SHOW_LEGEND) ? BL.iconUrl(lg.slug) : '';
+      const pips = (() => {
+        let out = '';
+        for (let i = 0; i < start; i++) out += pipHtml(lg, i < seat.stocks, true);
+        return out;
+      })();
+      return '<div class="seat">'
+        + (icon ? '<img class="seat-ico" src="' + icon + '" alt="" onerror="this.classList.add(\'is-hidden\')">' : '')
+        + '<div class="seat-tag">' + esc(seat.name || 'PLAYER') + '</div>'
+        + '<div class="seat-pips">' + pips + '</div>'
+        + '</div>';
+    }
+
+    let _sig = '';
+    function render(data) {
+      if (!data) return;
+      const bh = data.brawlhalla || {};
+      const doubles = bh.mode === '2v2';
+      const start = Math.max(1, Math.min(9, Number(bh.startStocks) || 3));
+      const sides = { a: 'blue', b: 'orange' };
+
+      // Resolve each side once: identity from SceneBase (so the org/prefix rule is the same one
+      // every other head-to-head scene uses), stocks and legends from state.brawlhalla.
+      const side = (key) => {
+        const s = sides[key];
+        const t = (typeof SceneBase !== 'undefined') ? SceneBase.teamSide(data, s) : (data.teams || {})[s] || {};
+        const b = bh[s] || {};
+        const roster = (t.players || []);
+        const seats = (b.players || []).slice(0, 2).map((p, i) => ({
+          stocks: Math.max(0, Math.min(9, Number(p && p.stocks) || 0)),
+          legend: (p && p.legend) || '',
+          card: (p && p.card) || null,
+          name: ((roster[i] && (roster[i].gamertag || roster[i].name)) || '').toUpperCase()
+        }));
+        const first = roster[0] || {};
+        return {
+          key, team: t,
+          name: (t.soloName || t.name || '').toUpperCase(),
+          org: (t.soloSub || '').toUpperCase(),
+          color: t.color || (key === 'a' ? '#f24b3a' : '#2f7de1'),
+          countryCode: (first.countryCode || '').toLowerCase(),
+          score: Number(t.series) || 0,
+          stocks: Math.max(0, Math.min(9, Number(b.stocks) || 0)),
+          legend: b.legend || '',
+          // Singles quotes seat 0's card — that is the player on screen.
+          card: (seats[0] && seats[0].card) || null,
+          seats
+        };
+      };
+      const A = side('a'), B = side('b');
+
+      // Rebuild only when something VISIBLE changed: a full_state tick lands several times a
+      // second, and replaying the entrance on each one would strobe the board.
+      const sigOf = (x) => [x.name, x.org, x.color, x.countryCode, x.score, x.stocks, x.legend,
+        (x.card ? [x.card.tier, x.card.rating, x.card.peakRating, x.card.globalRank, x.card.regionRank, x.card.wins, x.card.losses, (x.card.legends[0] || {}).id].join('~') : ''),
+        x.seats.map((s) => [s.stocks, s.legend, s.name, (s.card ? s.card.tier : '')].join('|')).join(';')].join('~');
+      const sig = [sigOf(A), sigOf(B), doubles, start, bh.title || '', bh.showRank, bh.showLegend,
+        data.eventName || '', data.bestOf || '', data.roundLabel || '',
+        (SceneBase.brandLogo(data) || '').slice(0, 40), data.fontFamily || ''].join('§');
+      if (sig === _sig) { if (typeof CasterRail !== 'undefined') CasterRail.render(data); return; }
+      _sig = sig;
+
+      const root = document.documentElement.style;
+      [['a', A], ['b', B]].forEach(([k, s]) => {
+        root.setProperty('--' + k, s.color);
+        root.setProperty('--' + k + '-deep', ramp(s.color, -0.62));
+        root.setProperty('--' + k + '-lite', ramp(s.color, 0.1));
+      });
+      if (data.fontFamily) root.setProperty('--main-font', "'" + data.fontFamily + "'");
+
+      const board = el('bh');
+      board.classList.toggle('no-info', !SHOW_INFO);
+      if (QP.get('w')) root.setProperty('--bh-w', parseInt(QP.get('w'), 10) + 'px');
+      if (QP.get('top')) root.setProperty('--bh-top', parseInt(QP.get('top'), 10) + 'px');
+
+      [['A', A], ['B', B]].forEach(([id, s]) => {
+        el('score' + id).textContent = s.score;
+
+        // Singles: one identity block + one pip row. Doubles: the seat list instead.
+        el('who' + id).style.display = doubles ? 'none' : '';
+        el('seats' + id).style.display = doubles ? '' : 'none';
+        el('pips' + id).style.display = doubles ? 'none' : '';
+        if (doubles) {
+          el('seats' + id).innerHTML = s.seats.map((seat) => seatHtml(seat, s.key, start)).join('');
+        } else {
+          el('tag' + id).textContent = s.name || (id === 'A' ? 'PLAYER 1' : 'PLAYER 2');
+          el('org' + id).textContent = s.org;
+          renderPips(el('pips' + id), legendFor(s.legend, s.card), s.stocks, start, false);
+        }
+
+        // Flag. Only an ISO-2 COUNTRY CODE makes a flag path — a country NAME asks for
+        // "united states.svg", a 404 that draws as a broken-image icon on air.
+        const flag = el('flag' + id);
+        if (s.countryCode && /^[a-z]{2}$/.test(s.countryCode)) {
+          flag.src = FLAG_BASE + s.countryCode + '.svg';
+          flag.classList.remove('is-hidden');
+        } else {
+          flag.classList.add('is-hidden');
+        }
+
+        // Legend portrait behind the plate (singles only — two seats have no room for it).
+        const lg = doubles ? null : legendFor(s.legend, s.card);
+        const por = el('por' + id);
+        const art = (lg && SHOW_LEGEND && bh.showLegend !== false) ? BL.renderUrl(lg.slug) : '';
+        por.style.backgroundImage = art ? 'url(' + art + ')' : '';
+        por.classList.toggle('is-hidden', !art);
+      });
+
+      // Context bar: rank chips outside, match context in the middle.
+      const wantRank = SHOW_RANK && bh.showRank !== false;
+      el('ctxA').innerHTML = wantRank ? rankChips(A.card, bh.rankMode) : '';
+      el('ctxB').innerHTML = wantRank ? rankChips(B.card, bh.rankMode) : '';
+      const mid = [];
+      const ev = (data.roundLabel || data.eventName || '').toString().toUpperCase();
+      if (ev) mid.push('<span class="ev">' + esc(ev) + '</span>');
+      const label = bh.title || (doubles ? '2v2 Doubles' : '1v1 Singles');
+      if (label) mid.push('<span class="bo">' + esc(String(label).toUpperCase()) + '</span>');
+      if (data.bestOf) mid.push('<span class="bo">BO' + data.bestOf + '</span>');
+      el('ctxM').innerHTML = mid.join('<span class="sep">·</span>');
+
+      // Brand mark on the seam.
+      const logo = (typeof SceneBase !== 'undefined') ? (SceneBase.brandLogo(data) || '') : '';
+      el('brand').innerHTML = logo ? '<img src="' + logo + '" alt="">' : '<div class="vs">VS</div>';
+
+      // Centre the mark on the WHOLE stack rather than on bar 1 — measured, so it stays true if a
+      // bar's height changes, and correctly falls to 0 when the context bar is hidden.
+      {
+        const bar = el('ctxM').parentElement;
+        const on = SHOW_INFO && getComputedStyle(bar).visibility !== 'hidden';
+        root.setProperty('--brand-y', on ? ((bar.offsetHeight + 4) / 2) + 'px' : '0px');
+      }
+
+      if (typeof CasterRail !== 'undefined') CasterRail.render(data);
+      board.classList.add('show');
+    }
+
+    // Bottom-centre for singles; beside the board for doubles, where the game's own per-player HUD
+    // fills the bottom of frame and a centred card would sit right on top of it.
+    if (typeof CasterRail !== 'undefined') CasterRail.mount({
+      variant: 'chip', bottom: 30, anchor: '#bh', vAnchor: '.brandmark', gap: 24,
+      dock: { a: 72, b: 30, gap: 4 },
+      posFrom: function (d) {
+        const b = (d || {}).brawlhalla || {};
+        if (b.railPos === 'topleft') return 'topleft';
+        return b.mode === '2v2' ? 'topleft' : 'bottom';
+      }
+    });
+
+    if (typeof SceneBase !== 'undefined') {
+      if (SceneBase.preview) {
+        render({
+          activeGame: 'brawlhalla',
+          games: { brawlhalla: { id: 'brawlhalla', format: '1v1', rosterSize: 2, logo: 'games/brawlhalla.png' } },
+          teams: {
+            blue: { name: 'SSG | SANDSTORM', color: '#f24b3a', logo: '',
+                    players: [{ gamertag: 'SANDSTORM', prefix: 'SSG', countryCode: 'us' }] },
+            orange: { name: 'TSM | BOOMIE', color: '#2f7de1', logo: '',
+                      players: [{ gamertag: 'BOOMIE', prefix: 'TSM', countryCode: 'us' }] }
+          },
+          series: { blue: 2, orange: 1 }, bestOf: 5,
+          brawlhalla: {
+            mode: '1v1', startStocks: 3, rankMode: 'ranked_1v1', showRank: true, showLegend: true,
+            title: '1v1 Singles',
+            blue: { stocks: 3, legend: 'Mordex', players: [{ stocks: 3, legend: 'Mordex', bhId: 1, card: { tier: 'Valhallan', rating: 2143, peakRating: 2200, region: 'US-E', regionRank: 1, globalRank: 1, wins: 693, losses: 64, games: 757, legends: [{ id: 35 }] } }] },
+            orange: { stocks: 2, legend: 'Bödvar', players: [{ stocks: 2, legend: 'Bödvar', bhId: 2, card: { tier: 'Diamond', rating: 2010, peakRating: 2060, region: 'EU', regionRank: 12, globalRank: 34, wins: 410, losses: 190, games: 600, legends: [{ id: 3 }] } }] }
+          },
+          eventName: 'BRAWLHALLA WORLD CHAMPIONSHIP', roundLabel: 'GRAND FINAL',
+          brand: { logo: '', color: '#f24b3a' },
+          casters: { nameMode: 'gamertag', list: [
+            { slot: 1, gamertag: 'JONZEY', role: 'Play-by-play', social: 'x', socialHandle: 'ItzJonzey' }
+          ] }
+        });
+      } else {
+        SceneBase.connect((data) => { SceneBase.applySceneConfig('brawlhalla', data); render(data); });
+      }
+    }
+  </script>
+</body>
+</html>

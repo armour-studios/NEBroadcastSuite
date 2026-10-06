@@ -15,12 +15,23 @@ const { EventEmitter } = require('events');
 const IS_DEV = () => _electronApp && !_electronApp.isPackaged;
 const { createStartGgClient } = require('./backend/integrations/startgg-client');
 const { createChallongeClient } = require('./backend/integrations/challonge-client');
+const { resolveGameId } = require('./backend/game-match');
+const { frameJson } = require('./backend/rl-framing');
+const { obsPreviewRedirect } = require('./backend/obs-preview-guard');
+const { isAllowedOrigin, originGuardMiddleware } = require('./backend/origin-guard');
+const { createChallengermodeClient, parseChallengermodeId } = (() => {
+  const m = require('./backend/integrations/challengermode-client');
+  return { createChallengermodeClient: m.createChallengermodeClient, parseChallengermodeId: m.parseTournamentId };
+})();
+const cmData = require('./backend/challengermode');   // Challengermode GraphQL queries + mapping (NOT Challonge)   // platform game name -> GAMES id (makes every platform multi-game)
+const { createBrawlhalla, BH_REGIONS } = require('./backend/brawlhalla');   // Brawlhalla career-stats API (no live feed — see the module header)
 const { createBallchasingClient } = require('./backend/integrations/ballchasing-client');
 const { createBallchasingWatcher } = require('./backend/integrations/ballchasing-watcher');
 const { scanAndRenameReplays } = require('./backend/integrations/replay-renamer');
 const { getNxgenEvents, getNxgenEventLive, getNxgenLeaderboard } = require('./backend/nxgen');
 const faceit = require('./backend/integrations/faceit-client');
 const { createDirectorEngine } = require('./backend/director');
+const promosData = require('./backend/promos');
 const cloud = require('./backend/cloud/cloud-client');   // Nameless cloud (dormant until BROADCAST_REMOTE_URL set)
 const { createClipSystem } = require('./backend/clips');
 const { createTelemetryRecorder } = require('./backend/telemetry/recorder');   // AI training-data capture (Phase 0, local JSONL)
@@ -35,6 +46,7 @@ const { createDiscordChat, fetchChannelMessages: fetchDiscordMessages } = requir
 const questionStore = require('./backend/questions');             // Q&A mailbag store (sources, dedupe, keyword capture)
 const vetoData = require('./backend/veto');
 const draftData = require('./backend/draft');
+const gameConfigData = require('./backend/game-config');
 const vmix = require('./backend/vmix');   // vMix HTTP control — the full alternative to OBS (docs/vmix-integration.md)
 const lolChampSelect = require('./backend/lol-champselect');
 const lolLive = require('./backend/lol-live');
@@ -166,6 +178,8 @@ const { registerTwitchWebhooks } = require('./backend/integrations/twitch-webhoo
 const { TwitchClient } = require('./backend/integrations/twitch-client');
 const { SocialPublisher } = require('./backend/social-publisher');
 const liquipedia         = require('./backend/integrations/liquipedia-client');
+const riot               = require('./backend/integrations/riot-client');
+const valGep             = require('./backend/integrations/valorant-gep');
 const { PredictionManager } = require('./backend/integrations/twitch-predictions');
 const { WheelManager } = require('./backend/integrations/twitch-wheel');
 const { MiniGameManager } = require('./backend/integrations/twitch-minigames');
@@ -225,7 +239,9 @@ const BROADCAST_REMOTE_URL = process.env.BROADCAST_REMOTE_URL || 'https://www.na
 const BROADCAST_API_KEY    = process.env.BROADCAST_API_KEY    || '';
 
 let httpServer = null;
+let httpServer6 = null;   // IPv6 loopback twin of httpServer (see the listen block in start())
 let bridgeWss = null;
+let bridgeHttp6 = null;   // IPv6 loopback twin of the WS bridge (see startBridgeServer)
 let _bridgeHeartbeat = null;
 
 // Stats tracking — match/game IDs for the current broadcast session
@@ -245,9 +261,16 @@ let wsTokenFile;
 let wsAuthToken = '';   // shared secret required on every WS bridge connection — see getOrCreateWsToken()
 let startggApiToken = '';
 let challongeApiKey = '';
+// Challengermode (challengermode.com) — a DIFFERENT platform from Challonge. This is the long-lived
+// REFRESH key from their Application Dashboard; the short-lived bot token it buys lives inside the
+// client and is never persisted.
+let challengermodeRefreshKey = '';
 let nxgenApiKey = '';
 let faceitApiKey = '';        // FACEIT Data API server-side key (encrypted at rest, never broadcast)
 let ballchasingApiKey = '';
+let riotApiKey = '';         // Riot Games developer/production key — the PRODUCER's own, from
+                             // developer.riotgames.com. Encrypted at rest, never broadcast.
+                             // NOTE: a DEVELOPMENT key expires every 24h; riot-client says so on 403.
 let liquipediaApiKey = '';   // Liquipedia LPDB key — the PRODUCER's own. Access is not self-service and
                              // the free tier is non-commercial, so the licensing relationship is
                              // theirs, not the suite's. Encrypted at rest, never broadcast.
@@ -278,7 +301,9 @@ try {
 // Per-game overlay layouts (browser source URLs) — not colour themes.
 const OVERLAY_LAYOUTS = {
   'rocket-league': [
-    { id: 'classic',   name: 'Classic HUD',   path: '/' },
+    // 'classic' (overlay/index.html at "/") was retired 2026-10: the React HUD handles every message
+    // and state field it did (its break screen lives on as countdown.html). Saved 'classic' picks are
+    // aliased to the React HUD below, and "/" redirects to /rl-hud.html so old OBS sources still work.
     { id: 'lexogrine', name: 'React HUD', path: '/rl-hud.html' },
     { id: 'player',    name: 'Player HUD (in-game)', path: '/rl-player.html' },
     { id: 'worlds',    name: 'Worlds HUD', path: '/rl-worlds.html' }
@@ -368,6 +393,13 @@ const OVERLAY_LAYOUTS = {
     { id: 'head-to-head', name: 'Head-to-Head Scoreboard',  path: '/duorow.html' },
     { id: 'points-board', name: 'Standings / Points Board', path: '/standings.html' }
   ],
+  // Brawlhalla — 1v1 and 2v2 platform fighter. Stocks/legends are producer-driven (the game has
+  // no live feed); the ranked card on the board comes from the official stats API.
+  'brawlhalla': [
+    { id: 'brawlhalla-hud',  name: 'Brawlhalla Scoreboard',  path: '/brawlhalla.html' },
+    { id: 'points-board',    name: 'Top 8 Placement Board',  path: '/standings.html' },
+    { id: 'fgc-default',     name: 'FGC Scoreboard',         path: '/fgc/default/template.html' }
+  ],
   'smash':     [
     { id: 'smash-hud',       name: 'Smash Scoreboard',       path: '/smash.html' },
     { id: 'smash-team',      name: 'Smash Team Scoreboard',  path: '/smash-team.html' },
@@ -383,7 +415,7 @@ const GENERIC_OVERLAY_LAYOUTS = [
 ];
 
 const GAMES = {
-  'rocket-league': { id: 'rocket-league', name: 'Rocket League', overlay: '/',          format: 'duo',   teamLabels: { a: 'Blue', b: 'Orange' },           rosterSize: 3, logo: 'games/rocketleague.svg',  features: ['boost', 'stats-api', 'director'],   themes: [], statLabel: 'Goals',  statAbbr: 'G' },
+  'rocket-league': { id: 'rocket-league', name: 'Rocket League', overlay: '/rl-hud.html', format: 'duo',   teamLabels: { a: 'Blue', b: 'Orange' },           rosterSize: 3, logo: 'games/rocketleague.svg',  features: ['boost', 'stats-api', 'director'],   themes: [], statLabel: 'Goals',  statAbbr: 'G' },
   'csgo':          { id: 'csgo',          name: 'CS2 / CS:GO',   overlay: '/csgo.html', format: 'team5', teamLabels: { a: 'CT', b: 'T' },                  rosterSize: 5, logo: 'games/cs2.svg',           features: ['gsi', 'radar', 'vetoes', 'director'], themes: [], statLabel: 'Rounds', statAbbr: 'R' },
   'valorant':      { id: 'valorant',      name: 'Valorant',      overlay: '',           format: 'team5', teamLabels: { a: 'Attackers', b: 'Defenders' },   rosterSize: 5, logo: 'games/valorant.svg',      features: ['vetoes', 'agents', 'director'],     themes: [], statLabel: 'Rounds', statAbbr: 'R' },
   'league':        { id: 'league',        name: 'League of Legends', overlay: '/lol-hud.html', format: 'team5', teamLabels: { a: 'Blue', b: 'Red' },         rosterSize: 5, logo: 'games/lol.svg',           features: ['draft', 'live-data', 'director'],    themes: [] },
@@ -399,6 +431,11 @@ const GAMES = {
   'bedwars':       { id: 'bedwars',       name: 'Minecraft Bedwars', overlay: '',       format: 'ffa',   teamLabels: { a: 'Team A', b: 'Team B' },         rosterSize: 4, logo: 'games/bedwars.png',       features: ['bracket'],              themes: [], statLabel: 'Beds', statAbbr: 'B' },
   'marvel-rivals': { id: 'marvel-rivals', name: 'Marvel Rivals', overlay: '/marvel-rivals.html', format: 'team6', teamLabels: { a: 'Team A', b: 'Team B' }, rosterSize: 6, logo: 'games/rivals.png',        features: ['heroes', 'draft'],       themes: [] },
   'smash':         { id: 'smash',         name: 'Super Smash Bros.', overlay: '/smash.html', format: '1v1',   teamLabels: { a: 'Player 1', b: 'Player 2' },     rosterSize: 1, logo: 'games/ssb.png',           features: ['bracket', 'stocks', 'fgc'], themes: [] },
+  // Brawlhalla — free-to-play platform fighter. 1v1 and 2v2 are both competitive formats, so
+  // rosterSize is 2 (the doubles pair); the board lays itself out from state.brawlhalla.mode.
+  // 'stats-api' = the official career-stats API (rank/tier/ELO/legends), NOT a live match feed —
+  // stocks and the legend on screen are producer-driven, exactly like Smash.
+  'brawlhalla':    { id: 'brawlhalla',    name: 'Brawlhalla',    overlay: '/brawlhalla.html', format: '1v1', teamLabels: { a: 'Player 1', b: 'Player 2' }, rosterSize: 2, logo: 'games/brawlhalla.png', features: ['bracket', 'stocks', 'fgc', 'legends', 'stats-api'], themes: [], statLabel: 'Stocks', statAbbr: 'S' },
   // Fighting games (FGC) — 1v1 head-to-head; sides are the two players. 2XKO is a 2v2 tag game
   // (two characters/players per side). Overlays live under overlay/fgc/ (see OVERLAY_LAYOUTS).
   'tekken8':       { id: 'tekken8',       name: 'Tekken 8',      overlay: '/fgc/tekken8-blue/template.html', format: '1v1', teamLabels: { a: 'Player 1', b: 'Player 2' }, rosterSize: 1, logo: 'games/tekken8.svg',  features: ['bracket', 'fgc'], themes: [] },
@@ -538,7 +575,7 @@ function brPoiSet(gameId, modeId) {
 }
 
 const THEME_ALIASES = {
-  'rocket-league': { default: 'classic', midnight: 'classic', neon: 'classic' },
+  'rocket-league': { default: 'lexogrine', midnight: 'lexogrine', neon: 'lexogrine', classic: 'lexogrine' },
   'csgo': { default: 'cs2-hud', midnight: 'cs2-hud', neon: 'cs2-hud' },
   'valorant': { default: 'valorant-hud', midnight: 'valorant-hud', neon: 'valorant-hud' },
   'league': { default: 'lol-hud', midnight: 'lol-hud', neon: 'lol-hud' }
@@ -590,7 +627,7 @@ const WINNER_STYLES = ['slam', 'depth'];
 // The look of the full-screen replay transition. 'slam' is the shutter-bar wipe that shipped;
 // 'cinema' is the letterboxed scrolling-type treatment. Declared ABOVE state for the same
 // temporal-dead-zone reason WINNER_STYLES is.
-const REPLAY_STYLES = ['slam', 'cinema'];
+const REPLAY_STYLES = ['slam', 'cinema', 'sweep'];   // overlay/replay-fx.js implements all three; only rl-worlds.html loads it (rl-hud.html plays 'cinema' or falls back to slam)
 
 let state = {
   version: appVersion,
@@ -598,6 +635,10 @@ let state = {
   rlHudHidden: false,       // manual "hide UI" — blanks the live RL HUD overlay for a clean feed (not persisted)
   rlReplayTransitions: true,   // play the animated shutter-slam replay intro/outro (+ Brazil flag) on the RL overlays; off = no wipe, HUD just hides/shows for the replay (persisted)
   rlSponsorRoll: false,        // occasionally roll the title-sponsor tab out from behind the bottom-right statcard on the RL HUD (persisted)
+  // optional RLCS-style stats sidebar on the Worlds overlay (rl-worlds.html): ranked rows the producer
+  // fills manually or pulls from league standings / series stats (persisted)
+  worldsSidebar: { visible: false, title: 'Total Goals', subtitle: '', source: 'manual', rows: [] },
+  worldsTicker: true,          // producer on/off for the scores ticker on the Worlds overlay (rl-worlds.html); off just hides that source's ticker lane, the global ticker feed keeps running everywhere else (persisted)
   rlScoreboardSeparate: false,  // route the post-game scoreboard to its OWN browser source (rl-hud.html?only=scoreboard); when on, the MAIN HUD hides its inline board (persisted)
   // Game performance mode: while an RL match is LIVE the app sheds load so borderless
   // gameplay stays smooth — panel previews/animations pause, the app's process priority
@@ -619,7 +660,7 @@ let state = {
   // this producer's Twitch handle (shown on the grid tile bar); label = a desk name ("Desk 2") when the
   // handle is empty.
   pulse: { publish: false, feedViewUrl: '', channel: '', label: '' },
-  themesByGame: { 'rocket-league': 'classic', 'csgo': 'cs2-hud' },
+  themesByGame: { 'rocket-league': 'lexogrine', 'csgo': 'cs2-hud' },
   eventName: '',   // fresh installs start with no preset title — the producer sets their own
   // Which event slug the current eventName was pulled from. Loading a DIFFERENT event pulls its
   // title once; anything typed afterwards is the producer's and survives re-loads of that event.
@@ -736,7 +777,7 @@ let state = {
   // A league picks a season default; any cup can override it. See sanitizePointMatrix.
   pointMatrices: [],
   // Champion/hero draft board (LoL etc.). sequence/ops drive the live pick-ban.
-  draft: { visible: false, title: '', subtitle: '', game: '', teamStart: 'a', owBanCount: 4, sequence: [], ops: [], turn: null, complete: false,
+  draft: { visible: false, title: '', subtitle: '', game: '', teamStart: 'a', owBanCount: 2, sequence: [], ops: [], turn: null, complete: false,
     // owBanCount: Overwatch total hero bans (2 = one per team, 4 = two per team). Producer-set.
     // LoL champ-select automation — fills the board live from the League Client (LCU).
     auto: { enabled: false, status: 'off', statusDetail: '', lockfilePath: '' } },
@@ -802,20 +843,31 @@ let state = {
     phaseEndsIn: null,
     showHistory: false,    // round-history overlay visibility (control-panel toggle)
     builtinRadar: true,    // true = built-in auto-zoom radar (default); false = external (boltobserv)
+    autoWinner: true,      // put the Winner graphic on air when a map ends (gameover); persisted
     killfeed: []           // recent kills: [{ killer, killerTeam, victim, victimTeam, weapon, hs, ts }]
   },
-  valorant: {                                              // Valorant Local Client API (port 2999)
+  valorant: {                                              // Overwolf GEP relay (POST /api/val-gep)
     connected: false,
     lastUpdate: 0,
+    source: '',       // 'gep' once the relay has ever reported
     map: { name: '', displayName: '' },
-    round: { number: 1, phase: 'warmup' },
-    // ORDER = attacker first half; CHAOS = defender first half (sides swap at round 13)
+    round: { number: 1, phase: 'warmup', rawPhase: '' },   // phase: warmup|shopping|live|bomb|end
+    // ORDER / CHAOS are FIXED team identities (GEP team index 0 / 1). They do not swap at half;
+    // the overlay works out who is attacking from the round number.
     order: { score: 0 },
     chaos: { score: 0 },
-    spikeState: '',   // '' | 'carried' | 'planted' | 'defusing' | 'defused' | 'detonated'
-    players: [],      // [{ name, agent, agentName, team, health, maxHealth, armor, alive, kills, assists, deaths }]
-    observed: null,   // activePlayer from the API (spectated player)
-    roundHistory: [], // [{ round, winner: 'ORDER'|'CHAOS' }]
+    spikeState: '',   // '' | 'planted' | 'defused' | 'detonated'
+    // Every field here is one Overwolf's `scoreboard_N` actually sends. Per-player HEALTH and
+    // utility charges are NOT in that payload (only the local player's, via `me`), so they are
+    // deliberately absent rather than rendered as zeros — see backend/integrations/valorant-gep.js.
+    players: [],      // [{ name, agent, agentName, team, isLocal, teammate, alive, shield, armor,
+                      //    kills, deaths, assists, credits, ultPointsGained, ultPointsNeeded, weapon, hasSpike }]
+    observed: null,   // who the relay seat is spectating (match_info.observing)
+    roundHistory: [], // [{ round, winner: 'ORDER'|'CHAOS' }] — derived from the score moving
+    killfeed: [],     // [{ attacker, victim, weapon, headshot, assists, ts }]
+    gameMode: '',
+    matchId: '',
+    localSide: '',    // 'attack' | 'defense' — the RELAY PC's side this half, not the match's
   },
   lol: {                                                   // League Live Client Data API (port 2999, spectator)
     connected: false,
@@ -835,7 +887,11 @@ let state = {
     ocr: {
       enabled: false, available: false, status: 'off', statusDetail: '',
       source: 'est',          // 'est' | 'ocr' — which feed is currently driving team gold
-      lastBlue: null, lastRed: null,   // last raw OCR'd values (for calibration feedback)
+      lastBlue: null, lastRed: null,   // last VALIDATED values (for calibration feedback)
+      lastBlueConf: 0, lastRedConf: 0, // Tesseract confidence of the last raw read, 0-100
+      lastReason: { blue: '', red: '' },   // why the tracker took/held the last read (ok/first/lowconf/jump/decrease/noread)
+      capture: '',            // 'display' (Electron frame grab) | 'powershell' (fallback)
+      displayId: '',          // which monitor the spectator client is on ('' = primary); regions are in its physical pixels
       regions: { blue: { x: 800, y: 16, w: 78, h: 26 }, red: { x: 1042, y: 16, w: 78, h: 26 } }  // 1080p defaults
     },
   },
@@ -918,8 +974,8 @@ let state = {
   },
   bestOf: 5,
   teams: {
-    blue:   { name: 'BLUE TEAM',   logo: null, color: '#055fdb', players: [] },
-    orange: { name: 'ORANGE TEAM', logo: null, color: '#e97139', players: [] }
+    blue:   { name: 'BLUE TEAM',   logo: null, color: '#055fdb', abbr: null, players: [] },
+    orange: { name: 'ORANGE TEAM', logo: null, color: '#e97139', abbr: null, players: [] }
   },
   teamPlayers: {}, // keyed by side, contains player data
   series:  { blue: 0, orange: 0 },
@@ -962,6 +1018,34 @@ let state = {
     startggFormat: '',
     blue:   { stocks: 3, character: '', players: [3, 3, 3, 3], characters: ['', '', '', ''] },
     orange: { stocks: 3, character: '', players: [3, 3, 3, 3], characters: ['', '', '', ''] }
+  },
+  // Brawlhalla board (overlay/brawlhalla.html). Same shape as `smash` on purpose — it is the same
+  // KIND of game and the same kind of broadcast: a platform fighter with NO live data feed, so the
+  // stocks and the legend on screen are producer-driven. What Brawlhalla adds over Smash is a real
+  // career-stats API, so each side also carries a `card` — the player's ranked identity (ELO, tier,
+  // peak, global/region rank, season W/L, most-played legends) pulled from api.brawlhalla.com.
+  //   mode        '1v1' | '2v2' — lays the board out for singles or the doubles pair
+  //   players[]   per-seat stocks, legends and linked brawlhalla_ids (seat 0 = the singles player)
+  //   card        the last ranked pull for that seat, or null. Never blocks the board: a board with
+  //               no cards is a correct board, it just has no rank chips.
+  brawlhalla: {
+    startStocks: 3,
+    mode: '1v1',
+    // Which ladder the rank chips quote. The API has no ranked_2v2 player stats (2v2 rating lives
+    // on the TEAM), so a doubles board still shows each player's 1v1 card — labelled as such.
+    rankMode: 'ranked_1v1',
+    region: 'ALL',
+    // Printed under the centre mark, e.g. "1v1 Singles". Auto-filled from the loaded event unless
+    // the producer typed their own, in which case titleManual pins it.
+    title: '', titleManual: false,
+    // Running a side out of stocks closes the game (opponent takes the series point, both refill).
+    autoAdvance: true,
+    showRank: true,       // rank/ELO chips on the board
+    showLegend: true,     // legend portrait + name on each plate
+    railPos: 'auto',
+    blue:   { stocks: 3, legend: '', players: [{ stocks: 3, legend: '', bhId: 0, card: null }, { stocks: 3, legend: '', bhId: 0, card: null }] },
+    orange: { stocks: 3, legend: '', players: [{ stocks: 3, legend: '', bhId: 0, card: null }, { stocks: 3, legend: '', bhId: 0, card: null }] },
+    lastError: '', lastLookupAt: 0
   },
   // Marvel Tokon board (overlay/tokon.html). The game's HUD owns the bottom-centre, so casters and
   // sponsors go either along the bottom ('meters': sponsors rotating between the super meters, casters
@@ -1087,6 +1171,17 @@ let state = {
     tournament: null,
     squad: []
   },
+  // Riot Games API. Identity and ranked data for LoL / Valorant / TFT, using the producer's OWN
+  // key from developer.riotgames.com. Nothing polls — Riot's per-key rate limit is small and a
+  // development key expires daily, so every call here is a deliberate producer action.
+  riot: {
+    region: 'americas',    // account-v1 / match-v5 routing: americas | europe | asia | sea
+    platform: 'na1',       // summoner-v4 / league-v4 / status routing: na1 | euw1 | kr | …
+    keyKind: 'none',       // none | development | production — dev keys expire every 24 hours
+    lastCheckAt: null,
+    lastError: null,
+    lastPlayer: null       // last Riot ID looked up, for the panel's result line
+  },
   challonge: {
     enabled: false,
     tournamentSlug: '',    // e.g. "my-tournament" or "subdomain-tournament"
@@ -1116,8 +1211,55 @@ let state = {
     // matchFeed uses so one overlay code path renders both platforms.
     matchFeed: [],         // [{ matchId, round, teamA, teamB, logoA, logoB, scoreA, scoreB, status, winSide }]
     autoFollow: false,
-    lastAutoFollowMatchId: null
+    lastAutoFollowMatchId: null,
+    // Which of OUR games this tournament is, resolved from Challonge's `game_name`
+    // (backend/game-match.js). '' = we couldn't tell, and we then leave the active game alone
+    // rather than guessing an overlay. This is what makes Challonge multi-game: without it a
+    // Brawlhalla bracket loads while the app is still wearing Rocket League's overlay and labels.
+    gameId: '',
+    gameApplied: false,    // did loading actually switch the active game (vs. already being on it)
+    // Seconds between live polls. Exposed because Challonge's FREE plan is 500 requests/MONTH and
+    // every poll costs three (tournament + participants + matches) — see challongeBudget below.
+    pollSec: 30,
+    // Rolling request counter for the current calendar month, so a producer can see where they are
+    // against that 500 before a 429 tells them on air. Not a limit we enforce — it's their quota to
+    // spend — but they should be able to see it being spent.
+    budget: { month: '', used: 0, limit: 500, warned: false }
   },
+  // Challengermode (challengermode.com) — a DIFFERENT platform from Challonge, despite the name.
+  // GraphQL API, bot-token auth, and a tournament graph of STAGES (groups then playoffs) rather
+  // than one flat bracket — see backend/challengermode.js. Mirrors the Challonge state shape so
+  // everything downstream (queue, ticker, bracket, auto-follow, top 8) is shared.
+  challengermode: {
+    enabled: false,
+    tournamentId: '',      // UUID; producers paste a URL and parseChallengermodeId() digs it out
+    selectedTournament: null,   // { id, name, state, gameName, gameSlug, lineupCount, url }
+    connected: false,
+    lastError: null,
+    lastSyncAt: null,
+    eventTeams: [],        // [{ id, name, logo, seed, players:[{name,captain}] }]
+    logoMap: {},           // lowercased lineup name -> logo URL
+    queue: [],             // same shape every other platform's queue uses
+    queueFetchedAt: null,
+    matchFeed: [],
+    autoFollow: false,
+    lastAutoFollowMatchId: null,
+    // Which of OUR games this tournament is, from gameTitle.slug/title (backend/game-match.js).
+    gameId: '',
+    gameApplied: false,
+    // Challengermode publishes no requests-per-minute limit — the API is budgeted by FIELD COST
+    // instead — so this is an ordinary poll interval, not a quota dial like Challonge's.
+    pollSec: 30,
+    // Space (organiser) id, so "my Challengermode tournaments" can be listed without a game slug.
+    spaceId: ''
+  },
+  // Real finish order for the loaded CHALLENGERMODE tournament. `placementText` carries the tie
+  // RANGE ("5-8") that Challengermode models natively and Challonge cannot.
+  challengermodePlacements: { id: '', rows: [], complete: false, fetchedAt: 0, error: '' },
+  // Real finish order (1, 2, 3, 4, 5, 5, 7, 7) for the loaded CHALLONGE tournament, refreshed on
+  // the live poll. The mirror image of startggPlacements — same row shape, same job: it is what
+  // the top-8 board draws from. See challongePlacements().
+  challongePlacements: { slug: '', rows: [], complete: false, fetchedAt: 0, error: '' },
   // FACEIT (open.faceit.com Data API v4). A "competition" is either a CHAMPIONSHIP (bracket /
   // league tournament) or a HUB (rolling ladder) — organisers use both, and the match shape is
   // identical, so competitionType picks the endpoint family and everything downstream is shared.
@@ -1163,7 +1305,7 @@ let state = {
     }
   },
   activeEvent: {
-    platform: null,      // 'startgg' | 'challonge' | 'nxgen' | 'faceit' | null
+    platform: null,      // 'startgg' | 'challonge' | 'challengermode' | 'nxgen' | 'faceit' | null
     slug: '',
     name: '',
     gameName: '',
@@ -1273,7 +1415,7 @@ let state = {
     // should clobber it. Prevents the old silent collision where a manual edit wiped an import (and
     // vice-versa). source names the platform for 'imported'. Default '' = empty/no bracket yet.
     mode: '',            // '' | 'imported' | 'manual'
-    source: '',          // '' | 'startgg' | 'challonge' | 'nxgen' | 'faceit'
+    source: '',          // '' | 'startgg' | 'challonge' | 'challengermode' | 'nxgen' | 'faceit'
     type: '',            // SINGLE_ELIMINATION | DOUBLE_ELIMINATION | ROUND_ROBIN | SWISS (mirrors active phase)
     winners: [],         // [{ name, round, sets: [{ a:{name,score,winner}, b:{...} }] }] (mirrors active phase)
     losers: [],
@@ -1664,9 +1806,11 @@ function safeWriteJson(filePath, data, sync = false) {
     return;
   }
   if (_writingFiles.has(filePath)) { _pendingWrites.set(filePath, data); return; }
+  // Stringify BEFORE taking the write lock — a throw here used to leave the path locked, so every
+  // later save only queued and the file was never written again that session.
+  const json = _stringifyForSave(data);
   _writingFiles.add(filePath);
   const tmp = filePath + '.tmp';
-  const json = _stringifyForSave(data);
   const done = () => {
     _writingFiles.delete(filePath);
     if (_pendingWrites.has(filePath)) {
@@ -1898,10 +2042,21 @@ function buildProfileBundle() {
     app: 'NE Broadcast Suite',
     exportedAt: Date.now(),
     data: {
-      teams:          _own(savedTeams),
+      // Each team's private VDO room + PASSWORD stays on this PC. The Profile page promises no
+      // passwords are included, and this bundle is also what org library sync pushes to every
+      // teammate. A team without a room gets a fresh one the first time it's needed (ensureTeamVdo).
+      teams:          _own(savedTeams).map((t) => { if (!t || !t.vdo) return t; const { vdo, ...rest } = t; return rest; }),
       brandKits:      _own(savedBrandKits),
       facecams:       _own(savedFacecams),
-      presets:        savedPresets,
+      // A preset snapshots ALL of state.casters, including the shared caster/guest/observer room
+      // passwords, the interview room and the director API key. Those belong to this install
+      // (applyPreset keeps the local ones anyway), so they never leave in an export.
+      presets:        (savedPresets || []).map((p) => {
+        if (!p || !p.config || !p.config.casters) return p;
+        const c = { ...p.config.casters };
+        ['vdo', 'guestsVdo', 'observersVdo', 'interview', 'apiKey', 'rooms'].forEach((k) => { delete c[k]; });
+        return { ...p, config: { ...p.config, casters: c } };
+      }),
       leagues:        s.leagues || [],
       castersLibrary: _own((s.casters && s.casters.library) || []),
       settings: {
@@ -1963,11 +2118,20 @@ function applyProfileBundle(bundle, options) {
   }
   if (want('settings') && d.settings && typeof d.settings === 'object') {
     const v = d.settings;
-    ['fontFamily', 'colorMode', 'activeBrandKitId', 'bestOf', 'banner', 'ticker', 'overtime', 'replay', 'scoreboardAd', 'rlStatsScreen', 'deskFooter', 'preshow', 'vdo', 'customOverlayLayouts']
+    ['activeBrandKitId', 'bestOf', 'banner', 'ticker', 'preshow', 'vdo']
       .forEach((k) => { if (v[k] !== undefined) state[k] = v[k]; });
-    if (v.themesByGame && typeof v.themesByGame === 'object') state.themesByGame = { ...state.themesByGame, ...v.themesByGame };
-    state.useBrandColors = (state.colorMode === 'brand');
-    parts.push('look & settings');
+    parts.push('settings');
+    // Overlay styles — layouts per game, font, colour mode, replay / overtime / stats-screen /
+    // scoreboard-ad / desk-footer looks. Importing a profile (usually to pick up its teams or brand
+    // kits) used to overwrite all of these, which read as "my overlay styles reset". They now
+    // import only when asked for explicitly (options.styles === true).
+    if (opts.styles === true) {
+      ['fontFamily', 'colorMode', 'overtime', 'replay', 'scoreboardAd', 'rlStatsScreen', 'deskFooter', 'customOverlayLayouts']
+        .forEach((k) => { if (v[k] !== undefined) state[k] = v[k]; });
+      if (v.themesByGame && typeof v.themesByGame === 'object') state.themesByGame = { ...state.themesByGame, ...v.themesByGame };
+      state.useBrandColors = (state.colorMode === 'brand');
+      parts.push('overlay styles');
+    }
   }
   saveAppState();
   return 'Imported ' + (parts.join(', ') || 'nothing');
@@ -2258,7 +2422,31 @@ function sanitizePlacements(p) {
 // level — they're wrapped into a single "Main" package on load so every read path resolves
 // through activePackage().
 function brandId() { return Math.random().toString(36).slice(2, 11); }
-const PACKAGE_FIELDS = ['sponsorLabel', 'sponsorInterval', 'sponsorMode', 'sponsors', 'bannerImages', 'bannerCaptions', 'bannerSlant', 'bannerHeader', 'bannerInterval', 'replaySkin', 'scoreboardBg'];
+const PACKAGE_FIELDS = ['sponsorLabel', 'presentedLabel', 'sponsorInterval', 'sponsorMode', 'sponsors', 'bannerImages', 'bannerCaptions', 'bannerSlant', 'bannerHeader', 'bannerInterval', 'replaySkin', 'scoreboardBg'];
+
+// Worlds overlay stats sidebar: clamp to a small, safe shape (≤10 ranked rows) so it can ride the
+// live broadcast tier without bloating it. Logos are optional and kept only when a data: or short URL.
+function sanitizeWorldsSidebar(s) {
+  s = s || {};
+  const src = ['manual', 'standings', 'series'].includes(s.source) ? s.source : 'manual';
+  const rows = (Array.isArray(s.rows) ? s.rows : []).slice(0, 10).map((r, i) => {
+    r = r || {};
+    const row = {
+      rank: (r.rank != null && r.rank !== '') ? String(r.rank).slice(0, 4) : (i + 1),
+      name: String(r.name == null ? '' : r.name).slice(0, 40),
+      value: String(r.value == null ? '' : r.value).slice(0, 12),
+    };
+    if (typeof r.logo === 'string' && r.logo && r.logo.length < 262144) row.logo = r.logo;
+    return row;
+  }).filter((r) => r.name.trim());
+  return {
+    visible: !!s.visible,
+    title: String(s.title == null ? 'Total Goals' : s.title).slice(0, 40),
+    subtitle: String(s.subtitle == null ? '' : s.subtitle).slice(0, 40),
+    source: src,
+    rows,
+  };
+}
 
 function sanitizePackage(p, fallbackName) {
   p = p || {};
@@ -2266,6 +2454,9 @@ function sanitizePackage(p, fallbackName) {
     id: p.id || brandId(),
     name: (p.name || fallbackName || 'Main').toString().slice(0, 40),
     sponsorLabel: (p.sponsorLabel != null ? p.sponsorLabel : 'PARTNERS').toString(),   // preserve explicit '' (no rail heading); default only when unset
+    // "Presented by" wording for the title-sponsor lockup across ALL overlays (RL HUD roll-out,
+    // desk/duorow plate, post-game scorecard). Empty = overlays use their 'PRESENTED BY' default.
+    presentedLabel: typeof p.presentedLabel === 'string' ? p.presentedLabel.slice(0, 40) : '',
     sponsorInterval: Number(p.sponsorInterval) > 0 ? Number(p.sponsorInterval) : 6,
     sponsorMode: p.sponsorMode === 'static' ? 'static' : 'cycle',   // rail: cycle one at a time, or show all at once
     sponsors: Array.isArray(p.sponsors) ? p.sponsors.map((s) => ({
@@ -2326,11 +2517,8 @@ function activateBrandKitById(id) {
   const kit = savedBrandKits.find((b) => b.id === id);
   if (kit) ensureKitPackages(kit);
   syncActivePreshowTopics();   // Desk Show headline/topics follow the newly-active kit's active package
-  if (kit) applyPackageSnapshot(activePackage(kit));   // captured show setup travels with the package
-  // Automation: snap this game's theme to the kit's preferred design, if set.
-  if (kit && kit.themes && isValidTheme(state.activeGame, kit.themes[state.activeGame])) {
-    state.themesByGame[state.activeGame] = kit.themes[state.activeGame];
-  }
+  if (kit) applyPackageSnapshot(activePackage(kit), { styles: !!kit.linkStyles });   // captured show setup travels with the package
+  if (kit) applyKitStyles(kit);
   applyBrandSlots();           // fill the ad slots from this brand's sponsor placements
   saveAppState();
   broadcastFullState();        // brand colours apply automatically when colorMode === 'brand'
@@ -2338,12 +2526,40 @@ function activateBrandKitById(id) {
   // differently and it's theirs. (Removed 2026-08: the old opt-in brand-kit profile/collection switch.)
 }
 
+// Overlay STYLES (per-game layout, per-scene style presets) belong to the producer, not to a
+// brand. Activating, re-saving or switching a package used to snap the active game's layout to
+// the kit's design and REPLACE every scene style preset with the copy captured into the package —
+// so styles "reset" every time a brand was touched. Now a kit only drives styles when the producer
+// links them (kit.linkStyles, the "Apply these designs when this profile goes live" switch), and
+// then it sets each game it names, not just whichever game happens to be active.
+function applyKitStyles(kit) {
+  if (!kit || !kit.linkStyles || !kit.themes || typeof kit.themes !== 'object') return false;
+  let changed = false;
+  Object.keys(kit.themes).forEach((g) => {
+    const t = kit.themes[g];
+    if (GAMES[g] && t && isValidTheme(g, t) && state.themesByGame[g] !== t) { state.themesByGame[g] = t; changed = true; }
+  });
+  return changed;
+}
+
 // Apply a package's captured show setup. Only fields the snapshot carries are touched, so a
-// package captured before a feature existed can't blank newer state.
-function applyPackageSnapshot(pkg) {
+// package captured before a feature existed can't blank newer state. Scene style presets are
+// applied only with opts.styles (a linked kit), and MERGED — presets made since the capture survive.
+function applyPackageSnapshot(pkg, opts) {
   const s = pkg && pkg.showSnapshot;
   if (!s || typeof s !== 'object') return false;
-  if (s.scenePresets && typeof s.scenePresets === 'object') state.scenePresets = JSON.parse(JSON.stringify(s.scenePresets));
+  if (opts && opts.styles && s.scenePresets && typeof s.scenePresets === 'object') {
+    const snap = JSON.parse(JSON.stringify(s.scenePresets));
+    if (!state.scenePresets || typeof state.scenePresets !== 'object') state.scenePresets = {};
+    Object.keys(snap).forEach((scene) => {
+      const cur = state.scenePresets[scene] || { active: 'Default', presets: {} };
+      const inc = snap[scene] || {};
+      state.scenePresets[scene] = {
+        active: inc.active || cur.active,
+        presets: { ...(cur.presets || {}), ...(inc.presets || {}) }
+      };
+    });
+  }
   if (s.ticker && typeof s.ticker === 'object') {
     if (Array.isArray(s.ticker.messages)) state.ticker.messages = s.ticker.messages.slice(0, 50);
     if (Number(s.ticker.speed) > 0) state.ticker.speed = Number(s.ticker.speed);
@@ -2420,6 +2636,7 @@ function activeBrand() {
     accent: kit.accent || null,
     font: kit.font || null,
     sponsorLabel: pkg.sponsorLabel != null ? pkg.sponsorLabel : 'PARTNERS',   // preserve explicit '' (no rail heading); default only when unset
+    presentedLabel: pkg.presentedLabel || '',   // "Presented by" wording for the title-sponsor lockup across all overlays
     sponsorInterval: Number(pkg.sponsorInterval) > 0 ? Number(pkg.sponsorInterval) : 6,
     sponsorMode: pkg.sponsorMode === 'static' ? 'static' : 'cycle',
     bannerImages: Array.isArray(pkg.bannerImages) ? pkg.bannerImages : [],
@@ -2734,7 +2951,8 @@ const GAME_DEFAULT_COLORS = {
   'mobile-legends':{ a: '#2a7fff', b: '#e0383e' },
   'honor-of-kings':{ a: '#2a7fff', b: '#e0383e' },
   'the-finals':    { a: '#e0383e', b: '#f2c230' },   // THE FINALS red / gold
-  'marvel-tokon':  { a: '#e0383e', b: '#2a7fff' }
+  'marvel-tokon':  { a: '#e0383e', b: '#2a7fff' },
+  'brawlhalla':    { a: '#f24b3a', b: '#2f7de1' }    // Brawlhalla's own player-1 red / player-2 blue
 };
 const gameDefaultColors = (id) => GAME_DEFAULT_COLORS[id] || { a: '#055fdb', b: '#e97139' };
 // Every colour that's a per-game default → lets us tell an un-customised placeholder team
@@ -2748,6 +2966,80 @@ const DEFAULT_SIDE_COLOR_SET = new Set(
 // Called on set_game AND once at boot: without the boot call, a producer already sitting on a game
 // never picks up a newly-added default (Smash stayed on Rocket League's blue/orange until they
 // switched game and back).
+/*
+  Switch the active game and bring everything that is keyed to a game along with it.
+
+  Extracted from the set_active_game WS case so a PLATFORM can do the same thing. A tournament
+  platform knows which game its bracket is for — resolving that string and calling this is what
+  lets a Challonge (or start.gg, or FACEIT) load land on the right overlay, team labels, roster
+  size and default colours instead of whatever the producer happened to be on last.
+
+  Returns true when the game actually changed.
+*/
+function applyActiveGame(g) {
+  if (!g || !GAMES[g]) return false;
+  const prev = state.activeGame;
+  if (prev === g) return false;
+  state.activeGame = g;
+  // Re-tint placeholder team colours to the new game's defaults (e.g. Overwatch → blue/red)
+  // so the Match-Teams cards reflect the game. Saved teams' own brand colours are preserved
+  // because those aren't part of the default palette.
+  applyGameDefaultSideColors();
+  if (directorEngine) directorEngine.reset();
+  // Map Pool and Draft are keyed to the OLD game's pool/roster (map ids, hero rosters,
+  // ban formats) — leaving them as-is showed stale maps/heroes from the previous game
+  // (or Overwatch's ban board hanging around after switching away from Overwatch). Reset
+  // both to their clean not-started shape so the next Start Veto / Start Draft builds
+  // fresh from the NEW game's pool.
+  if (prev !== g) {
+    state.veto = { visible: false, title: '', maps: [] };
+    // Board content resets (old game's pool/roster), but PRODUCER PREFERENCES survive:
+    // teamStart and the Overwatch ban count are settings, not board state — resetting
+    // owBanCount to 4 here silently undid "one ban per team" every time the game switched.
+    state.draft = { visible: false, title: '', subtitle: '',
+      game: '', teamStart: (state.draft && state.draft.teamStart) || 'a',
+      owBanCount: (state.draft && state.draft.owBanCount) || 2,
+      sequence: [], ops: [], turn: null, complete: false,
+      auto: (state.draft && state.draft.auto) || { enabled: false, status: 'off', statusDetail: '', lockfilePath: '' } };
+  }
+  // Stop data connections for the previous game
+  if (prev === 'rocket-league' && g !== 'rocket-league') disconnectRL();
+  if (prev === 'valorant' && g !== 'valorant') stopValorantWatchdog();
+  if (prev === 'league' && g !== 'league') stopLolPolling();
+  if (prev === 'apex' && g !== 'apex') stopApexServer();
+  // Start data connections for the new game
+  if (g === 'rocket-league' && prev !== 'rocket-league') connectToRL();
+  if (g === 'valorant') startValorantWatchdog();
+  if (g === 'league') startLolPolling();
+  if (g === 'apex') startApexServer();
+  if (g === 'marvel-rivals') {
+    if (!state.mrMatch) state.mrMatch = { visible: true, format: 'BO5', bansByMap: [], gameMode: 'convergence', showMapLabels: true, mapWinners: [], mapModes: [], gepData: null };
+    state.mrMatch.visible = true;
+  }
+  return true;
+}
+
+/*
+  Adopt the game a tournament platform says its bracket is for.
+
+  Every platform hands the game over as free text and spells it its own way, so resolving it lives
+  in backend/game-match.js and this is the one place that ACTS on the answer. Returns
+  { id, changed } — id '' means "we couldn't tell", and in that case we deliberately do nothing:
+  switching to a guessed game would swap the overlay, the team labels and the roster size out from
+  under the producer, which is worse than leaving them where they were.
+
+  `pinned` is the producer's own choice. They can always override the platform afterwards with the
+  header dropdown, and a manual pick must survive the next poll — so only a LOAD passes
+  pinned:false, never the refresh.
+*/
+function adoptEventGame(gameName, { pinned = false } = {}) {
+  const id = resolveGameId(gameName, Object.keys(GAMES));
+  if (!id || pinned) return { id, changed: false };
+  const changed = applyActiveGame(id);
+  if (changed) console.log(`[platform] game set to ${GAMES[id].name} from "${gameName}"`);
+  return { id, changed };
+}
+
 function applyGameDefaultSideColors() {
   const dc = gameDefaultColors(state.activeGame);
   let changed = false;
@@ -2794,11 +3086,16 @@ function capturePreset() {
     fontFamily: state.fontFamily,
     bestOf: state.bestOf,
     facecamsEnabled: state.facecamsEnabled,
-    banner: state.banner,
-    ticker: state.ticker,
-    casters: state.casters
+    // By VALUE — a reference meant later live edits silently rewrote the saved preset.
+    banner: structuredCloneSafe(state.banner),
+    ticker: structuredCloneSafe(state.ticker),
+    casters: structuredCloneSafe(state.casters)
   };
 }
+function structuredCloneSafe(v) { try { return JSON.parse(JSON.stringify(v)); } catch (_) { return v; } }
+// Caster set-up that belongs to the install, not to a show preset — loading a preset must not
+// roll these back to whatever they were when the preset was saved.
+const PRESET_KEEP_CASTER_KEYS = ['library', 'vdo', 'rooms', 'apiKey', 'shifts', 'support'];
 
 function applyPreset(cfg) {
   if (!cfg || typeof cfg !== 'object') return;
@@ -2815,9 +3112,14 @@ function applyPreset(cfg) {
   if (typeof cfg.fontFamily === 'string') state.fontFamily = cfg.fontFamily;
   if (cfg.bestOf) state.bestOf = cfg.bestOf;
   if (typeof cfg.facecamsEnabled === 'boolean') state.facecamsEnabled = cfg.facecamsEnabled;
-  if (cfg.banner && typeof cfg.banner === 'object') state.banner = cfg.banner;
-  if (cfg.ticker && typeof cfg.ticker === 'object') state.ticker = cfg.ticker;
-  if (cfg.casters && typeof cfg.casters === 'object') state.casters = cfg.casters;
+  if (cfg.banner && typeof cfg.banner === 'object') state.banner = structuredCloneSafe(cfg.banner);
+  if (cfg.ticker && typeof cfg.ticker === 'object') state.ticker = structuredCloneSafe(cfg.ticker);
+  if (cfg.casters && typeof cfg.casters === 'object') {
+    const cur = state.casters || {};
+    const next = structuredCloneSafe(cfg.casters);
+    PRESET_KEEP_CASTER_KEYS.forEach((k) => { if (k in cur) next[k] = cur[k]; });
+    state.casters = next;
+  }
 }
 
 // Show Deck support / tournament-ops roles. Kept in sync with control-panel TD_SUPPORT_LABEL +
@@ -3330,7 +3632,12 @@ async function pullOrgLibrary(opts = {}) {
   } catch (e) { return { changed: false, error: e.message }; }
   finally { _orgPullBusy = false; }
 }
-cloudLoop('org-library', () => pullOrgLibrary(), 60000, { startAfterMs: 8000 });   // first pull once the session has loaded
+cloudLoop('org-library', () => pullOrgLibrary(), 60000, { startAfterMs: 8000 });
+
+// In-app promo strip feed (Nameless events / paid sponsors). Hourly, public endpoint, silent on failure.
+// Served to the control panel only via GET /api/promos — deliberately NOT part of state/buildLiveState.
+const appPromos = promosData.create({ getDataDir: () => dataDir, fetchFeed: () => cloud.getPromos() });
+cloudLoop('promos', () => appPromos.refresh(), 60 * 60 * 1000, { startAfterMs: 20000 });   // first pull once the session has loaded
 
 // ── In-app Stations manager: re-fetch the org's full nested station list and push it to the panel.
 // Called after every station/room/slot mutation so the manager UI always reflects the website state.
@@ -3427,9 +3734,11 @@ function restoreSecrets(saved) {
   };
   take('startggApiToken',      (v) => { startggApiToken = v; });
   take('challongeApiKey',      (v) => { challongeApiKey = v; });
+  take('challengermodeRefreshKey', (v) => { challengermodeRefreshKey = v; });
   take('nxgenApiKey',          (v) => { nxgenApiKey = v; });
   take('faceitApiKey',         (v) => { faceitApiKey = v; });
   take('liquipediaApiKey',     (v) => { liquipediaApiKey = v; });
+  take('riotApiKey',           (v) => { riotApiKey = v; });
   take('ballchasingApiKey',    (v) => { ballchasingApiKey = v; });
   take('bedwarsToken',         (v) => { bedwarsToken = v; });
   take('sheetsServiceAccount', (v) => { sheetsServiceAccount = v; });
@@ -3495,6 +3804,8 @@ function loadState() {
       if (typeof saved.showSeries === 'boolean') state.showSeries = saved.showSeries;
       if (typeof saved.rlReplayTransitions === 'boolean') state.rlReplayTransitions = saved.rlReplayTransitions;
       if (typeof saved.rlSponsorRoll === 'boolean') state.rlSponsorRoll = saved.rlSponsorRoll;
+      if (saved.worldsSidebar && typeof saved.worldsSidebar === 'object') state.worldsSidebar = sanitizeWorldsSidebar(saved.worldsSidebar);
+      if (typeof saved.worldsTicker === 'boolean') state.worldsTicker = saved.worldsTicker;
       if (typeof saved.rlScoreboardSeparate === 'boolean') state.rlScoreboardSeparate = saved.rlScoreboardSeparate;
       // Merged field-by-field, not assigned wholesale: a state.json written before this feature
       // existed has no seriesStats at all, and one written by a newer build must not be able to
@@ -3523,6 +3834,14 @@ function loadState() {
       if (Array.isArray(saved.preshowPresets)) state.preshowPresets = saved.preshowPresets;
       if (saved.banner) state.banner = saved.banner;
       if (saved.credits && Array.isArray(saved.credits.sponsors)) state.credits = { sponsors: saved.credits.sponsors, talent: Array.isArray(saved.credits.talent) ? saved.credits.talent : [] };
+      // The end-card text and the side-rail switches are saved with credits but were never read back,
+      // so "Thanks For Watching" came back on every restart. (visible stays off: graphics start off-air.)
+      if (saved.credits && typeof saved.credits === 'object') {
+        if (!state.credits) state.credits = { visible: false, sponsors: [], talent: [], endText: '' };
+        if (typeof saved.credits.endText === 'string') state.credits.endText = saved.credits.endText.slice(0, 80);
+        if (typeof saved.credits.showTop8 === 'boolean') state.credits.showTop8 = saved.credits.showTop8;
+        if (typeof saved.credits.showActivity === 'boolean') state.credits.showActivity = saved.credits.showActivity;
+      }
       if (saved.casters && typeof saved.casters === 'object') {
         state.casters = {
           visible: !!saved.casters.visible,
@@ -3600,7 +3919,7 @@ function loadState() {
         };
       }
       if (saved.rlStatsScreen && typeof saved.rlStatsScreen === 'object') {
-        const RL_STATS_DESIGNS = ['default', 'glass', 'block', 'radar'];
+        const RL_STATS_DESIGNS = ['default', 'glass', 'block', 'radar', 'compare'];
         state.rlStatsScreen = {
           showStats: saved.rlStatsScreen.showStats !== false,
           design: RL_STATS_DESIGNS.includes(saved.rlStatsScreen.design) ? saved.rlStatsScreen.design : 'default'
@@ -3683,7 +4002,9 @@ function loadState() {
           mapWinners: Array.isArray(saved.owMatch.mapWinners) ? saved.owMatch.mapWinners : [],
           mapModes:   Array.isArray(saved.owMatch.mapModes)   ? saved.owMatch.mapModes   : [],
           attackSide: saved.owMatch.attackSide || null,
-          showAttack: !!saved.owMatch.showAttack
+          showAttack: !!saved.owMatch.showAttack,
+          // Centre-pill format label: 'ft' = first to N wins (FT3), 'bo' = best of N maps (BO5).
+          seriesLabel: saved.owMatch.seriesLabel === 'bo' ? 'bo' : 'ft'
         };
       }
       if (saved.mrMatch && typeof saved.mrMatch === 'object') {
@@ -3785,6 +4106,43 @@ function loadState() {
         // side() sizes to the crew; doubles is always two a side.
         if (state.smash.mode === 'doubles') resizeSmashSides(2);
       }
+      // Brawlhalla. Everything is clamped/rebuilt rather than spread from the save: this runs
+      // inside loadState(), where ONE throw abandons the rest of the restore (see
+      // test/loadstate-restore.test.js), so a hand-edited or older state file must not be able to
+      // reach in with a string where a number goes.
+      if (saved.brawlhalla && typeof saved.brawlhalla === 'object') {
+        const b = saved.brawlhalla;
+        const start = Math.max(1, Math.min(9, Math.round(Number(b.startStocks) || 3)));
+        const clampS = (v) => Math.max(0, Math.min(9, Number.isFinite(+v) ? Math.round(+v) : start));
+        const seat = (x) => ({
+          stocks: clampS(x && x.stocks),
+          legend: String((x && x.legend) || '').slice(0, 40),
+          bhId: Math.max(0, Math.round(Number(x && x.bhId) || 0)),
+          // Cards are a CACHE of a remote pull, not producer input — never restored from disk, so a
+          // board can't go on air quoting an ELO from three weeks ago. They refill on first lookup.
+          card: null
+        });
+        const side = (x) => {
+          const seats = (Array.isArray(x && x.players) ? x.players : []).slice(0, 2).map(seat);
+          while (seats.length < 2) seats.push({ stocks: start, legend: '', bhId: 0, card: null });
+          return { stocks: clampS(x && x.stocks), legend: String((x && x.legend) || '').slice(0, 40), players: seats };
+        };
+        state.brawlhalla = {
+          startStocks: start,
+          mode: b.mode === '2v2' ? '2v2' : '1v1',
+          rankMode: b.rankMode === 'ranked_3v3' ? 'ranked_3v3' : 'ranked_1v1',
+          region: BH_REGIONS.includes(String(b.region || '').toUpperCase()) ? String(b.region).toUpperCase() : 'ALL',
+          title: String(b.title || '').slice(0, 40),
+          titleManual: !!b.titleManual,
+          autoAdvance: b.autoAdvance !== false,
+          showRank: b.showRank !== false,
+          showLegend: b.showLegend !== false,
+          railPos: b.railPos === 'topleft' ? 'topleft' : 'auto',
+          blue: side(b.blue),
+          orange: side(b.orange),
+          lastError: '', lastLookupAt: 0
+        };
+      }
       if (saved.tokon && typeof saved.tokon === 'object') {
         const rp = saved.tokon.railPos;
         // A layout saved for an older board shape (no layoutV / an older one) is dropped for the new
@@ -3874,6 +4232,20 @@ function loadState() {
           pendingEvents: []
         };
       }
+      if (saved.challengermode && typeof saved.challengermode === 'object') {
+        const c = saved.challengermode;
+        state.challengermode = {
+          ...state.challengermode,
+          enabled: !!c.enabled,
+          tournamentId: String(c.tournamentId || ''),
+          selectedTournament: (c.selectedTournament && typeof c.selectedTournament === 'object') ? c.selectedTournament : null,
+          logoMap: (c.logoMap && typeof c.logoMap === 'object') ? c.logoMap : {},
+          autoFollow: !!c.autoFollow,
+          gameId: String(c.gameId || ''),
+          spaceId: String(c.spaceId || ''),
+          pollSec: Math.max(10, Math.min(600, Math.round(Number(c.pollSec) || 30)))
+        };
+      }
       if (saved.challonge && typeof saved.challonge === 'object') {
         state.challonge = {
           ...state.challonge,
@@ -3882,6 +4254,13 @@ function loadState() {
           selectedTournament: saved.challonge.selectedTournament || null,
           logoMap: (saved.challonge.logoMap && typeof saved.challonge.logoMap === 'object') ? saved.challonge.logoMap : {},
           autoFollow: !!saved.challonge.autoFollow,
+          gameId: String(saved.challonge.gameId || ''),
+          // 15s floor: anything faster spends the whole free monthly quota in an hour.
+          pollSec: Math.max(15, Math.min(600, Math.round(Number(saved.challonge.pollSec) || 30))),
+          budget: (saved.challonge.budget && typeof saved.challonge.budget === 'object')
+            ? { month: String(saved.challonge.budget.month || ''), used: Math.max(0, Math.round(Number(saved.challonge.budget.used) || 0)),
+                limit: Math.max(0, Math.round(Number(saved.challonge.budget.limit) || 500)), warned: !!saved.challonge.budget.warned }
+            : { month: '', used: 0, limit: 500, warned: false },
           connected: false, lastError: null, queue: [], matchFeed: [], queueFetchedAt: null, eventTeams: [], lastAutoFollowMatchId: null
         };
       }
@@ -3909,6 +4288,11 @@ function loadState() {
           autoFollow: !!saved.faceit.autoFollow
         };
       }
+      if (saved.riot && typeof saved.riot === 'object') {
+        if (riot.REGIONS.includes(saved.riot.region)) state.riot.region = saved.riot.region;
+        if (riot.PLATFORMS[saved.riot.platform]) state.riot.platform = saved.riot.platform;
+      }
+      state.riot.keyKind = riot.keyKind(riotApiKey);
       if (saved.liquipedia && typeof saved.liquipedia === 'object') {
         const lq = saved.liquipedia;
         state.liquipedia.enabled = !!lq.enabled;
@@ -3940,6 +4324,8 @@ function loadState() {
           maps: {
             teams:     { ...state.sheets.maps.teams,     ...(saved.sheets.maps && saved.sheets.maps.teams) },
             schedule:  { ...state.sheets.maps.schedule,  ...(saved.sheets.maps && saved.sheets.maps.schedule) },
+            brResults: { ...state.sheets.maps.brResults, ...(saved.sheets.maps && saved.sheets.maps.brResults) },
+            brPlayers: { ...state.sheets.maps.brPlayers, ...(saved.sheets.maps && saved.sheets.maps.brPlayers) },
             standings: { ...state.sheets.maps.standings, ...(saved.sheets.maps && saved.sheets.maps.standings) }
           },
           connected: false, lastError: null, tabs: []   // runtime — re-established on connect
@@ -4004,6 +4390,7 @@ function loadState() {
       if (typeof saved.csgoCfgPath === 'string') {
         state.csgo.cfgPath = saved.csgoCfgPath;
       }
+      if (typeof saved.csgoAutoWinner === 'boolean') state.csgo.autoWinner = saved.csgoAutoWinner;
       if (saved.bracket && typeof saved.bracket === 'object') {
         state.bracket = {
           ...state.bracket,
@@ -4026,6 +4413,8 @@ function loadState() {
         // Self-heal saves made before the NXGEN importer stopped appending: NXGEN and Challonge
         // are single-phase sources, so any OTHER phase in the list is an orphan from a previously
         // imported event and would render as a stray phase chip on bracket.html.
+        // Challengermode is deliberately ABSENT here: it is genuinely multi-phase (one phase per
+        // stage — groups, then playoffs), so pruning to a single id would delete real stages.
         const soleId = state.bracket.source === 'nxgen' ? 'nxgen-main'
                      : state.bracket.source === 'challonge' ? 'challonge-main'
                      : state.bracket.source === 'faceit' ? 'faceit-main' : '';
@@ -4142,6 +4531,7 @@ function loadState() {
       }
       if (saved.lolOcr && typeof saved.lolOcr === 'object') {
         state.lol.ocr.enabled = !!saved.lolOcr.enabled;
+        state.lol.ocr.displayId = (saved.lolOcr.displayId || '').toString();
         if (saved.lolOcr.regions) ['blue', 'red'].forEach((s) => {
           if (saved.lolOcr.regions[s]) ['x', 'y', 'w', 'h'].forEach((k) => {
             const v = Number(saved.lolOcr.regions[s][k]);
@@ -4238,6 +4628,8 @@ function _saveAppStateNow(sync = false) {
       showSeries: state.showSeries,
       rlReplayTransitions: state.rlReplayTransitions,
       rlSponsorRoll: state.rlSponsorRoll,
+      worldsSidebar: state.worldsSidebar,
+      worldsTicker: state.worldsTicker,
       rlScoreboardSeparate: state.rlScoreboardSeparate,
       seriesStats: state.seriesStats,
       defaultBestOf: state.defaultBestOf,
@@ -4267,7 +4659,7 @@ function _saveAppStateNow(sync = false) {
       ticker: state.ticker,
       draftAuto: { enabled: !!(state.draft && state.draft.auto && state.draft.auto.enabled), lockfilePath: (state.draft && state.draft.auto && state.draft.auto.lockfilePath) || '' },
       lolHudMode: (state.lol && state.lol.hudMode) || 'auto',
-      lolOcr: { enabled: !!(state.lol && state.lol.ocr && state.lol.ocr.enabled), regions: (state.lol && state.lol.ocr && state.lol.ocr.regions) || undefined },
+      lolOcr: { enabled: !!(state.lol && state.lol.ocr && state.lol.ocr.enabled), displayId: (state.lol && state.lol.ocr && state.lol.ocr.displayId) || '', regions: (state.lol && state.lol.ocr && state.lol.ocr.regions) || undefined },
       br: {
         enabled: state.br.enabled, game: state.br.game, event: state.br.event, format: state.br.format,
         scoringPreset: state.br.scoringPreset, scoring: state.br.scoring,
@@ -4292,6 +4684,9 @@ function _saveAppStateNow(sync = false) {
       overtime: state.overtime,
       replay: (({ program, preview, ...look }) => look)(state.replay || {}),   // buses are runtime-only
       scoreboardAd: state.scoreboardAd,
+      // Post-game board style (Default/Glass/Block/Radar/Compare) + show-stats. loadState() already
+      // restored this, but it was never written, so the pick reset to Default on every restart.
+      rlStatsScreen: state.rlStatsScreen,
       watchlist: state.watchlist,
       teamSpotlight: state.teamSpotlight,
       breakScreen: {
@@ -4304,7 +4699,7 @@ function _saveAppStateNow(sync = false) {
       winner: { side: state.winner.side, name: state.winner.name, logo: state.winner.logo, color: state.winner.color, subtitle: state.winner.subtitle, style: state.winner.style },
       veto: { title: state.veto.title, maps: state.veto.maps },
       intro: { side: state.intro.side, title: state.intro.title, style: state.intro.style, showFooter: state.intro.showFooter, showRealName: state.intro.showRealName !== false },
-      owMatch: { visible: !!state.owMatch.visible, format: state.owMatch.format, currentMapIdx: state.owMatch.currentMapIdx, bansByMap: state.owMatch.bansByMap, attackSide: state.owMatch.attackSide || null, showAttack: !!state.owMatch.showAttack, gameMode: state.owMatch.gameMode || 'escort', showMapLabels: state.owMatch.showMapLabels !== false, mapWinners: Array.isArray(state.owMatch.mapWinners) ? state.owMatch.mapWinners : [], mapModes: Array.isArray(state.owMatch.mapModes) ? state.owMatch.mapModes : [] },
+      owMatch: { visible: !!state.owMatch.visible, format: state.owMatch.format, currentMapIdx: state.owMatch.currentMapIdx, bansByMap: state.owMatch.bansByMap, attackSide: state.owMatch.attackSide || null, showAttack: !!state.owMatch.showAttack, gameMode: state.owMatch.gameMode || 'escort', showMapLabels: state.owMatch.showMapLabels !== false, mapWinners: Array.isArray(state.owMatch.mapWinners) ? state.owMatch.mapWinners : [], mapModes: Array.isArray(state.owMatch.mapModes) ? state.owMatch.mapModes : [], seriesLabel: state.owMatch.seriesLabel === 'bo' ? 'bo' : 'ft' },
       mrMatch: (function(){ const m=state.mrMatch||{}; return { visible: m.visible !== false, format: m.format || 'BO5', bansByMap: m.bansByMap || [], gameMode: m.gameMode || 'convergence', showMapLabels: m.showMapLabels !== false, mapWinners: Array.isArray(m.mapWinners)?m.mapWinners:[], mapModes: Array.isArray(m.mapModes)?m.mapModes:[], gepData: m.gepData||null }; })(),
       customOverlayLayouts: state.customOverlayLayouts || {},
       gameConfigs: state.gameConfigs || {},
@@ -4314,6 +4709,7 @@ function _saveAppStateNow(sync = false) {
       activePlayer: state.activePlayer,
       observedPlayer: state.observedPlayer,
       smash: state.smash,
+      brawlhalla: state.brawlhalla,
       tokon: state.tokon,
       chatCommands: state.chatCommands,
       pulse: state.pulse,
@@ -4324,11 +4720,18 @@ function _saveAppStateNow(sync = false) {
       game: { number: state.game.number },
       startgg: state.startgg,
       startggApiToken: encryptSecret(startggApiToken),
-      challonge: { enabled: state.challonge.enabled, tournamentSlug: state.challonge.tournamentSlug, selectedTournament: state.challonge.selectedTournament, logoMap: state.challonge.logoMap, autoFollow: state.challonge.autoFollow },
+      challonge: { enabled: state.challonge.enabled, tournamentSlug: state.challonge.tournamentSlug, selectedTournament: state.challonge.selectedTournament, logoMap: state.challonge.logoMap, autoFollow: state.challonge.autoFollow, gameId: state.challonge.gameId, pollSec: state.challonge.pollSec, budget: state.challonge.budget },
+      challengermode: { enabled: state.challengermode.enabled, tournamentId: state.challengermode.tournamentId,
+        selectedTournament: state.challengermode.selectedTournament, logoMap: state.challengermode.logoMap,
+        autoFollow: state.challengermode.autoFollow, gameId: state.challengermode.gameId,
+        pollSec: state.challengermode.pollSec, spaceId: state.challengermode.spaceId },
+      challengermodeRefreshKey: encryptSecret(challengermodeRefreshKey),
       challongeApiKey: encryptSecret(challongeApiKey),
       nxgen: { enabled: state.nxgen.enabled, eventSlug: state.nxgen.eventSlug, selectedEvent: state.nxgen.selectedEvent, logoMap: state.nxgen.logoMap, autoFollow: state.nxgen.autoFollow },
       nxgenApiKey: encryptSecret(nxgenApiKey),
       liquipediaApiKey: encryptSecret(liquipediaApiKey),
+      riot: { region: state.riot.region, platform: state.riot.platform },
+      riotApiKey: encryptSecret(riotApiKey),
       // Persisted so the rolling hour survives a restart (Liquipedia's window keeps running
       // regardless) and so cached results are re-used, which their terms explicitly ask for.
       liquipediaBudget: _lpBudget.toJSON(),
@@ -4367,6 +4770,7 @@ function _saveAppStateNow(sync = false) {
       brand: state.brand || null,                 // global accent fallback (Settings ▸ Appearance) when no kit is active
       preshowPresets: state.preshowPresets || [], // Desk Show named topic rundowns
       csgoCfgPath: state.csgo.cfgPath,
+      csgoAutoWinner: state.csgo.autoWinner !== false,
       director: {
         enabled: state.director?.enabled !== false,
         sensitivity: state.director?.sensitivity ?? 0.5,
@@ -4670,7 +5074,7 @@ function dedupeSupport() {
     if (!s || !s.crewId || seenId.has(s.crewId)) return false;
     const c = byId.get(s.crewId);
     if (!c) return false;                       // crew record deleted → drop the orphan chip
-    const nm = (c.name || '').trim().toLowerCase();
+    const nm = String(c.name || '').trim().toLowerCase();   // a non-string name aborted loadState here
     if (nm && seenName.has(nm)) return false;   // same human via a duplicate crew record
     seenId.add(s.crewId);
     if (nm) seenName.add(nm);
@@ -5208,7 +5612,7 @@ const BROADCAST_TIERS = {
   // live production/scoreboard state (from the state literal)
   version: 'live', view: 'live', rlHudHidden: 'live', perfMode: 'live', orgLibrary: 'live', cloudRole: 'live', activeGame: 'live', themesByGame: 'live',
   eventName: 'live', gameLabel: 'live', roundLabel: 'live', speedUnit: 'live', fontFamily: 'live',
-  clock24h: 'live', showSeries: 'live', rlReplayTransitions: 'live', rlSponsorRoll: 'live', rlScoreboardSeparate: 'live', defaultBestOf: 'live', facecamsEnabled: 'live',
+  clock24h: 'live', showSeries: 'live', rlReplayTransitions: 'live', rlSponsorRoll: 'live', worldsSidebar: 'live', worldsTicker: 'live', rlScoreboardSeparate: 'live', defaultBestOf: 'live', facecamsEnabled: 'live',
   replayCams: 'live', activeBrandKitId: 'live', useBrandColors: 'live', colorMode: 'live',
   sceneBg: 'live', banner: 'live', casters: 'live', vdo: 'live', listenIn: 'live', credits: 'live',
   competition: 'live', compFeed: 'live', compSync: 'live',
@@ -5219,11 +5623,11 @@ const BROADCAST_TIERS = {
   // Settings + a change counter only — the vault RECORDS are fetched over /api/teamdb, never
   // broadcast (they carry base64 logos and full roster history).
   teamVault: 'live',
-  teamPlayers: 'live', series: 'live', activePlayer: 'live', observedPlayer: 'live', smash: 'live', tokon: 'live', match: 'live', myEvents: 'library', game: 'live',
+  teamPlayers: 'live', series: 'live', activePlayer: 'live', observedPlayer: 'live', smash: 'live', brawlhalla: 'live', tokon: 'live', match: 'live', myEvents: 'library', game: 'live',
   chatCommands: 'live', pulse: 'live',
   gameTeams: 'live', players: 'live', playerCache: 'live', currentGoal: 'live',
   spectatedPlayer: 'live', rlConnected: 'live', rlSpectatorUi: 'live', startgg: 'live',
-  challonge: 'live', nxgen: 'live', liquipedia: 'live', faceit: 'live', sheets: 'live', activeEvent: 'live', obs: 'live', vmix: 'live',
+  challonge: 'live', challengermode: 'live', challengermodePlacements: 'live', nxgen: 'live', liquipedia: 'live', riot: 'live', faceit: 'live', sheets: 'live', activeEvent: 'live', obs: 'live', vmix: 'live',
   switcher: 'live', commercial: 'live', upcoming: 'live', standings: 'live', leagueStats: 'live', leagueLeaderboard: 'live', leagueCapture: 'live', ballchasing: 'live', teamRecord: 'live',
   autoTeamsFromGame: 'live', startggLeagueStandings: 'live', gfxActive: 'live', watchlist: 'live',
   startggPlacements: 'live', startggCharacters: 'live',
@@ -5736,12 +6140,16 @@ brApplyScoringPreset('fncsFinals');
 function buildLiveState() {
   const publicStartgg = { ...state.startgg, hasToken: !!startggApiToken };
   const publicChallonge = { ...state.challonge, hasKey: !!challongeApiKey };
+  const publicChallengermode = { ...state.challengermode, hasKey: !!challengermodeRefreshKey };
   const publicNxgen = { ...state.nxgen, hasKey: !!nxgenApiKey };
   // Deliberately NOT a spread of state.liquipedia. The raw pulls (standings/rankings/squad/
   // tournament) are working data the server uses to fill a graphic on request — putting those
   // arrays on the live broadcast would ship them to every overlay on every tick, which is exactly
   // the payload bloat the LIVE/LIBRARY split exists to prevent. Overlays need none of it; the
   // panel needs the settings, the budget and a count of what is ready to apply.
+  // Key itself never travels — only whether one is saved, and what KIND it is (a development
+  // key expires every 24h, which is the answer to most "it worked yesterday" reports).
+  const publicRiot = { ...state.riot, hasKey: !!riotApiKey, keyKind: riot.keyKind(riotApiKey) };
   const publicLiquipedia = {
     enabled: state.liquipedia.enabled,
     wiki: state.liquipedia.wiki,
@@ -5764,6 +6172,11 @@ function buildLiveState() {
   const publicBedwars = { ...state.bedwars, hasToken: !!bedwarsToken };
   const publicBallchasing = { ...state.ballchasing, hasKey: !!ballchasingApiKey };
   const publicObs = { ...state.obs, hasPassword: !!obsPassword };
+  // Secrets never ride the broadcast: every overlay / remote WS client receives this payload, and
+  // nothing client-side reads these fields.
+  const { apiToken: _twTok, refreshToken: _twRef, webhookSecret: _twHook, ...publicTwitch } = state.twitch || {};
+  publicTwitch.hasToken = !!_twTok;
+  const { apiKey: _castKey, ...publicCasters } = state.casters || {};
   const publicDiscord = {
     connected: state.discord.connected,
     userId: state.discord.userId,
@@ -5789,8 +6202,10 @@ function buildLiveState() {
     cloudRole: currentCloudRole(),   // org-seat role (null = local/full access) — drives view-only UX
     startgg: publicStartgg,
     challonge: publicChallonge,
+    challengermode: publicChallengermode,
     nxgen: publicNxgen,
     liquipedia: publicLiquipedia,
+    riot: publicRiot,
     faceit: publicFaceit,
     sheets: publicSheets,
     bedwars: publicBedwars,   // token stripped; only hasToken travels
@@ -5834,6 +6249,8 @@ function buildLiveState() {
       })()
     },
     obs: publicObs,
+    twitch: publicTwitch,
+    casters: publicCasters,
     discord: publicDiscord,
     // Cloud reachability + the state of every background poll. Tiny, and it is the only way the
     // panel can say "station auto-fill is paused because the backend is down" instead of the
@@ -5855,6 +6272,7 @@ function buildLiveState() {
     vetoMeta: vetoData.VETO_META,    // per-game terminology (map/stage, Ban/Strike)
     draftGames: draftData.draftGames(),   // games with a champion-draft format
     theme: state.themesByGame[state.activeGame] || migrateThemeId(state.activeGame, 'default'),
+    themesByGame: state.themesByGame,   // every game's chosen layout, so a game can be set up before it goes on air
     activeOverlay: activeOverlayPath(state.activeGame),
     overlayLayout: resolveOverlayLayout(state.activeGame, state.themesByGame[state.activeGame]),
     presets: savedPresets.map((p) => ({ id: p.id, name: p.name, game: p.game })),
@@ -8541,15 +8959,121 @@ function challongeBracketType(type) {
   return 'SINGLE_ELIMINATION';
 }
 
+/*
+  Standings for a Challonge bracket — for EVERY format, not just round robin.
+
+  Challonge gives two different truths and they answer different questions:
+    · participant.final_rank  the REAL finish order, with the ties a bracket actually produces
+                              (1, 2, 3, 4, 5, 5, 7, 7). It fills in progressively as players are
+                              eliminated, so a running event already has its lower placings.
+    · match results           W/L, which is all you have for the players still alive.
+  So: rank by final_rank where it exists, and fall back to W/L for everyone still in. Sorting an
+  elimination bracket by wins alone is what puts a losers-run runner-up above the champion.
+*/
+function challongeStandings(partMap, matches) {
+  const rec = {};
+  Object.values(partMap).forEach((p) => {
+    rec[p.challongeId] = { name: p.name, logo: p.logo || null, seed: p.seed || 0,
+                           finalRank: p.finalRank || 0, wins: 0, losses: 0, gameWins: 0, gameLosses: 0 };
+  });
+  matches.forEach((m) => {
+    const d = m.match;
+    if (d.state !== 'complete' || !d.winner_id) return;
+    const w = rec[d.winner_id];
+    const loserId = d.winner_id === d.player1_id ? d.player2_id : d.player1_id;
+    const l = rec[loserId];
+    if (w) w.wins++;
+    if (l) l.losses++;
+    // Per-GAME totals (a Bo5 won 3-1 is 3 game wins), so a points-style board has real numbers.
+    const csv = String(d.scores_csv || '').trim();
+    if (!csv) return;
+    let g1 = 0, g2 = 0;
+    csv.split(',').forEach((g) => {
+      const mm = /^\s*(-?\d+)\s*-\s*(-?\d+)\s*$/.exec(g);
+      if (!mm) return;
+      const a = parseInt(mm[1], 10), b = parseInt(mm[2], 10);
+      if (a > b) g1++; else if (b > a) g2++;
+    });
+    const p1 = rec[d.player1_id], p2 = rec[d.player2_id];
+    if (p1) { p1.gameWins += g1; p1.gameLosses += g2; }
+    if (p2) { p2.gameWins += g2; p2.gameLosses += g1; }
+  });
+
+  const rows = Object.values(rec);
+  rows.sort((a, b) => {
+    // A known finish beats any inference, and finishing 3rd beats finishing 5th.
+    if (a.finalRank && b.finalRank) return a.finalRank - b.finalRank;
+    if (a.finalRank) return 1;       // ranked = ELIMINATED, so they sit below everyone still alive
+    if (b.finalRank) return -1;
+    return (b.wins - a.wins) || (a.losses - b.losses) || ((a.seed || 999) - (b.seed || 999));
+  });
+  return rows.map((r, i) => ({
+    placement: r.finalRank || (i + 1),
+    name: r.name, logo: r.logo, wins: r.wins, losses: r.losses,
+    gameWins: r.gameWins, gameLosses: r.gameLosses
+  }));
+}
+
+/*
+  The TOP 8 board's rows: real finish order only.
+
+  Distinct from challongeStandings() on purpose. Standings will happily rank the field with an
+  inference for anyone still playing, because a standings board is allowed to be provisional. A
+  top-8 graphic is not — it states "this is how the event finished", so it draws ONLY from
+  final_rank and reports how far along it is. `complete` says every one of the top N has a real
+  placement; until then the panel can show what there is and say so.
+*/
+function challongePlacements(partMap, limit = 8) {
+  const ranked = Object.values(partMap).filter((p) => p.finalRank > 0)
+    .sort((a, b) => a.finalRank - b.finalRank)
+    .slice(0, limit)
+    .map((p) => ({ placement: p.finalRank, name: p.name, logo: p.logo || null, seed: p.seed || 0,
+                   // Mirrors the start.gg placement row shape so the same Top 8 builder,
+                   // the same overlay and the same push path handle both platforms.
+                   entrantId: p.challongeId, players: [], countryCode: '', character: '' }));
+  const fieldSize = Object.keys(partMap).length;
+  return { rows: ranked, complete: ranked.length >= Math.min(limit, fieldSize) };
+}
+
+/*
+  Split a Challonge participant name into an org tag and a player name.
+
+  Challonge has no prefix field — a 1v1 entrant is typed free-hand, and the convention every
+  fighting-game TO uses is "TAG | Player". Splitting it is what lets the head-to-head name plates,
+  the FGC skins and the Smash/Brawlhalla boards print an org the way they do for start.gg, where
+  the prefix arrives as its own field.
+*/
+function challongeSplitName(raw) {
+  const str = String(raw || '').trim();
+  const m = /^(.{1,20}?)\s*[|｜]\s*(.+)$/.exec(str);
+  if (m) return { prefix: m[1].trim(), name: m[2].trim() };
+  return { prefix: '', name: str };
+}
+
 function buildChalongeBracket(tournament, participants, matches) {
   const partMap = challongePartMap(participants);
   const getName = (id) => (id ? (partMap[id]?.name || `#${id}`) : 'TBD');
   const type = challongeBracketType(tournament.tournament_type);
 
+  // Challonge's scores_csv is PER GAME, comma separated: a Bo5 comes back "3-1,2-3,3-0".
+  // Splitting the whole string on '-' (what this used to do) read "3-1,2-3" as ["3","1,2","3"] and
+  // put 3-0 on the bracket for a 2-1 series — every multi-game set on every fighting-game bracket
+  // we draw. Count GAMES WON when the set has more than one game; a single-game set is its own
+  // score (a 13-7 Valorant map is the score, not "1-0").
+  //
+  // A negative number is Challonge's forfeit marker ("-1-0"), so the split has to tolerate a
+  // leading '-' on either side rather than assuming two clean integers.
+  const GAME_RE = /^\s*(-?\d+)\s*-\s*(-?\d+)\s*$/;
   function parseScore(match) {
-    const csv = match.scores_csv || '';
-    const parts = csv.split('-').map((s) => parseInt(s) || 0);
-    return { aScore: parts[0] || 0, bScore: parts[1] || 0 };
+    const csv = String(match.scores_csv || '').trim();
+    if (!csv) return { aScore: 0, bScore: 0 };
+    const games = csv.split(',').map((g) => GAME_RE.exec(g)).filter(Boolean)
+      .map((m) => ({ a: parseInt(m[1], 10), b: parseInt(m[2], 10) }));
+    if (!games.length) return { aScore: 0, bScore: 0 };
+    if (games.length === 1) return { aScore: games[0].a, bScore: games[0].b };
+    let a = 0, b = 0;
+    games.forEach((g) => { if (g.a > g.b) a++; else if (g.b > g.a) b++; });
+    return { aScore: a, bScore: b };
   }
 
   if (type === 'ROUND_ROBIN' || type === 'SWISS') {
@@ -8563,7 +9087,7 @@ function buildChalongeBracket(tournament, participants, matches) {
     });
     const schedule = Object.keys(roundMap).map(Number).sort((a, b) => a - b).map((r) => ({ name: 'Round ' + r, sets: roundMap[r] }));
     const roster = Object.values(partMap).sort((a, b) => (a.seed || 99) - (b.seed || 99)).map((p) => p.name);
-    return { type, winners: [], losers: [], finals: [], standings: [], schedule, roster };
+    return { type, winners: [], losers: [], finals: [], standings: challongeStandings(partMap, matches), schedule, roster };
   }
 
   // Elimination: positive round = winners side, negative = losers side.
@@ -8599,7 +9123,48 @@ function buildChalongeBracket(tournament, participants, matches) {
   const lKeys = Object.keys(losersMap).map(Number).sort((a, b) => b - a);
   const losers = lKeys.map((r) => ({ name: 'Losers Round ' + Math.abs(r), sets: losersMap[r] }));
 
-  return { type, winners, losers, finals, standings: [], schedule: [], roster: [] };
+  return { type, winners, losers, finals, standings: challongeStandings(partMap, matches), schedule: [], roster: [] };
+}
+
+/*
+  Put one platform entrant on a side of the scoreboard. Shared by every tournament platform.
+
+  This is the "works across games" half of a platform integration. A team game only needs the name
+  and the crest, but a 1v1 game (Smash, Brawlhalla, every FGC title, EA FC) draws the PLAYER and
+  their org from the side's ROSTER — SceneBase.soloIdentity and the head-to-head name plates read
+  teams[side].players[0], not the team name. Setting only the name left every 1v1 board with a
+  blank plate, which is why a platform could look like it "didn't work" for fighting games.
+
+  So: always set name + logo, and for a 1v1 game also seed a one-player roster from the entrant,
+  splitting the "TAG | Player" convention into an org prefix and a player name.
+
+  `roster` (optional) is the platform's own member list, used in preference to splitting the
+  entrant name — Challengermode gives us real usernames, so there is no need to guess from a
+  string. An existing roster is left alone when it already names the same player: a producer may
+  have filled in country, socials or a camera assignment, and none of that should be thrown away
+  because the poller came round again.
+*/
+function pushEntrantToSide(side, rawName, logo, opts = {}) {
+  const name = String(rawName || '').trim();
+  const logoMap = opts.logoMap || {};
+  const teamLogo = logo || logoMap[name.toLowerCase()] || null;
+  state.teams[side] = { ...state.teams[side], name, logo: teamLogo };
+  const game = GAMES[state.activeGame] || {};
+  const isSolo = game.format === '1v1' || Number(game.rosterSize) === 1;
+  if (!isSolo || !name) return;
+  // Prefer the platform's own roster over parsing the entrant name.
+  const member = Array.isArray(opts.roster) && opts.roster.length
+    ? String((opts.roster[0] && (opts.roster[0].name || opts.roster[0])) || '').trim() : '';
+  const split = member ? { prefix: '', name: member } : challongeSplitName(name);
+  const existing = (state.teams[side].players || [])[0];
+  if (existing && String(existing.name || '').toLowerCase() === split.name.toLowerCase()) return;
+  state.teams[side].players = [{
+    id: Math.random().toString(36).slice(2, 11),
+    name: split.name, platform: opts.platform || 'challonge', platformId: '', assignedCamera: null,
+    country: '', countryCode: '', prefix: split.prefix, realName: ''
+  }];
+  // A new roster invalidates whichever member was pinned as the on-air one.
+  state.activePlayer[side] = '';
 }
 
 function buildChallongeQueue(partMap, matches) {
@@ -8623,8 +9188,30 @@ function buildChallongeQueue(partMap, matches) {
     });
 }
 
+/*
+  Count Challonge requests against the calendar month.
+
+  Challonge's free plan is 500 requests per MONTH, and the grace period on that ended 6 July 2026 —
+  past it, a free app over the limit gets 429s. Our live poll costs THREE requests (tournament +
+  participants + matches), so a 30s poll is ~86,000 a month: a free key runs out in under four
+  hours of broadcasting. That is not something a producer should discover from a dead bracket
+  mid-show, so we count it and show it. We do NOT block on it — it is their quota to spend, and a
+  paid plan has a much larger allowance — but the number is visible before the 429 arrives.
+*/
+function challongeSpend(n = 1) {
+  const b = state.challonge.budget || (state.challonge.budget = { month: '', used: 0, limit: 500, warned: false });
+  const month = new Date().toISOString().slice(0, 7);   // YYYY-MM
+  if (b.month !== month) { b.month = month; b.used = 0; b.warned = false; }
+  b.used += n;
+  if (!b.warned && b.limit && b.used >= b.limit * 0.8) {
+    b.warned = true;
+    console.warn(`[challonge] ${b.used}/${b.limit} requests used this month. Challonge's free plan cuts off at ${b.limit}/month (429 after that) — raise the poll interval in Settings or upgrade the Challonge plan.`);
+  }
+}
+
 async function fetchChallongeTournamentData(slug) {
   const client = createChallongeClient(challongeApiKey);
+  challongeSpend(3);
   const [tData, pData, mData] = await Promise.all([
     client.get(`/tournaments/${slug}.json`),
     client.get(`/tournaments/${slug}/participants.json`),
@@ -8676,7 +9263,17 @@ async function loadChalongeTournament(slug) {
   };
   adoptEventName(slug, tournament.name);
   setActivePlatform('challonge');   // this is now the active platform — silence start.gg / NXGEN follow
+  // THE thing that makes Challonge multi-game: Challonge tags every tournament with a game, so
+  // loading one lands us on that game's overlay, labels, roster size and colours. Without this a
+  // Brawlhalla bracket went on air wearing whatever game was already active.
+  const adopted = adoptEventGame(tournament.game_name);
+  state.challonge.gameId = adopted.id;
+  state.challonge.gameApplied = adopted.changed;
   state.challonge.queueFetchedAt = Date.now();
+  // Real finish order for the top-8 board. Challonge fills final_rank progressively as players are
+  // eliminated, so a running event already has its lower placings.
+  const pl = challongePlacements(partMap, 8);
+  state.challongePlacements = { slug, rows: pl.rows, complete: pl.complete, fetchedAt: Date.now(), error: '' };
 
   // Apply bracket to state.bracket
   const bd = buildChalongeBracket(tournament, participants, matches);
@@ -8711,8 +9308,9 @@ async function refreshChallongeLive() {
       if (live && live.matchId !== state.challonge.lastAutoFollowMatchId) {
         state.challonge.lastAutoFollowMatchId = live.matchId;
         if (live.teamA && live.teamA !== 'TBD') {
-          state.teams.blue = { ...state.teams.blue, name: live.teamA, logo: live.logoA || state.challonge.logoMap[(live.teamA || '').toLowerCase()] || null };
-          state.teams.orange = { ...state.teams.orange, name: live.teamB || '', logo: live.logoB || state.challonge.logoMap[(live.teamB || '').toLowerCase()] || null };
+          const opts = { logoMap: state.challonge.logoMap, platform: 'challonge' };
+          pushEntrantToSide('blue', live.teamA, live.logoA, opts);
+          pushEntrantToSide('orange', live.teamB, live.logoB, opts);
           saveAppState();
         }
       }
@@ -8720,6 +9318,22 @@ async function refreshChallongeLive() {
     // Re-bind an auto round label to whoever is on air now (or clear a stale one from a previous
     // event/platform). No-op for a hand-typed label.
     retuneRoundLabel();
+    // Finish order, and — when the board on air is following it — re-mirror the rows so a top 8
+    // resolves itself live instead of freezing at push time. Same contract as start.gg's
+    // refreshStartggPlacements(), including preserving anything the producer typed by hand.
+    const pl = challongePlacements(partMap, 8);
+    state.challongePlacements = { slug, rows: pl.rows, complete: pl.complete, fetchedAt: Date.now(), error: '' };
+    if ((state.standings.source || '') === 'challonge-placements') {
+      const keep = {};
+      (state.standings.rows || []).forEach((r) => { if (r && r.name) keep[String(r.name).toLowerCase()] = r; });
+      state.standings.rows = pl.rows.map((r) => {
+        const prev = keep[String(r.name).toLowerCase()] || {};
+        // A fighter/character the producer set by hand is theirs — Challonge never reports one,
+        // so re-mirroring must never blank it.
+        return { ...prev, placement: r.placement, name: r.name, logo: r.logo || prev.logo || null,
+                 character: prev.character || '' };
+      });
+    }
     // Refresh bracket scores
     const bd = buildChalongeBracket(tournament, participants, matches);
     const existingPhase = state.bracket.phases.find((p) => p.id === 'challonge-main');
@@ -8743,8 +9357,195 @@ let _challongePollTimer = null;
 function setChallongePolling(enabled) {
   if (_challongePollTimer) { clearInterval(_challongePollTimer); _challongePollTimer = null; }
   if (enabled && challongeApiKey && (state.challonge.tournamentSlug || '').trim()) {
-    refreshChallongeLive();
-    _challongePollTimer = setInterval(refreshChallongeLive, 30000);
+    const tick = () => { refreshChallongeLive().catch((e) => console.warn('[challonge]', e && e.message)); };
+    tick();
+    const sec = Math.max(15, Math.min(600, Number(state.challonge.pollSec) || 30));
+    _challongePollTimer = setInterval(tick, sec * 1000);
+  }
+}
+
+// ─── Challengermode integration ──────────────────────────────────────────────
+// challengermode.com — NOT Challonge. GraphQL, bot-token auth, stage-based tournaments.
+// Queries + mapping live in backend/challengermode.js; this is the state/lifecycle half.
+
+let _cmClient = null;
+let _cmClientKey = '';
+function challengermodeClient() {
+  // Rebuild when the key changes so a re-paste takes effect without a relaunch (server.js runs in
+  // the Electron main process, so a stale client would otherwise survive until the app restarts).
+  if (!_cmClient || _cmClientKey !== challengermodeRefreshKey) {
+    _cmClient = createChallengermodeClient(challengermodeRefreshKey);
+    _cmClientKey = challengermodeRefreshKey;
+  }
+  return _cmClient;
+}
+
+async function fetchChallengermodeTournament(id, { live = false } = {}) {
+  const data = await challengermodeClient().query(
+    live ? cmData.TOURNAMENT_LIVE_QUERY : cmData.TOURNAMENT_QUERY, { id });
+  const t = data && data.tournament;
+  if (!t) throw new Error('No Challengermode tournament with that id, or the bot cannot see it. A private tournament needs the bot linked to its Space.');
+  return t;
+}
+
+// Apply a fetched tournament to the bracket/queue/placement state. Shared by load and refresh so
+// the two can never drift into showing different things from the same payload.
+function applyChallengermodeTournament(t, { full }) {
+  const phases = cmData.mapStages(t);
+  state.challengermode.queue = cmData.buildQueue(t);
+  state.challengermode.matchFeed = cmData.buildMatchFeed(t);
+  state.challengermode.queueFetchedAt = Date.now();
+  state.challengermode.connected = true;
+  state.challengermode.lastError = null;
+  state.challengermode.lastSyncAt = new Date().toISOString();
+
+  const pl = cmData.buildPlacements(t, 8);
+  state.challengermodePlacements = { id: t.id, rows: pl.rows, complete: pl.complete, fetchedAt: Date.now(), error: '' };
+
+  if (full) {
+    const teams = cmData.buildEventTeams(t);
+    state.challengermode.eventTeams = teams;
+    const logoMap = {};
+    teams.forEach((x) => { if (x.logo) logoMap[x.name.toLowerCase()] = x.logo; });
+    state.challengermode.logoMap = logoMap;
+    state.bracket.teams = teams.filter((x) => x.logo).map((x) => ({ name: x.name, logo: x.logo }));
+  }
+
+  if (phases.length) {
+    state.bracket.phases = phases;
+    // Keep the producer on the stage they were watching; fall back to the LAST stage with matches,
+    // because that is the one being played (groups finish before playoffs start).
+    const keep = phases.find((p) => p.id === state.bracket.activePhaseId);
+    state.bracket.activePhaseId = keep ? keep.id : phases[phases.length - 1].id;
+  }
+  state.bracket.standings = cmData.buildStandings(t);
+  state.bracket.lastFetchAt = Date.now();
+  syncActiveBracketPhase();
+}
+
+async function loadChallengermodeTournament(rawId) {
+  const id = parseChallengermodeId(rawId) || String(rawId || '').trim();
+  if (!id) throw new Error('Paste a Challengermode tournament link or id.');
+  const t = await fetchChallengermodeTournament(id, { live: false });
+
+  state.challengermode.tournamentId = id;
+  const gameName = (t.gameTitle && (t.gameTitle.title || t.gameTitle.slug)) || '';
+  state.challengermode.selectedTournament = {
+    id: t.id,
+    name: t.name || '',
+    state: t.state || '',
+    gameName,
+    gameSlug: (t.gameTitle && t.gameTitle.slug) || '',
+    lineupCount: (((t.attendance || {}).roster || {}).lineupCount) || 0,
+    url: `https://www.challengermode.com/tournaments/${id}`
+  };
+
+  state.activeEvent = {
+    platform: 'challengermode',
+    slug: id,
+    name: t.name || '',
+    gameName,
+    numEntrants: state.challengermode.selectedTournament.lineupCount,
+    format: (t.stages && t.stages.length ? String(t.stages[t.stages.length - 1].format || '') : ''),
+    url: state.challengermode.selectedTournament.url,
+    loadedAt: new Date().toISOString()
+  };
+  adoptEventName(id, t.name);
+  // Same rule as every other platform: the tournament knows its game, so follow it onto that
+  // game's overlay rather than leaving whatever was active. Challengermode's slug ("rocket-league",
+  // "counter-strike-2") resolves cleanly through backend/game-match.js.
+  const adopted = adoptEventGame((t.gameTitle && t.gameTitle.slug) || gameName);
+  state.challengermode.gameId = adopted.id;
+  state.challengermode.gameApplied = adopted.changed;
+  setActivePlatform('challengermode');   // silence the other platforms' auto-follow
+
+  // Auto-import entrants into the saved team library, same as the other loaders.
+  cmData.buildEventTeams(t).forEach((x) => {
+    if (!x.name) return;
+    if (!savedTeams.find((s) => s.name.toLowerCase() === x.name.toLowerCase())) {
+      savedTeams.push({ name: x.name, logo: x.logo || null, players: [] });
+    }
+  });
+  saveTeams();
+
+  state.bracket.title = t.name || 'Bracket';
+  state.bracket.matches = [];
+  state.bracket.eventSlug = 'challengermode:' + id;
+  state.bracket.mode = 'imported';
+  state.bracket.source = 'challengermode';
+  applyChallengermodeTournament(t, { full: true });
+  saveAppState();
+  broadcastFullState();
+  return {
+    name: t.name || '',
+    teamsCount: state.challengermode.eventTeams.length,
+    matchesCount: cmData.allSeries(t).length,
+    stages: (t.stages || []).length,
+    game: gameName
+  };
+}
+
+async function refreshChallengermodeLive() {
+  const id = (state.challengermode.tournamentId || '').trim();
+  if (!id || !challengermodeRefreshKey) return;
+  try {
+    const t = await fetchChallengermodeTournament(id, { live: true });
+    applyChallengermodeTournament(t, { full: false });
+    if (state.challengermode.selectedTournament) state.challengermode.selectedTournament.state = t.state || '';
+
+    if (state.challengermode.autoFollow) {
+      const liveMatch = state.challengermode.queue.find((m) => m.live);
+      if (liveMatch && liveMatch.matchId !== state.challengermode.lastAutoFollowMatchId
+          && liveMatch.teamA && liveMatch.teamA !== 'TBD' && liveMatch.teamB && liveMatch.teamB !== 'TBD') {
+        state.challengermode.lastAutoFollowMatchId = liveMatch.matchId;
+        const teams = state.challengermode.eventTeams || [];
+        const rosterFor = (name) => {
+          const hit = teams.find((x) => x.name.toLowerCase() === String(name || '').toLowerCase());
+          return hit ? hit.players : [];
+        };
+        const opts = { logoMap: state.challengermode.logoMap, platform: 'challengermode' };
+        pushEntrantToSide('blue', liveMatch.teamA, liveMatch.logoA, { ...opts, roster: rosterFor(liveMatch.teamA) });
+        pushEntrantToSide('orange', liveMatch.teamB, liveMatch.logoB, { ...opts, roster: rosterFor(liveMatch.teamB) });
+        // The series is a best-of; following it without the format leaves the scorebar on the
+        // previous match's Bo, which is wrong on screen the moment the first game ends.
+        if (liveMatch.bestOf) state.bestOf = Math.max(1, Math.min(9, Number(liveMatch.bestOf)));
+        saveAppState();
+      }
+    }
+    // Re-bind an auto round label to whoever is on air now (or clear a stale one).
+    retuneRoundLabel();
+
+    // A board following this platform keeps following it as the bracket resolves. Producer-typed
+    // rows are keyed by name and must survive the re-mirror.
+    if ((state.standings.source || '') === 'challengermode-placements') {
+      const keep = {};
+      (state.standings.rows || []).forEach((r) => { if (r && r.name) keep[String(r.name).toLowerCase()] = r; });
+      state.standings.rows = state.challengermodePlacements.rows.map((r) => {
+        const prev = keep[String(r.name).toLowerCase()] || {};
+        return { ...prev, placement: r.placement, placementText: r.placementText,
+                 name: r.name, logo: r.logo || prev.logo || null,
+                 players: (r.players && r.players.length) ? r.players : (prev.players || []),
+                 character: prev.character || '' };
+      });
+    }
+    broadcastFullState();
+  } catch (e) {
+    state.challengermode.connected = false;
+    state.challengermode.lastError = e.message;
+    broadcastFullState();
+    throw e;
+  }
+}
+
+let _cmPollTimer = null;
+function setChallengermodePolling(enabled) {
+  if (_cmPollTimer) { clearInterval(_cmPollTimer); _cmPollTimer = null; }
+  if (enabled && challengermodeRefreshKey && (state.challengermode.tournamentId || '').trim()) {
+    refreshChallengermodeLive().catch((e) => console.warn('[challengermode]', e.message));
+    const sec = Math.max(10, Math.min(600, Number(state.challengermode.pollSec) || 30));
+    _cmPollTimer = setInterval(() => {
+      refreshChallengermodeLive().catch((e) => console.warn('[challengermode]', e.message));
+    }, sec * 1000);
   }
 }
 
@@ -9275,6 +10076,7 @@ function setActivePlatform(platform) {
     state.nxgen.matchFeed = [];
   }
   if (platform !== 'faceit')    { state.faceit.autoFollow   = false; setFaceitPolling(false); }
+  if (platform !== 'challengermode') { state.challengermode.autoFollow = false; setChallengermodePolling(false); }
   retuneTickerSource();
 }
 
@@ -9708,6 +10510,10 @@ async function loadFaceitCompetition(id, type) {
     loadedAt: new Date().toISOString()
   };
   adoptEventName(id, name);
+  // Same rule as Challonge and start.gg: the platform knows the game, so follow it onto the right
+  // overlay instead of leaving whatever was active. FACEIT reports ids like "cs2" / "valorant",
+  // which backend/game-match.js resolves directly.
+  adoptEventGame(game);
   setActivePlatform('faceit');   // this is now the active platform — silence the other follows
 
   const phase = {
@@ -9901,6 +10707,28 @@ function indexEntrantLogos(entrants) {
 
 // Best known logo for a team name: prefer a saved-team custom logo, then the
 // start.gg logoMap captured at load time.
+// Short tag for a team, from wherever the producer set one: the working library, the imported
+// event teams, then the vault (which remembers it under every alias). Mirrors logoForTeamName so
+// a tag banked once follows the team onto every side it is applied to - queue clicks, bracket Go
+// Live, auto-fill from stream and the game's own team names all route through set_team and get
+// it for free. null = nothing set; overlays then fall back to initials.
+function cleanTeamAbbr(v) { return String(v || '').trim().toUpperCase().slice(0, 6) || null; }
+function abbrForTeamName(name) {
+  const key = (name || '').trim().toLowerCase();
+  if (!key) return null;
+  const saved = savedTeams.find((t) => t && (t.name || '').trim().toLowerCase() === key);
+  if (saved && saved.abbr) return cleanTeamAbbr(saved.abbr);
+  const ev = ((state.startgg && state.startgg.eventTeams) || []).find((t) => t && (t.name || '').trim().toLowerCase() === key);
+  if (ev && ev.abbr) return cleanTeamAbbr(ev.abbr);
+  if (state.teamVault && state.teamVault.enabled) {
+    try {
+      const hit = teamDb.resolve({ name });
+      if (hit.rec && hit.rec.abbr) return cleanTeamAbbr(hit.rec.abbr);
+    } catch (_) {}
+  }
+  return null;
+}
+
 function logoForTeamName(name) {
   const key = (name || '').trim().toLowerCase();
   if (!key) return null;
@@ -9920,6 +10748,57 @@ function logoForTeamName(name) {
   return null;
 }
 
+// Swap everything that belongs to a TEAM between the blue and orange sides: names/logos/colours,
+// series score, active/observed player, Smash/Brawlhalla seats, and an armed league capture's
+// orientation. The Swap button, and CS2 when the game reports that the teams changed sides.
+function swapTeamSides() {
+  // Swap names/logos
+  const tempTeams = { ...state.teams.blue };
+  state.teams.blue = { ...state.teams.orange };
+  state.teams.orange = tempTeams;
+  
+  // Swap series scores
+  const tempSeries = state.series.blue;
+  state.series.blue = state.series.orange;
+  state.series.orange = tempSeries;
+
+  // Swap the active/on-air player so each side keeps its selection across the swap.
+  const tempActive = state.activePlayer.blue;
+  state.activePlayer.blue = state.activePlayer.orange;
+  state.activePlayer.orange = tempActive;
+  // The observed player travels with their team.
+  if (state.observedPlayer && state.observedPlayer.side) {
+    state.observedPlayer.side = state.observedPlayer.side === 'blue' ? 'orange' : 'blue';
+  }
+
+  // Smash stocks/fighters/crew follow their team across the swap.
+  if (state.smash) {
+    const tmpS = state.smash.blue;
+    state.smash.blue = state.smash.orange;
+    state.smash.orange = tmpS;
+  }
+
+  // Same for Brawlhalla — stocks, legends and each seat's linked ranked card belong to the
+  // PLAYER, so they travel with them. Leaving them behind puts the other side's ELO under a
+  // player's name, which is worse than a wrong stock count because it looks authoritative.
+  if (state.brawlhalla) {
+    const tmpB = state.brawlhalla.blue;
+    state.brawlhalla.blue = state.brawlhalla.orange;
+    state.brawlhalla.orange = tmpB;
+  }
+
+  // Team records need no swapping now: both auto (stats/startgg) and manual (manualByName) are
+  // keyed by team NAME, so they follow the team across the swap automatically.
+
+  // An armed league capture maps the live blue/orange scores onto the fixture's team A/B via
+  // aSide. Producers swap when the teams change colour between games, so after a swap team A's
+  // score comes from the other colour; without this every later game was recorded backwards.
+  if (state.leagueCapture && state.leagueCapture.active) {
+    state.leagueCapture.aSide = state.leagueCapture.aSide === 'orange' ? 'blue' : 'orange';
+  }
+
+}
+
 // Auto team names from the live game: when enabled, apply a game-reported team name to a
 // side, matching the saved-teams library to pull the correct logo/colour. Generic in-game
 // names (CT/T/Blue/Orange/etc.) are ignored. Returns true if anything changed.
@@ -9937,6 +10816,9 @@ function applyGameTeamName(side, rawName) {
   if (t.name !== nm) { t.name = nm; changed = true; }
   if (saved && saved.logo && t.logo !== saved.logo) { t.logo = saved.logo; changed = true; }
   if (saved && saved.color && t.color !== saved.color) { t.color = saved.color; changed = true; }
+  // The tag follows the team too - the previous side's abbreviation must not outlive its team.
+  const abbr = abbrForTeamName(nm);
+  if ((t.abbr || null) !== abbr) { t.abbr = abbr; changed = true; }
   return changed;
 }
 
@@ -9957,6 +10839,7 @@ function activePlatformSets() {
   if (p === 'challonge') return { platform: p, sets: state.challonge.queue || [] };
   if (p === 'nxgen')     return { platform: p, sets: state.nxgen.queue || [] };
   if (p === 'faceit')    return { platform: p, sets: state.faceit.queue || [] };
+  if (p === 'challengermode') return { platform: p, sets: state.challengermode.queue || [] };
   return { platform: 'startgg', sets: [...(state.startgg.queue || []), ...(state.startgg.matchFeed || [])] };
 }
 // start.gg carries real round TEXT ("Winners Finals"); Challonge and NXGEN only give a round
@@ -9964,7 +10847,9 @@ function activePlatformSets() {
 // air is worse than an honest "ROUND 3".
 function platformRoundLabel(platform, round) {
   if (round == null || round === '') return '';
-  if (platform === 'startgg') return String(round).toUpperCase();
+  // Challengermode names its rounds properly ("Upper Semifinal", "Grand Final"), so it gets the
+  // same treatment as start.gg rather than being reduced to "ROUND 3".
+  if (platform === 'startgg' || platform === 'challengermode') return String(round).toUpperCase();
   const n = Number(round);
   if (!Number.isFinite(n) || n === 0) return String(round).toUpperCase();
   if (platform === 'challonge' && n < 0) return 'LOSERS ROUND ' + Math.abs(n);
@@ -12138,6 +13023,23 @@ function scheduleVaultEnrich(reason) {
 
 // One-shot "make this event the broadcast event": full team import (→ library with
 // logos) + bracket (all phases) + stream queue, and start polling for live updates.
+// The game start.gg says an event is for ("Super Smash Bros. Ultimate", "Rocket League"), or ''.
+// activateStartggEvent's callers never send it, and event NAMES rarely carry the game ("Fight Night #3"),
+// so without this the auto-detect had nothing to work from and a Smash event loaded while the app sat on
+// Rocket League — where the Smash-only top-8 wall (and every fighting-game default) then never appeared.
+// One tiny query, best-effort: any failure just means we fall back to the event name as before.
+async function fetchStartggEventGame(slug) {
+  try {
+    if (!startggApiToken || !slug) return '';
+    const client = createStartGgClient(startggApiToken);
+    const res = await client.request('query EventGame($slug: String!) { event(slug: $slug) { videogame { name } } }', { slug });
+    return String((res && res.event && res.event.videogame && res.event.videogame.name) || '');
+  } catch (e) {
+    console.warn('[start.gg] could not read the event\'s videogame:', e && e.message);
+    return '';
+  }
+}
+
 async function activateStartggEvent(tournamentSlug, eventSlug, meta) {
   if (!startggApiToken) throw new Error('Missing Start.gg API token (set it in Settings)');
   const evSlug = parseEventSlug(eventSlug || '');
@@ -12178,11 +13080,21 @@ async function activateStartggEvent(tournamentSlug, eventSlug, meta) {
     tournamentName: (meta && meta.tournamentName) || loaded.tournamentName || ''
   };
   state.startgg.pendingEvents = [];
+  // Which game this event is, so start.gg gets the same treatment Challonge does: loading an
+  // event lands the app on that game's overlay, labels and roster size. start.gg's own
+  // `videogame.name` rides in on `meta.game` where the caller had it; the EVENT NAME is the
+  // fallback, because start.gg event names carry the game far more often than not ("Ultimate
+  // Singles", "Rocket League 3v3"). resolveGameId returns '' when it can't tell, and we then
+  // leave the producer's game alone rather than guessing.
+  // The event's real videogame wins over the name heuristic; the name/tournament name stay as the fallback.
+  const _sggVideogame = (meta && meta.game) || await fetchStartggEventGame(evSlug);
+  const _sggGameName = _sggVideogame || state.startgg.selectedEvent.name || '';
+  adoptEventGame(_sggGameName);
   state.activeEvent = {
     platform: 'startgg',
     slug: evSlug,
     name: state.startgg.selectedEvent.name || state.startgg.selectedEvent.tournamentName || '',
-    gameName: '',
+    gameName: _sggVideogame || '',
     numEntrants: (state.startgg.eventTeams || []).length,
     format: '',
     url: `https://www.start.gg/${evSlug}`,
@@ -12425,7 +13337,8 @@ const CS_NOT_PRIMARY = new Set(['C4', 'Pistol', 'Knife', 'Grenade', 'StackableIt
 // and an active-weapon board turns into a row of knives.
 function parseWeapons(weapons) {
   const out = { weapon: '', clip: null, reserve: null, nades: [], hasBomb: false,
-                primary: '', secondary: '', hasTaser: false, activeNade: '' };
+                primary: '', secondary: '', hasTaser: false, activeNade: '',
+                clips: {} };   // every carried gun's magazine, active or not → which gun just fired
   const nadeCount = {};
   Object.keys(weapons || {}).forEach((slot) => {
     const w = weapons[slot] || {};
@@ -12441,6 +13354,7 @@ function parseWeapons(weapons) {
     else if (name === 'taser') out.hasTaser = true;
     else if (type === 'Pistol') { if (!out.secondary) out.secondary = name; }
     else if (type && !CS_NOT_PRIMARY.has(type)) { if (!out.primary) out.primary = name; }
+    if (typeof w.ammo_clip === 'number' && type !== 'Grenade' && type !== 'C4' && type !== 'Knife' && type !== 'Melee') out.clips[name] = w.ammo_clip;
     if (w.state === 'active') {
       out.weapon = name;   // raw GSI base name (lowercase), e.g. "ak47", "m4a1_silencer"
       if (w.ammo_clip !== undefined) out.clip = w.ammo_clip;
@@ -12473,120 +13387,27 @@ function broadcastCsgo() {
   broadcast(bridgeClients, { type: 'csgo_update', data: state.csgo });
 }
 
-// ── Valorant Local Client API (port 2999) ────────────────────────────────────
-// Valorant runs an HTTPS server on 127.0.0.1:2999 with a self-signed cert while
-// a game is active. We poll it every 500 ms when Valorant is the active game.
+// ── Valorant live data — Overwolf GEP relay ──────────────────────────
+// Fed by POST /api/val-gep from companion-overwolf, the same relay already carrying Overwatch,
+// Marvel Rivals and R6. See backend/integrations/valorant-gep.js for the field-by-field contract
+// and, importantly, for what Valorant does NOT expose (per-player health, utility charges).
+//
+// This replaced a poller aimed at https://127.0.0.1:2999/liveclientdata/allgamedata. That port is
+// the LEAGUE client's; Valorant never served it, so the HUD could not connect — and with League
+// running on the same PC the poll SUCCEEDED and fed League data into a Valorant scoreboard.
 
-const VAL_MAP_NAMES = {
-  '/game/maps/ascent/ascent':   'Ascent',
-  '/game/maps/port/port':       'Icebox',
-  '/game/maps/triad/triad':     'Haven',
-  '/game/maps/duality/duality': 'Bind',
-  '/game/maps/bonsai/bonsai':   'Split',
-  '/game/maps/foxtrot/foxtrot': 'Breeze',
-  '/game/maps/canyon/canyon':   'Fracture',
-  '/game/maps/pitt/pitt':       'Pearl',
-  '/game/maps/jam/jam':         'Lotus',
-  '/game/maps/juliett/juliett': 'Sunset',
-  '/game/maps/infinity/infinity': 'Abyss',
-  'ascent': 'Ascent', 'icebox': 'Icebox', 'haven': 'Haven', 'bind': 'Bind',
-  'split': 'Split', 'breeze': 'Breeze', 'fracture': 'Fracture', 'pearl': 'Pearl',
-  'lotus': 'Lotus', 'sunset': 'Sunset', 'abyss': 'Abyss',
-};
-
-const _valHttpsAgent = new https.Agent({ rejectUnauthorized: false });
-
-function _valorantFetch(apiPath) {
-  return axios.get(`https://127.0.0.1:2999${apiPath}`, {
-    httpsAgent: _valHttpsAgent,
-    timeout: 1500,
-  }).then(r => r.data);
+function broadcastValorant() {
+  broadcast(bridgeClients, { type: 'valorant_update', data: state.valorant });
 }
 
-function _parseValorantAgent(rawName) {
-  // "game_character_default_reyna" → "reyna"
-  return (rawName || '').replace(/^game_character_default_/i, '').toLowerCase();
-}
+// The relay posts on a 1.5s cadence. Three missed beats and the game (or the relay) is gone —
+// the HUD then shows its "not detected" badge rather than freezing on the last live round.
+const VAL_GEP_STALE_MS = 6000;
+let _valStaleTimer = null;
 
-function _resolveMapName(raw) {
-  if (!raw) return '';
-  const key = raw.toLowerCase();
-  return VAL_MAP_NAMES[key] || VAL_MAP_NAMES[key.split('/').pop()] || raw;
-}
-
-function handleValorantData(data) {
-  const v = state.valorant;
-  v.connected = true;
-  v.lastUpdate = Date.now();
-
-  // Map
-  const gd = data.gameData || {};
-  const mapRaw = gd.mapName || '';
-  v.map.name = mapRaw;
-  v.map.displayName = _resolveMapName(mapRaw);
-
-  // Round history from events → derive scores
-  const events = (data.events && data.events.Events) || [];
-  const ended = events.filter(e => e.EventName === 'Round_Ended');
-  const started = events.filter(e => e.EventName === 'Round_Start');
-
-  let orderScore = 0, chaosScore = 0;
-  const history = [];
-  for (const ev of ended) {
-    const winner = (ev.Result && ev.Result.WinningTeam) || '';
-    if (winner === 'ORDER') orderScore++;
-    else if (winner === 'CHAOS') chaosScore++;
-    history.push({ round: history.length + 1, winner });
-  }
-  v.order.score = orderScore;
-  v.chaos.score = chaosScore;
-  v.roundHistory = history;
-  v.round.number    = Math.max(1, started.length > 0 ? started.length : ended.length + 1);
-  v.round.gameTime  = gd.gameTime || 0;
-  const _lastStart  = started.length > 0 ? started[started.length - 1] : null;
-  v.round.startTime = _lastStart ? (_lastStart.EventTime || 0) : 0;
-
-  // Spike state from events
-  const lastEvent = events.length > 0 ? events[events.length - 1] : null;
-  if (lastEvent) {
-    if (lastEvent.EventName === 'Spike_Start')      v.spikeState = 'planted';
-    else if (lastEvent.EventName === 'Spike_Defused')   v.spikeState = 'defused';
-    else if (lastEvent.EventName === 'Spike_Detonated') v.spikeState = 'detonated';
-    else if (lastEvent.EventName === 'Round_Start')     v.spikeState = '';
-    else if (lastEvent.EventName === 'Round_Ended')     v.spikeState = '';
-  }
-
-  // Round phase
-  v.round.phase = gd.paused ? 'paused' : (v.spikeState === 'planted' ? 'bomb' : 'live');
-
-  // Players
-  const allPlayers = data.allPlayers || [];
-  v.players = allPlayers.map(p => {
-    const mh = p.maxHealth || 100;
-    return {
-      name:      p.summonerName || '',
-      agent:     _parseValorantAgent(p.rawChampionName),
-      agentName: p.championName || '',
-      team:      p.team || 'ORDER',
-      health:    p.currentHealth != null ? p.currentHealth : 100,
-      maxHealth: mh,
-      armor:     mh > 125 ? 2 : mh > 100 ? 1 : 0, // 0=none 1=light(25) 2=heavy(50)
-      alive:     !(p.isDead) && (p.currentHealth || 0) > 0,
-      kills:     (p.scores && p.scores.kills)   || 0,
-      assists:   (p.scores && p.scores.assists) || 0,
-      deaths:    (p.scores && p.scores.deaths)  || 0,
-    };
-  });
-
-  // Active (spectated) player
-  const active = data.activePlayer;
-  if (active && active.summonerName) {
-    v.observed = v.players.find(p => p.name === active.summonerName) || null;
-  }
-
-  // Stats: detect game start/finish from the live scores and persist player stats.
-  try { _valorantStats(v); } catch (e) {}
-
+function applyValorantGep(body) {
+  state.valorant = valGep.applyGepUpdate(state.valorant, body);
+  try { _valorantStats(state.valorant); } catch (e) {}
   broadcastValorant();
 }
 
@@ -12638,29 +13459,19 @@ function _valorantStats(v) {
   }
 }
 
-function broadcastValorant() {
-  broadcast(bridgeClients, { type: 'valorant_update', data: state.valorant });
-}
-
-let _valPollTimer = null;
-
-function startValorantPolling() {
-  if (_valPollTimer) return;
-  _valPollTimer = setInterval(async () => {
-    try {
-      const data = await _valorantFetch('/liveclientdata/allgamedata');
-      handleValorantData(data);
-    } catch {
-      if (state.valorant.connected) {
-        try { analytics.event('disconnect', { what: 'Valorant' }); } catch (e) {}
-        state.valorant.connected = false;
-        broadcastValorant();
-      }
+function startValorantWatchdog() {
+  if (_valStaleTimer) return;
+  _valStaleTimer = setInterval(() => {
+    const v = state.valorant;
+    if (v.connected && Date.now() - (v.lastUpdate || 0) > VAL_GEP_STALE_MS) {
+      v.connected = false;
+      try { analytics.event('disconnect', { what: 'Valorant' }); } catch (e) {}
+      broadcastValorant();
     }
-  }, 500);
+  }, 2000);
 }
-function stopValorantPolling() {
-  if (_valPollTimer) { clearInterval(_valPollTimer); _valPollTimer = null; }
+function stopValorantWatchdog() {
+  if (_valStaleTimer) { clearInterval(_valStaleTimer); _valStaleTimer = null; }
   if (state.valorant.connected) { state.valorant.connected = false; broadcastValorant(); }
 }
 
@@ -12695,21 +13506,38 @@ function handleLolData(data) {
 
 // ── League gold OCR (optional override of the estimate) ──────────────────────
 let _lolOcrStop = null;
+// Language data ships in assets/ocr (unpacked from the asar); the worker cache must live in
+// userData because the install dir is read-only. Idempotent, cheap — called before any OCR use.
+function lolOcrConfigure() {
+  lolOcr.configure({ langPath: path.join(__dirname, 'assets', 'ocr'), cachePath: path.join(dataDir || os.tmpdir(), 'ocr-cache') });
+}
+function lolOcrStatusMsg() {
+  const o = state.lol.ocr;
+  return { type: 'lol_ocr_status', status: o.status, detail: o.statusDetail, lastBlue: o.lastBlue, lastRed: o.lastRed,
+    blueConf: o.lastBlueConf, redConf: o.lastRedConf, reason: o.lastReason, capture: o.capture, source: o.source };
+}
 function startLolOcr() {
   if (_lolOcrStop) return;
+  lolOcrConfigure();
   state.lol.ocr.available = lolOcr.tessAvailable();
   _lolOcrStop = lolOcr.startOcr({
-    intervalMs: 2000,
+    intervalMs: 1000,
     getRegions: () => state.lol.ocr.regions,
+    getDisplayId: () => state.lol.ocr.displayId,
     onResult: (res) => {
-      state.lol.ocr.lastBlue = res.blue;
-      state.lol.ocr.lastRed = res.red;
+      const o = state.lol.ocr;
+      o.lastBlue = res.blue; o.lastRed = res.red;
+      o.lastBlueConf = res.blueConf || 0; o.lastRedConf = res.redConf || 0;
+      o.lastReason = res.reason || { blue: '', red: '' };
+      o.capture = res.capture || '';
+      // The tracker hands back its last GOOD value while it holds over a bad frame, so the
+      // override stays fresh through a misread instead of flickering back to the estimate.
       if (res.blue != null && res.red != null) _lolOcrGold = { blue: res.blue, red: res.red, ts: Date.now() };
     },
     onStatus: (status, detail) => {
       state.lol.ocr.status = status;
       state.lol.ocr.statusDetail = detail;
-      broadcast(bridgeClients, { type: 'lol_ocr_status', status, detail, lastBlue: state.lol.ocr.lastBlue, lastRed: state.lol.ocr.lastRed });
+      broadcast(bridgeClients, lolOcrStatusMsg());
     }
   });
 }
@@ -13083,6 +13911,32 @@ function onDirectorEvents(gameId, events) {
 // ammo clip dropping (same weapon, no reload) means they just fired. Set per tick; the
 // overlay latches the effect for a short window so sustained fire reads as a steady pulse.
 let prevFire = {};               // steamid -> { clip, weapon }
+// The gun each player last FIRED, from any carried weapon's magazine dropping (not only the active
+// one). Kills are credited to this: AWPers switch to the knife straight after a shot, so by the GSI
+// tick that carries the kill the ACTIVE weapon is often already the knife — which put "knife" on
+// the kill feed for AWP kills.
+let prevClips = {};              // steamid -> { weaponName: ammo_clip }
+const lastShot = {};             // steamid -> { weapon, ts }
+const SHOT_WINDOW_MS = 2500;     // a kill within this long of the last shot belongs to that gun
+function trackShots(players, now) {
+  const cur = {};
+  (players || []).forEach((p) => {
+    const clips = p._clips || {};
+    const prev = prevClips[p.steamid] || {};
+    Object.keys(clips).forEach((name) => {
+      if (typeof prev[name] === 'number' && clips[name] < prev[name] && (prev[name] - clips[name]) <= 40) {
+        lastShot[p.steamid] = { weapon: name, ts: now };
+      }
+    });
+    cur[p.steamid] = clips;
+    delete p._clips;   // internal only — never broadcast
+  });
+  prevClips = cur;
+}
+function killWeapon(p, now) {
+  const ls = lastShot[p.steamid];
+  return (ls && now - ls.ts < SHOT_WINDOW_MS) ? ls.weapon : (p.weapon || '');
+}
 function detectFiring(players) {
   const cur = {};
   (players || []).forEach((p) => {
@@ -13093,6 +13947,56 @@ function detectFiring(players) {
     cur[p.steamid] = { clip, weapon: p.weapon };
   });
   prevFire = cur;
+}
+
+// CS2 auto team names: the game's CT|T team names when the producer last pressed Swap. While the
+// game still reports exactly those names, auto-naming holds off so the manual swap sticks.
+let _csManualSwapKey = null;
+
+// CS2 auto team names (CT = blue side, T = orange side), matched to the saved library for logos.
+// Also moves whole teams across when the game reports a side change, and respects a manual Swap.
+function csApplyAutoTeams(ctInfo, tInfo) {
+  if (state.autoTeamsFromGame) {
+    const gameKey = csGameTeamsKey();
+    if (_csManualSwapKey && _csManualSwapKey === gameKey) {
+      // The producer pressed Swap: keep their sides until the game reports different team names.
+    } else {
+      _csManualSwapKey = null;
+      // The game says the teams changed sides (halftime / overtime): move the WHOLE team across —
+      // logo, colour, series score, players — not just the name. Renaming alone left each name next
+      // to the other team's logo whenever a team wasn't in the saved library.
+      const norm = (x) => String(x == null ? '' : x).trim().toLowerCase();
+      const ct = norm(ctInfo.name), t = norm(tInfo.name);
+      if (ct && t && ct !== t && !GENERIC_TEAM_RE.test(ct) && !GENERIC_TEAM_RE.test(t)
+          && ct === norm(state.teams.orange && state.teams.orange.name) && t === norm(state.teams.blue && state.teams.blue.name)) {
+        swapTeamSides();
+      }
+      applyGameTeamName('blue', ctInfo.name); applyGameTeamName('orange', tInfo.name);
+      retuneRoundLabel();   // teams changed without a set push — don't leave the old round on screen
+    }
+  }
+}
+
+// Victory screen when a CS2 map ends. The HUD's CT panel is always the BLUE team and T the ORANGE
+// one (auto team names keep that true across halftime), so the side with more rounds is the winner.
+// Only an auto-shown winner is auto-hidden, so one the producer put up by hand is never pulled.
+let _csAutoWinnerShown = false;
+function csShowAutoWinner() {
+  if (state.csgo.autoWinner === false || !WS_HANDLERS.set_winner) return;
+  const ct = Number(state.csgo.ct && state.csgo.ct.score) || 0;
+  const t = Number(state.csgo.t && state.csgo.t.score) || 0;
+  if (ct === t) return;   // a draw has no winner to show
+  WS_HANDLERS.set_winner({ data: { side: ct > t ? 'blue' : 'orange', visible: true, subtitle: Math.max(ct, t) + '–' + Math.min(ct, t) } });
+  _csAutoWinnerShown = true;
+}
+function csHideAutoWinner() {
+  if (!_csAutoWinnerShown) return;
+  _csAutoWinnerShown = false;
+  if (state.winner && state.winner.visible && WS_HANDLERS.set_winner) WS_HANDLERS.set_winner({ data: { visible: false } });
+}
+function csGameTeamsKey() {
+  const n = (x) => String(x == null ? '' : x).trim().toLowerCase();
+  return n(state.csgo.ct && state.csgo.ct.name) + '|' + n(state.csgo.t && state.csgo.t.name);
 }
 
 let killPrev = null;             // steamid -> { deaths, roundKills, roundHs }
@@ -13130,13 +14034,14 @@ function updateKillfeed(players) {
       };
       kills.forEach(k => {
         const v = pickVictim(k.p.team);
+        const weapon = killWeapon(k.p, now);
         flowBus.emit('cs2_kill', {
           killer: k.p.name, killerTeam: k.p.team, victim: v ? v.name : '',
-          victimTeam: v ? v.team : '', weapon: k.p.weapon || '', headshot: !!k.hs
+          victimTeam: v ? v.team : '', weapon, headshot: !!k.hs
         });
         if (k.hs) flowBus.emit('cs2_headshot_kill', { killer: k.p.name, killerTeam: k.p.team, victim: v ? v.name : '' });
         state.csgo.killfeed.push({
-          killer: k.p.name, killerTeam: k.p.team, weapon: k.p.weapon || '',
+          killer: k.p.name, killerTeam: k.p.team, weapon,
           hs: !!k.hs, victim: v ? v.name : '', victimTeam: v ? v.team : '', ts: now
         });
       });
@@ -13173,11 +14078,7 @@ function handleGsi(payload) {
   });
   state.csgo.ct = { ...sideInfo(ctInfo), name: ctInfo.name || 'COUNTER-TERRORISTS' };
   state.csgo.t  = { ...sideInfo(tInfo),  name: tInfo.name  || 'TERRORISTS' };
-  // Auto team names → match saved library for logos/colours (CT=Blue side, T=Orange side).
-  if (state.autoTeamsFromGame) {
-    applyGameTeamName('blue', ctInfo.name); applyGameTeamName('orange', tInfo.name);
-    retuneRoundLabel();   // teams changed without a set push — don't leave the old round on screen
-  }
+  csApplyAutoTeams(ctInfo, tInfo);   // auto team names + side changes (see the function)
   state.csgo.round = {
     number: (typeof map.round === 'number') ? map.round + 1 : (state.csgo.round.number || 0),
     phase: round.phase || map.phase || '',
@@ -13228,9 +14129,11 @@ function handleGsi(payload) {
       activeNade: wp.activeNade,      // grenade currently in hand, '' if none
       hasKit: !!st.defusekit,
       hasBomb: wp.hasBomb,
-      firing: false                   // set by detectFiring() below
+      firing: false,                  // set by detectFiring() below
+      _clips: wp.clips                // every carried gun's magazine — read + removed by trackShots()
     };
   }).sort((a, b) => a.slot - b.slot);
+  trackShots(players, Date.now());   // before the killfeed: which gun just fired (strips _clips)
   detectFiring(players);
   if (players.length) state.csgo.players = players;
 
@@ -13320,6 +14223,7 @@ function handleGsi(payload) {
     _csgoLastMapPhase = mapPhase;
 
     if (mapPhase === 'live' && prev && prev !== 'live') {
+      csHideAutoWinner();   // next map is live: take down the winner we put up at the last gameover
       obsSwitch('inGame');
       // Stats: start CS2 match + game
       if (!statsCurrentMatchId) {
@@ -13340,6 +14244,7 @@ function handleGsi(payload) {
       });
     } else if (mapPhase === 'gameover') {
       obsSwitch('postGame');
+      csShowAutoWinner();
       // Stats: finalize CS2 game
       if (statsCs2GameId) {
         const ctScore = state.csgo.ct?.score || 0;
@@ -13375,6 +14280,7 @@ function handleGsi(payload) {
     } else if (mapPhase === 'intermission') {
       flowBus.emit('cs2_half_time', {});
     } else if (mapPhase === 'warmup' && prev !== 'warmup') {
+      csHideAutoWinner();
       obsSwitch('break');
     }
     if (mapPhase === 'gameover') flowBus.emit('cs2_match_ended', { ctScore: state.csgo.ct && state.csgo.ct.score || 0, tScore: state.csgo.t && state.csgo.t.score || 0 });
@@ -13536,18 +14442,63 @@ function rebuildDraftTurn() {
   d.turn = next ? { team: next.by, action: next.action } : null;
   d.complete = (d.ops || []).length >= d.sequence.length;
 }
+// ── Overwatch hero bans are PER MAP ──
+// owMatch.bansByMap[mapIdx] is the store (mapIdx = game.number - 1). state.draft is the editor for
+// the CURRENT map only: when the map changes, its ops are reloaded from that map's stored bans, so
+// map 1's bans no longer stay on the HUD during map 2, and stepping back to map 1 shows them again.
+function owMapIdx() { return Math.max(0, ((state.game && state.game.number) || 1) - 1); }
+function owDraftLoadMap() {
+  const d = state.draft;
+  if (!d || d.game !== 'overwatch' || !Array.isArray(d.sequence)) return;
+  const idx = owMapIdx();
+  const entry = ((state.owMatch && state.owMatch.bansByMap) || [])[idx] || {};
+  const left = { a: [], b: [] };
+  ['a', 'b'].forEach((side) => {
+    const v = entry[side];
+    const arr = Array.isArray(v) ? v : (v && v.hero ? [v] : []);
+    left[side] = arr.filter((x) => x && x.hero);
+  });
+  // Replay the stored bans in sequence order; stop at the first slot that has none (ops are a prefix).
+  const ops = [];
+  for (const step of d.sequence) {
+    const ban = step.action === 'ban' ? left[step.by].shift() : null;
+    if (!ban) break;
+    ops.push({ name: ban.hero, action: 'ban', by: step.by, role: ban.role || draftData.roleFor('overwatch', ban.hero, state.gameConfigs),
+      image: draftData.imageFor('overwatch', ban.hero, state.gameConfigs) });
+  }
+  d.ops = ops;
+  d.mapIdx = idx;
+  rebuildDraftTurn();
+}
+// Called before every full-state flush: cheap no-op unless the map changed under an OW draft.
+function syncOwDraftMap() {
+  const d = state.draft;
+  if (d && d.game === 'overwatch' && Array.isArray(d.sequence) && d.sequence.length && d.mapIdx !== owMapIdx()) owDraftLoadMap();
+}
+function clearOwMapBans(idx) {
+  const bansByMap = [...((state.owMatch && state.owMatch.bansByMap) || [])];
+  if (bansByMap[idx]) { bansByMap[idx] = {}; state.owMatch = { ...state.owMatch, bansByMap }; }
+}
+// Overwatch ban order for a total ban count: one each (A, B) or snake two each (A, B, B, A).
+function owBanSequence(count, teamStart) {
+  const steps = count >= 4 ? [0, 1, 1, 0] : [0, 1];
+  return steps.map(t => ({ action: 'ban', by: draftData.resolveSide(t, teamStart || 'a') }));
+}
+// Rebuild a started draft's pick/ban ORDER from its current settings (who goes first, OW ban count).
+function rebuildDraftSequence(d) {
+  if (!d || !Array.isArray(d.sequence) || !d.sequence.length || !draftData.hasDraft(d.game)) return;
+  d.sequence = d.game === 'overwatch' ? owBanSequence(d.owBanCount, d.teamStart)
+    : draftData.buildDraft(d.game).map(s => ({ action: s.action, by: draftData.resolveSide(s.teamIdx, d.teamStart || 'a') }));
+}
 function draftStart({ game, teamStart, title, subtitle, owBanCount }) {
   const g = draftData.hasDraft(game) ? game : (draftData.hasDraft(state.activeGame) ? state.activeGame : 'league');
   if (!draftData.hasDraft(g)) throw new Error('No draft format defined for ' + g);
   const ts = teamStart === 'b' ? 'b' : (teamStart === 'a' ? 'a' : ((state.draft && state.draft.teamStart) || 'a'));
-  // Overwatch ban count is configurable: 2 (one per team) or 4 (two per team, snake A-B-B-A).
-  let owCount = Number(owBanCount) || (state.draft && state.draft.owBanCount) || 4;
-  owCount = owCount <= 2 ? 2 : 4;
-  const steps = g === 'overwatch'
-    ? (owCount === 2 ? [{ action: 'ban', teamIdx: 0 }, { action: 'ban', teamIdx: 1 }]
-                     : [{ action: 'ban', teamIdx: 0 }, { action: 'ban', teamIdx: 1 }, { action: 'ban', teamIdx: 1 }, { action: 'ban', teamIdx: 0 }])
-    : draftData.buildDraft(g);
-  const seq = steps.map(s => ({ action: s.action, by: draftData.resolveSide(s.teamIdx, ts) }));
+  // Overwatch ban count is configurable: 2 (one per team, the default) or 4 (two per team, snake A-B-B-A).
+  let owCount = Number(owBanCount) || (state.draft && state.draft.owBanCount) || 2;
+  owCount = owCount >= 4 ? 4 : 2;
+  const seq = g === 'overwatch' ? owBanSequence(owCount, ts)
+    : draftData.buildDraft(g).map(s => ({ action: s.action, by: draftData.resolveSide(s.teamIdx, ts) }));
   state.draft = {
     visible: !!(state.draft && state.draft.visible),
     title:    typeof title === 'string'    ? title    : (state.draft && state.draft.title)    || '',
@@ -13555,6 +14506,8 @@ function draftStart({ game, teamStart, title, subtitle, owBanCount }) {
     game: g, teamStart: ts, owBanCount: owCount, sequence: seq, ops: [], turn: null, complete: false,
     auto: (state.draft && state.draft.auto) || { enabled: false, status: 'off', statusDetail: '', lockfilePath: '' }
   };
+  // A fresh Overwatch start wipes THIS map's stored bans (other maps keep theirs).
+  if (g === 'overwatch') { clearOwMapBans(owMapIdx()); state.draft.mapIdx = owMapIdx(); }
   rebuildDraftTurn();
 }
 // The in-game HUD overlay (overlay/overwatch.html) shows hero bans from state.owMatch.bansByMap,
@@ -13605,12 +14558,11 @@ function draftUndo() {
 function draftReset() {
   const d = state.draft;
   if (d) {
-    if (d.game === 'overwatch') {
-      const mapIdx = Math.max(0, ((state.game && state.game.number) || 1) - 1);
-      const bansByMap = [...(state.owMatch.bansByMap || [])];
-      if (bansByMap[mapIdx]) { bansByMap[mapIdx] = {}; state.owMatch = { ...state.owMatch, bansByMap }; }
-    }
+    if (d.game === 'overwatch') { clearOwMapBans(owMapIdx()); d.mapIdx = owMapIdx(); }
     d.ops = [];
+    // Rebuild the order from the current settings, so changing Goes first / ban count and pressing
+    // Reset actually changes the board (it used to keep whatever the draft was started with).
+    rebuildDraftSequence(d);
     rebuildDraftTurn();
   }
 }
@@ -15586,30 +16538,25 @@ function connectToRL() {
     wasConnected = true;
     state.rlConnected = true;
     rlEventSeen = {}; rlLoggedFirstData = false;   // reset diagnostics per connection
+    rlBuffer = '';   // a partial object left by the previous connection would swallow this one's first message
     broadcast(bridgeClients, { type: 'rl_status', data: { connected: true } });
   });
 
+  // Decode as UTF-8 on the stream so a multibyte character split across TCP reads (player names)
+  // isn't turned into U+FFFD, which minted phantom players in the cache.
+  rlSocket.setEncoding('utf8');
   rlSocket.on('data', (data) => {
     if (!rlLoggedFirstData) { rlLoggedFirstData = true;
-      if (IS_DEV()) console.log('[RL] first data after connect (' + data.length + ' bytes):', JSON.stringify(data.toString().slice(0, 400))); }
-    rlBuffer += data.toString();
-    
-    // Split by contiguous JSON objects
-    const chunks = rlBuffer.replace(/\}\s*\{/g, '}\n{').split('\n');
-    rlBuffer = chunks.pop(); // keep the last incomplete chunk
-    
-    chunks.forEach(chunk => {
-      chunk = chunk.trim();
-      if (!chunk) return;
-      try {
-        const msg = JSON.parse(chunk);
-        handleRLEvent(msg);
-      } catch (e) {
-        // If it fails to parse, it might be incomplete. We should prepend it back.
-        // But since we split by }\n{, it should be complete unless the split failed.
-        // For simplicity, we just ignore broken packets.
-      }
-    });
+      if (IS_DEV()) console.log('[RL] first data after connect (' + data.length + ' bytes):', JSON.stringify(data.slice(0, 400))); }
+    const framed = frameJson(rlBuffer + data);
+    rlBuffer = framed.rest;
+    if (rlBuffer.length > 4 * 1024 * 1024) rlBuffer = '';   // runaway partial (should never happen) — don't grow forever
+    for (const chunk of framed.messages) {
+      let msg;
+      try { msg = JSON.parse(chunk); } catch (e) { continue; }   // a genuinely malformed packet
+      // Handler faults are logged, not swallowed: a throw here leaves half-applied state.
+      try { handleRLEvent(msg); } catch (e) { console.error('[RL] handler error on ' + (msg && msg.Event) + ':', (e && e.stack) || e); }
+    }
   });
 
   rlSocket.on('close', () => {
@@ -15622,6 +16569,10 @@ function connectToRL() {
       broadcast(bridgeClients, { type: 'rl_status', data: { connected: false } });
     }
     rlSocket = null;
+    rlBuffer = '';
+    // The match can end without a MatchEnded reaching us (observer leaves, RL crashes): release
+    // the load-shedding/priority drop so the app doesn't stay throttled until the next match.
+    setPerfActive(false);
     scheduleRLReconnect();
   });
 
@@ -15761,6 +16712,10 @@ function syncSeriesStatsMatchup() {
     ss.liveBanked = false;
     ss._roster = [];
     console.log('[seriesStats] New series (' + reason + ') - cleared the previous series banked games.');
+    // The reset can be detected inside handleUpdateState, which only sends a state_update. Without a
+    // full_state the board kept the OLD banked games and added the NEW players' live line on top.
+    saveAppState();
+    broadcastFullState();
   }
 }
 
@@ -15907,6 +16862,12 @@ function handleRLEvent(msg) {
     case 'MatchCreated':
     case 'game:match_created':
       handleMatchCreated(data);
+      break;
+    case 'MatchDestroyed':
+      // The lobby was torn down (observer left, forfeit, crash) — MatchEnded may never have arrived, and
+      // without this the app stayed throttled (load shedding + lowered priority) until the next match.
+      state.inReplay = false;
+      setPerfActive(false);
       break;
     case 'MatchPaused':
     case 'game:match_paused':
@@ -16064,7 +17025,7 @@ function handleClock(data) {
   if ('TimeSeconds' in data) state.game.time = data.TimeSeconds;
   else if ('time_seconds' in data) state.game.time = data.time_seconds;
 
-  if ('bOvertime' in data) state.game.isOT = data.bOvertime;
+  if ('bOvertime' in data) state.game.isOT = !!data.bOvertime || !!state.otTriggered;   // RL's late false must not undo fireOvertime()
   maybeTriggerOvertime();   // detect the 0:00 ground-touch OT trigger (before RL's own late flag)
 
   rlGameTrack.gameTime = state.game.time;
@@ -16136,9 +17097,11 @@ function handleUpdateState(data) {
   // awaitingKickoff + clock ticking down near 5:00 (so the ~60s "choose teams" timer can't trigger it).
   maybeReturnForKickoff(prevTime);
 
-  if ('bOvertime' in game) state.game.isOT = game.bOvertime;   // official RL Stats API OT flag
-  else if ('IsOT' in game) state.game.isOT = game.IsOT;
-  else if ('isOT' in game) state.game.isOT = game.isOT;
+  // official RL Stats API OT flag. RL only sets it AFTER the OT kickoff countdown, so a false must not undo
+  // the early fireOvertime() latch (the overlay's OT swipe is edge-driven and replayed on the flicker).
+  if ('bOvertime' in game) state.game.isOT = !!game.bOvertime || !!state.otTriggered;
+  else if ('IsOT' in game) state.game.isOT = !!game.IsOT || !!state.otTriggered;
+  else if ('isOT' in game) state.game.isOT = !!game.isOT || !!state.otTriggered;
 
   // Scores from teams array or direct fields
   const teams = game.Teams || game.teams || [];
@@ -16240,6 +17203,7 @@ function handleUpdateState(data) {
     _rlPrevPlayerStats[p.name] = { saves: p.saves || 0, demos: p.demos || 0 };
   });
 
+  const _prevPlayersForGoal = state.players;   // captured BEFORE the overwrite so scorer inference can diff goals
   state.players = normalised;
 
   // Track the peak per-team headcount this match (Blue=0 / Orange=1). Used to cap the post-game board
@@ -16327,9 +17291,10 @@ function handleUpdateState(data) {
   state.spectatedPlayer = spec;
 
   // Infer goal from score diff when GoalScored event was missed or arrived late.
-  const prevPlayers = state.players;
+  // (prevPlayers used to be read AFTER state.players was reassigned, so it always diffed the packet
+  // against itself and fell back to "top-goals player on the scoring team".)
   if (!state.currentGoal) {
-    const inferred = inferGoalFromScoreDiff(prevPlayers, normalised);
+    const inferred = inferGoalFromScoreDiff(_prevPlayersForGoal, normalised);
     if (inferred) state.currentGoal = inferred;
   }
 
@@ -16338,7 +17303,7 @@ function handleUpdateState(data) {
   rlGameTrack.orangeScore = state.game.orangeScore ?? 0;
 
   // Detect transition to replay to trigger goal banner if not already shown
-  if (game.bReplay === true && !state.inReplay && state.view !== 'goal') {
+  if (game.bReplay === true && !state.inReplay && state.view !== 'goal' && state.view !== 'scoreboard') {
     handleGoalReplayStart();
   }
 
@@ -16465,10 +17430,16 @@ function handleBallHit(data) {
 // actual numbers instead of assumptions. Logs one line per replay stage.
 let _rlReplayT0 = 0;
 function handleGoalReplayStart() {
+  // Already started via the bReplay path (or a duplicate event): don't re-emit the flow trigger or
+  // re-take the replay-length anchor.
+  if (state.view === 'goal' && state.inReplay) return;
   flowBus.emit('rl_replay_start', {});
   _rlReplayT0 = Date.now();
   console.log('[RL replay] GoalReplayStart (t=0)');
-  if (state.view === 'goal' && state.inReplay) return;
+  // The post-game board is already up (the winning goal's replay can start after it finalizes): keep
+  // holding it. Flipping to 'goal' here made the end handler's scoreboard guard miss, cutting OBS back
+  // to the in-game scene while the board should still be showing.
+  if (state.view === 'scoreboard') { state.inReplay = true; return; }
 
   if (!state.currentGoal) {
     const inferred = inferGoalFromScoreDiff(state.players, state.players);
@@ -16501,6 +17472,9 @@ function handleGoalReplayWillEnd() {
 }
 
 function handleGoalReplayEnd() {
+  // Nothing to end (the bReplay:false path already did it): no second flow trigger, no second
+  // length measurement skewing the smoothed replay length.
+  if (state.view !== 'goal' && !state.inReplay && !_pendingPostGameFinalize) return;
   flowBus.emit('rl_replay_end', {});
   if (_rlReplayT0) {
     const len = Date.now() - _rlReplayT0;
@@ -16516,7 +17490,6 @@ function handleGoalReplayEnd() {
       if (Math.abs(state.rlReplayLenMs - prev) > 100) saveAppState();
     }
   }
-  if (state.view !== 'goal' && !state.inReplay && !_pendingPostGameFinalize) return;
   // If the winning-goal replay ends while the post-game scoreboard is already showing (the finalize
   // already ran, e.g. via the fallback timer), don't reset the view — it should keep holding.
   if (state.view === 'scoreboard') { state.inReplay = false; state.currentGoal = null; return; }
@@ -16540,6 +17513,7 @@ let _boardLingerTimer = null;           // 2s delay after OBS cut so the overlay
 let _pendingPostGameFinalize = false;   // MatchEnded fired but the winning-goal replay is still playing
 let _pendingFinalizeFallbackTimer = null;
 let _pendingFinalizeDirectTimer = null; // tracks the 800ms "no replay" setTimeout so it can be cancelled at kickoff
+let _pendingFinalizeScores = null;      // final score frozen at MatchEnded (handleMatchCreated zeroes state.game before the board finalizes)
 let _pendingFinalizeRoster = null;      // roster snapshot taken at MatchEnded, consumed by finalizePostGameBoard
 
 // Post-game roster for the scoreboard. playerCache accumulates EVERY name seen this game — reconnects,
@@ -16589,15 +17563,17 @@ function finalizePostGameBoard() {
   // and so the overlay can re-render it from a full_state on reload/reconnect (not just the view_change).
   const roster = _pendingFinalizeRoster || scoreboardRoster();
   _pendingFinalizeRoster = null;
+  const _finalScores = _pendingFinalizeScores || { blue: state.game.blueScore ?? 0, orange: state.game.orangeScore ?? 0 };
+  _pendingFinalizeScores = null;
   state.scoreboard = {
     players: Object.values(roster).map(p => ({ ...p })),
-    blueScore: state.game.blueScore ?? 0,
-    orangeScore: state.game.orangeScore ?? 0,
+    blueScore: _finalScores.blue,
+    orangeScore: _finalScores.orange,
     series: { ...state.series }
   };
   broadcast(bridgeClients, {
     type: 'view_change',
-    data: { view: 'scoreboard', series: state.series, playerCache: roster }
+    data: { view: 'scoreboard', series: state.series, playerCache: roster, blueScore: _finalScores.blue, orangeScore: _finalScores.orange }
   });
   obsSwitch('postGame');
 
@@ -16713,7 +17689,9 @@ function explainTwitchApiError(e) {
 
 function handleMatchEnded(data) {
   setPerfActive(false);     // match over — restore previews/animations/priority
-  resetOvertimeTrigger();   // game over — clear the OT latch so the next game can trigger its own
+  // NOTE: the OT latch is deliberately NOT cleared here. RL keeps sending UpdateState after MatchEnded with
+  // isOT still true, and clearing the latch made maybeTriggerOvertime() re-fire rl_overtime (a second
+  // 'scene cut on overtime' at game end). handleMatchCreated() resets it for the next game.
   state.awaitingKickoff = true;   // we're in post-game — return to the in-game overlay on the next kickoff (clock_started)
   // Stats: finalize this game before series scores are updated
   if (statsCurrentGameId) {
@@ -16726,8 +17704,10 @@ function handleMatchEnded(data) {
       overtime: state.game.isOT
     });
     try { analytics.event('game_complete'); } catch (e) {}
-    const rlPlayers = Object.values(state.playerCache).map(p => ({
-      ...p, team: p.team === 'blue' ? 'a' : 'b'
+    // p.team is the numeric TeamNum (0 blue / 1 orange) — comparing to 'blue' saved every player as side 'b'.
+    // Use the capped roster so rejoin/name-variant ghosts don't inflate the games count.
+    const rlPlayers = Object.values(scoreboardRoster()).map(p => ({
+      ...p, team: Number(p.team) === 1 ? 'b' : 'a'
     }));
     stats.saveRlPlayerStats(statsCurrentGameId, rlPlayers);
     statsCurrentGameId = null;
@@ -16804,6 +17784,7 @@ function handleMatchEnded(data) {
   // Snapshot the roster NOW before handleMatchCreated can clear state.playerCache. The finalize
   // timer below fires 800ms later, by which time playerCache may already be empty.
   _pendingFinalizeRoster = scoreboardRoster();
+  _pendingFinalizeScores = { blue: state.game.blueScore ?? 0, orange: state.game.orangeScore ?? 0 };
 
   // Finalize once the winning-goal replay actually ends — not a fixed guess. If no replay is in
   // progress right now (MatchEnded arrived after ReplayEnd already fired, or there's no replay to
@@ -17170,6 +18151,13 @@ function startBridgeServer() {
     // token handed out by GET /api/ws-token. Clients fetch the token once over HTTP (same
     // trust boundary as the rest of the API) and append it as ?token=…
     verifyClient: (info, cb) => {
+      // Browsers let ANY page open ws://127.0.0.1:3001, and on the default loopback bind no token is
+      // required, so the Origin check is what keeps a random website from driving the show.
+      const origin = info.req.headers.origin;
+      if (!isAllowedOrigin(origin, info.req.headers.host)) {
+        console.warn('[security] refused WS bridge connection from origin ' + origin);
+        return cb(false, 403, 'Forbidden');
+      }
       if (!enforceToken) return cb(true);
       let token = '';
       try { token = new URL(info.req.url, 'http://bridge').searchParams.get('token') || ''; } catch (e) {}
@@ -17190,6 +18178,28 @@ function startBridgeServer() {
     }
   });
 
+  // IPv6 loopback twin, for the same reason the HTTP server has one. An overlay opened as
+  // http://localhost:3000/... builds ws://localhost:3001 from its own hostname, and "localhost" is
+  // ::1 FIRST on Windows — with only the IPv4 bind above, the socket had to fail over to 127.0.0.1
+  // (slow), or was answered by whatever other program held :3001 on IPv6 (never connects). Both
+  // spellings were published in OBS URLs, so both must reach the bridge. Upgrades are handed to the
+  // SAME bridgeWss, so verifyClient, the client set and every handler are shared. Best-effort only.
+  if (wsHost.indexOf(':') < 0) {
+    try {
+      bridgeHttp6 = require('http').createServer((req, res) => { res.writeHead(426); res.end(); });
+      bridgeHttp6.on('upgrade', (req, socket, head) => {
+        if (!bridgeWss) { try { socket.destroy(); } catch (e) {} return; }
+        bridgeWss.handleUpgrade(req, socket, head, (ws) => bridgeWss.emit('connection', ws, req));
+      });
+      bridgeHttp6.on('error', (err) => {
+        console.warn('[Bridge] IPv6 loopback listener unavailable (' + (err && err.code || err) + ')');
+        try { bridgeHttp6.close(); } catch (e) {}
+        bridgeHttp6 = null;
+      });
+      bridgeHttp6.listen(WS_PORT, '::1');
+    } catch (e) { bridgeHttp6 = null; }
+  }
+
   bridgeWss.on('connection', (ws) => {
     bridgeClients.add(ws);
     ws.isAlive = true;
@@ -17203,7 +18213,7 @@ function startBridgeServer() {
     // between accept and first write. Unguarded, either threw inside the connection handler and the
     // newly-connected browser source got NO snapshot at all — it would sit blank while every
     // already-connected overlay carried on updating.
-    try { ws.send(JSON.stringify(getFullState())); }
+    try { const snap = JSON.stringify(getFullState()); ws.send(snap); _seedImgSent(ws, snap); }
     catch (e) { console.error('[bridge] initial snapshot failed for a client:', (e && e.message) || e); }
     if (_lastUpdateStatus) { try { ws.send(JSON.stringify({ type: 'update_status', data: _lastUpdateStatus })); } catch (e) {} }
     // A part-way restore must never be silent — the producer needs to know before they carry on.
@@ -17326,7 +18336,9 @@ registerWsHandlers({
     saveAppState(); broadcastFullState();
   },
   veto_visible(msg) {
-    if (state.veto) state.veto.visible = !!(msg.data && msg.data.visible);
+    // Through the exclusive-graphics gate so gfxActive stays in step — setting .visible directly
+    // left Hide unable to take the board down (gfxActive still said "veto").
+    if (state.veto) setExclusiveGfxVisible('veto', !!(msg.data && msg.data.visible));
     saveAppState(); broadcastFullState();
   },
   // Champion/hero draft
@@ -17334,7 +18346,7 @@ registerWsHandlers({
     try {
       const d = msg.data || {};
       draftStart({ game: d.game, teamStart: d.teamStart, title: d.title, subtitle: d.subtitle, owBanCount: d.owBanCount });
-      if (typeof d.visible === 'boolean') state.draft.visible = d.visible;
+      if (typeof d.visible === 'boolean') setExclusiveGfxVisible('draft', d.visible);
       saveAppState(); broadcastFullState();
     } catch (e) {
       ws.send(JSON.stringify({ type: 'draft-result', data: { ok: false, message: e.message } }));
@@ -17348,8 +18360,15 @@ registerWsHandlers({
     if (typeof d.title === 'string')    state.draft.title    = d.title.slice(0, 80);
     if (typeof d.subtitle === 'string') state.draft.subtitle = d.subtitle.slice(0, 120);
     if (d.teamStart === 'a' || d.teamStart === 'b') state.draft.teamStart = d.teamStart;
-    // Overwatch ban-count preference — stored now, applied on the next draftStart (rebuilds the sequence).
-    if (d.owBanCount != null) state.draft.owBanCount = Number(d.owBanCount) <= 2 ? 2 : 4;
+    // Overwatch ban-count preference. Applies straight away while no ban has been made yet;
+    // mid-draft it waits for Reset / the next Start Draft (both rebuild the slots from it).
+    if (d.owBanCount != null) state.draft.owBanCount = Number(d.owBanCount) >= 4 ? 4 : 2;
+    // Goes first / ban count re-shape the board straight away while nothing has been banned yet;
+    // once bans exist they wait for Reset (which rebuilds from these settings).
+    if ((d.teamStart === 'a' || d.teamStart === 'b' || d.owBanCount != null) && !(state.draft.ops || []).length) {
+      rebuildDraftSequence(state.draft);
+      rebuildDraftTurn();
+    }
     saveAppState(); broadcastFullState();
   },
   // Performance preferences (Settings ▸ Performance) — every knob is wired:
@@ -17439,6 +18458,9 @@ registerWsHandlers({
     if (!state.credits) state.credits = { visible: false, sponsors: [], talent: [], endText: '' };
     if (typeof d.visible === 'boolean') setExclusiveGfxVisible('credits', d.visible);
     if (typeof d.endText === 'string') state.credits.endText = d.endText.slice(0, 80);
+    // Side rails on the credits roll (event Top 8 / this stream's Twitch activity). Absent = shown.
+    if (typeof d.showTop8 === 'boolean') state.credits.showTop8 = d.showTop8;
+    if (typeof d.showActivity === 'boolean') state.credits.showActivity = d.showActivity;
     if (Array.isArray(d.talent)) {
       // Manual talent credits — crew from other shifts who still deserve the roll.
       state.credits.talent = d.talent.filter((t) => t && t.name).slice(0, 40).map((t) => ({
@@ -17484,6 +18506,11 @@ registerWsHandlers({
       state.owMatch.gameMode = mode;
       saveAppState(); broadcastFullState();
     }
+  },
+  ow_set_series_label(msg) {
+    if (!state.owMatch) state.owMatch = { visible: false, format: 'FT3', currentMapIdx: 0, bansByMap: [] };
+    state.owMatch.seriesLabel = (msg.data && msg.data.label) === 'bo' ? 'bo' : 'ft';
+    saveAppState(); broadcastFullState();
   },
   ow_set_map_labels(msg) {
     if (!state.owMatch) state.owMatch = { visible: false, format: 'FT3', currentMapIdx: 0, bansByMap: [] };
@@ -17704,9 +18731,12 @@ registerWsHandlers({
     saveAppState();
     broadcastFullState();
 
-    // Auto-prediction: resolve with the winning team's outcome
-    if (state.twitch.connected && predictionManager && state.twitch.predictions.settings.autoCreate) {
-      const winnerName = state.winner.name || (state.winner.side === 'blue' ? state.teams.blue.name : state.teams.orange.name);
+    // Auto-prediction: resolve with the winning team's outcome. Only when this message actually
+    // PUTS THE WINNER ON AIR — a style change, a subtitle edit or a hide used to run this too, and
+    // with no side set it fell back to the orange team and paid out the wrong outcome (irreversible).
+    if (('visible' in w) && winnerVisible && state.twitch.connected && predictionManager && state.twitch.predictions.settings.autoCreate) {
+      const winnerName = state.winner.name
+        || (state.winner.side === 'blue' ? state.teams.blue.name : state.winner.side === 'orange' ? state.teams.orange.name : '');
       const current = state.twitch.predictions.current;
       // Skip if already resolved by score in handleMatchEnded
       if (current && current.state !== 'RESOLVED' && current.state !== 'CANCELLED' && winnerName) {
@@ -17796,6 +18826,15 @@ function ensureCompetitionApiKey(regenerate) {
   }
   return competitionApiKey;
 }
+// OBS audio / source controls sent straight from the panel (pinned pills, Production Deck tiles,
+// the volume slider) and the Stream Deck plugin. They share the Flow actions' implementation, so a
+// button and an automation flow can never drift apart.
+registerWsHandlers(Object.fromEntries(
+  ['obs_input_mute', 'obs_input_unmute', 'obs_source_show', 'obs_source_hide', 'obs_set_volume'].map((type) => [type, (msg) => {
+    _executeFlowAction({ type, params: (msg && msg.data) || {} }, {}).catch((e) => console.warn('[OBS] ' + type + ' failed:', e.message));
+  }])
+));
+
 registerWsHandlers({
   // Make a league the live competition ('' = take it off air).
   competition_set_live(msg, ws) {
@@ -18142,6 +19181,96 @@ function refillSmashStocks() {
 }
 
 /** Called after every stock write. Returns true when it closed the game. */
+// ── Brawlhalla board helpers ────────────────────────────────────────────────
+// Module scope for the same reason the Smash helpers are: loadState() and the WS switch both call
+// them, and a function declared inside the switch is a ReferenceError that aborts the whole state
+// restore (see [[loadstate-abort-wipes-secrets]] / test/loadstate-restore.test.js).
+
+// The Brawlhalla data layer. Created lazily: the API needs no key, but building the client at boot
+// would spend a module load on every producer who never touches the game.
+let _brawlhalla = null;
+function brawlhalla() {
+  if (!_brawlhalla) _brawlhalla = createBrawlhalla();
+  return _brawlhalla;
+}
+
+let _bhGameClosed = false;
+const bhSeats = () => (state.brawlhalla.mode === '2v2' ? 2 : 1);
+
+// Stocks a side has left. 1v1 reads the side's own count; 2v2 pools the pair's, so a board can
+// show "3 stocks left" for a team whose second player is already out.
+function bhStocksLeft(side) {
+  const sd = state.brawlhalla[side] || {};
+  if (bhSeats() === 2) {
+    return (sd.players || []).slice(0, 2).reduce((a, p) => a + Math.max(0, Number(p && p.stocks) || 0), 0);
+  }
+  return Math.max(0, Number(sd.stocks) || 0);
+}
+
+function refillBrawlhallaStocks() {
+  const start = state.brawlhalla.startStocks;
+  ['blue', 'orange'].forEach((side) => {
+    state.brawlhalla[side].stocks = start;
+    (state.brawlhalla[side].players || []).forEach((p) => { p.stocks = start; });
+  });
+}
+
+// A side running out of stocks closes the game: the opponent takes the series point and both
+// sides refill. Identical rule to Smash — same genre, same producer expectation.
+function checkBrawlhallaGameOver() {
+  if (!state.brawlhalla.autoAdvance) return false;
+  const left = { blue: bhStocksLeft('blue'), orange: bhStocksLeft('orange') };
+  if (left.blue > 0 && left.orange > 0) { _bhGameClosed = false; return false; }
+  if (left.blue <= 0 && left.orange <= 0) return false;   // mid-reset, not a result
+  if (_bhGameClosed) return false;
+  _bhGameClosed = true;
+  const winner = left.blue > 0 ? 'blue' : 'orange';
+  const cap = Math.ceil(state.bestOf / 2);
+  state.series[winner] = Math.max(0, Math.min(cap, (state.series[winner] || 0) + 1));
+  const played = (state.series.blue || 0) + (state.series.orange || 0);
+  state.game.number = Math.max(1, Math.min(state.bestOf, played + 1));
+  refillBrawlhallaStocks();
+  console.log(`[Brawlhalla] ${winner} took the game on stocks — series ${state.series.blue}-${state.series.orange}, game ${state.game.number}`);
+  broadcast(bridgeClients, { type: 'brawlhalla-game-over', data: { winner, series: { ...state.series }, game: state.game.number } });
+  return true;
+}
+
+/*
+  Refresh the ranked card for one seat. Safe to call whenever — the data layer caches for five
+  minutes, so a panel that calls this on every render still makes one request per player per five
+  minutes.
+
+  A failed lookup NEVER clears the card that is already on screen: the board is live, and replacing
+  a rank chip with a blank because a single request timed out is worse than showing one that is a
+  few minutes stale. The error is surfaced on state.brawlhalla.lastError instead.
+*/
+async function refreshBrawlhallaCard(side, seat = 0) {
+  const sd = state.brawlhalla[side];
+  if (!sd) return null;
+  const p = (sd.players || [])[seat];
+  if (!p || !p.bhId) return null;
+  try {
+    const card = await brawlhalla().playerCard(p.bhId, { mode: state.brawlhalla.rankMode });
+    p.card = card;
+    state.brawlhalla.lastError = '';
+    state.brawlhalla.lastLookupAt = Date.now();
+    return card;
+  } catch (e) {
+    state.brawlhalla.lastError = e.message;
+    return null;
+  }
+}
+
+// Every linked seat, refreshed together (both sides going on air at once).
+async function refreshBrawlhallaCards() {
+  const jobs = [];
+  ['blue', 'orange'].forEach((side) => {
+    for (let i = 0; i < bhSeats(); i++) jobs.push(refreshBrawlhallaCard(side, i));
+  });
+  await Promise.all(jobs);
+  broadcastFullState();
+}
+
 function checkSmashGameOver() {
   if (!state.smash.autoAdvance) return false;
   const left = { blue: smashStocksLeft('blue'), orange: smashStocksLeft('orange') };
@@ -18355,6 +19484,7 @@ function handleControlMessage(msg, ws) {
       const o = msg.data || {};
       const cur = state.replay || {};
       state.replay = {
+        ...cur,   // keep the runtime program/preview buses — replacing the object wholesale emptied Preview mid-cue
         label: typeof o.label === 'string' ? o.label : (cur.label ?? 'REPLAY'),
         logo: ('logo' in o) ? (o.logo || null) : (cur.logo ?? null),
         outroLogo: ('outroLogo' in o) ? (o.outroLogo || null) : (cur.outroLogo ?? null),
@@ -19335,13 +20465,28 @@ function handleControlMessage(msg, ws) {
     // ── Game Config Builder — one active config per game, extending an EXISTING built-in game
     // (maps/roles/characters). Bundle is built entirely client-side (like the League Editor holds
     // lgLeagues locally); these handlers only fire on Export/Import/Reset. ────────────────────────
+    // Save & apply: the edited bundle becomes the active config for its game straight away — no
+    // file round-trip (Export is only for sharing a bundle with someone else).
+    case 'save_game_config': {
+      const d = msg.data || {};
+      if (!d.bundle || typeof d.bundle !== 'object' || !GAMES[d.bundle.game]) {
+        sendImportExportResult(ws, false, 'Nothing to save — pick a valid game first.', 'game-config');
+        break;
+      }
+      const saved = normalizeGameConfigFor(d.bundle);
+      state.gameConfigs = { ...(state.gameConfigs || {}), [saved.game]: saved };
+      saveAppState(); broadcastFullState();
+      sendImportExportResult(ws, true,
+        `Saved — ${saved.maps.length} map(s), ${saved.characters.length} character(s), ${saved.roles.length} role(s) now live for ${GAMES[saved.game].name}.`, 'game-config');
+      break;
+    }
     case 'export_game_config': {
       const d = msg.data || {};
-      const bundle = d.bundle;
-      if (!bundle || typeof bundle !== 'object' || !GAMES[bundle.game]) {
+      if (!d.bundle || typeof d.bundle !== 'object' || !GAMES[d.bundle.game]) {
         sendImportExportResult(ws, false, 'Nothing to export — pick a valid game first.', 'game-config');
         break;
       }
+      const bundle = normalizeGameConfigFor(d.bundle);
       const zip = new AdmZip();
       const manifest = extractAssetsToZip(bundle, zip);
       zip.addFile('manifest.json', Buffer.from(JSON.stringify(manifest, null, 2)));
@@ -19371,7 +20516,7 @@ function handleControlMessage(msg, ws) {
           const bundle = inflateAssetsFromZip(JSON.parse(manifestEntry.getData().toString('utf8')), zip);
           if (bundle.format !== 'ne-game-config') throw new Error('Not a valid Game Config file.');
           if (!GAMES[bundle.game]) throw new Error(`"${bundle.game}" isn't one of this app's built-in games — Game Configs can only extend an existing game.`);
-          state.gameConfigs = { ...(state.gameConfigs || {}), [bundle.game]: bundle };
+          state.gameConfigs = { ...(state.gameConfigs || {}), [bundle.game]: normalizeGameConfigFor(bundle) };
           saveAppState(); broadcastFullState();
           sendImportExportResult(ws, true, `Game config loaded for ${GAMES[bundle.game].name}.`, 'game-config');
         } catch (e) {
@@ -19459,6 +20604,7 @@ function handleControlMessage(msg, ws) {
       const d = msg.data || {};
       const o = state.lol.ocr;
       if (typeof d.enabled === 'boolean') o.enabled = d.enabled;
+      if (d.displayId != null) o.displayId = String(d.displayId || '');
       if (d.regions) {
         ['blue', 'red'].forEach((s) => {
           if (d.regions[s]) ['x', 'y', 'w', 'h'].forEach((k) => {
@@ -19474,6 +20620,40 @@ function handleControlMessage(msg, ws) {
       else if (!o.enabled) o.status = 'off';
       saveAppState();
       broadcastFullState();
+      break;
+    }
+    // Calibration helpers. Each replies to the asking client only (the snapshot carries a
+    // screenshot — never put it in state or a broadcast).
+    case 'lol_ocr_displays': {
+      lolOcrConfigure();
+      let displays = [];
+      try { displays = lolOcr.listDisplays(); } catch (e) {}
+      try { ws.send(JSON.stringify({ type: 'lol_ocr_displays', displays, current: state.lol.ocr.displayId || '' })); } catch (e) {}
+      break;
+    }
+    case 'lol_ocr_snapshot': {
+      lolOcrConfigure();
+      const o = state.lol.ocr;
+      lolOcr.snapshot({ displayId: o.displayId, regions: o.regions })
+        .then((res) => { try { ws.send(JSON.stringify({ type: 'lol_ocr_snapshot', ...res })); } catch (e) {} })
+        .catch((e) => { try { ws.send(JSON.stringify({ type: 'lol_ocr_snapshot', ok: false, message: (e && e.message) || 'snapshot failed' })); } catch (e2) {} });
+      break;
+    }
+    case 'lol_ocr_autolocate': {
+      lolOcrConfigure();
+      const o = state.lol.ocr;
+      lolOcr.autoLocate({ displayId: o.displayId })
+        .then((res) => {
+          if (res.ok && res.regions) {
+            o.regions = { blue: { ...res.regions.blue }, red: { ...res.regions.red } };
+            if (res.displayId) o.displayId = res.displayId;
+            // A running reader picks the new boxes up on its next tick via getRegions().
+            saveAppState();
+            broadcastFullState();
+          }
+          try { ws.send(JSON.stringify({ type: 'lol_ocr_autolocate', ok: !!res.ok, message: res.message || '', regions: res.regions || null, words: res.words || null })); } catch (e) {}
+        })
+        .catch((e) => { try { ws.send(JSON.stringify({ type: 'lol_ocr_autolocate', ok: false, message: (e && e.message) || 'auto-detect failed' })); } catch (e2) {} });
       break;
     }
 
@@ -20555,43 +21735,7 @@ function handleControlMessage(msg, ws) {
     case 'set_active_game': {
       const g = msg.data?.game;
       if (g && GAMES[g]) {
-        const prev = state.activeGame;
-        state.activeGame = g;
-        // Re-tint placeholder team colours to the new game's defaults (e.g. Overwatch → blue/red)
-        // so the Match-Teams cards reflect the game. Saved teams' own brand colours are preserved
-        // because those aren't part of the default palette.
-        applyGameDefaultSideColors();
-        if (directorEngine) directorEngine.reset();
-        // Map Pool and Draft are keyed to the OLD game's pool/roster (map ids, hero rosters,
-        // ban formats) — leaving them as-is showed stale maps/heroes from the previous game
-        // (or Overwatch's ban board hanging around after switching away from Overwatch). Reset
-        // both to their clean not-started shape so the next Start Veto / Start Draft builds
-        // fresh from the NEW game's pool.
-        if (prev !== g) {
-          state.veto = { visible: false, title: '', maps: [] };
-          // Board content resets (old game's pool/roster), but PRODUCER PREFERENCES survive:
-          // teamStart and the Overwatch ban count are settings, not board state — resetting
-          // owBanCount to 4 here silently undid "one ban per team" every time the game switched.
-          state.draft = { visible: false, title: '', subtitle: '',
-            game: '', teamStart: (state.draft && state.draft.teamStart) || 'a',
-            owBanCount: (state.draft && state.draft.owBanCount) || 4,
-            sequence: [], ops: [], turn: null, complete: false,
-            auto: (state.draft && state.draft.auto) || { enabled: false, status: 'off', statusDetail: '', lockfilePath: '' } };
-        }
-        // Stop data connections for the previous game
-        if (prev === 'rocket-league' && g !== 'rocket-league') disconnectRL();
-        if (prev === 'valorant' && g !== 'valorant') stopValorantPolling();
-        if (prev === 'league' && g !== 'league') stopLolPolling();
-        if (prev === 'apex' && g !== 'apex') stopApexServer();
-        // Start data connections for the new game
-        if (g === 'rocket-league' && prev !== 'rocket-league') connectToRL();
-        if (g === 'valorant') startValorantPolling();
-        if (g === 'league') startLolPolling();
-        if (g === 'apex') startApexServer();
-        if (g === 'marvel-rivals') {
-          if (!state.mrMatch) state.mrMatch = { visible: true, format: 'BO5', bansByMap: [], gameMode: 'convergence', showMapLabels: true, mapWinners: [], mapModes: [], gepData: null };
-          state.mrMatch.visible = true;
-        }
+        applyActiveGame(g);
         saveAppState();
         broadcastFullState();
       }
@@ -20600,10 +21744,12 @@ function handleControlMessage(msg, ws) {
 
     case 'set_theme': {
       const t = msg.data?.theme;
+      // Optional game: Settings ▸ Games sets a game's layout without making it the active game.
+      const tg = (msg.data?.game && GAMES[msg.data.game]) ? msg.data.game : state.activeGame;
       if (t) {
-        const migrated = migrateThemeId(state.activeGame, t);
-        if (isValidTheme(state.activeGame, migrated)) {
-          state.themesByGame[state.activeGame] = migrated;
+        const migrated = migrateThemeId(tg, t);
+        if (isValidTheme(tg, migrated)) {
+          state.themesByGame[tg] = migrated;
           saveAppState();
           broadcastFullState();
         }
@@ -20636,6 +21782,13 @@ function handleControlMessage(msg, ws) {
       state.csgo.showHistory = !!(msg.data && msg.data.visible);
       broadcastFullState();
       broadcastCsgo();
+      break;
+    }
+
+    case 'csgo_auto_winner': {
+      state.csgo.autoWinner = !!(msg.data && msg.data.enabled);
+      saveAppState();
+      broadcastFullState();
       break;
     }
 
@@ -20691,6 +21844,7 @@ function handleControlMessage(msg, ws) {
         accent: k.accent || null,
         font: k.font || null,
         themes: (k.themes && typeof k.themes === 'object') ? k.themes : {},
+        linkStyles: !!k.linkStyles,   // per-game designs above apply on go-live only when linked (see applyKitStyles)
         obsSceneCollection: (typeof k.obsSceneCollection === 'string') ? k.obsSceneCollection.trim() : '',
         obsProfile: (typeof k.obsProfile === 'string') ? k.obsProfile.trim() : '',
         packages: [],
@@ -20723,7 +21877,8 @@ function handleControlMessage(msg, ws) {
         applyBrandSlots();
         syncActivePreshowTopics();
         const liveKit = existing || savedBrandKits.find((b) => b.id === entry.id);
-        if (applyPackageSnapshot(activePackage(liveKit))) saveAppState();
+        const snapped = applyPackageSnapshot(activePackage(liveKit), { styles: !!(liveKit && liveKit.linkStyles) });
+        if (applyKitStyles(liveKit) || snapped) saveAppState();
       }
       broadcastFullState();
       break;
@@ -20745,7 +21900,7 @@ function handleControlMessage(msg, ws) {
           if (kit.id === state.activeBrandKitId) {
             applyBrandSlots();
             syncActivePreshowTopics();
-            if (applyPackageSnapshot(activePackage(kit))) saveAppState();
+            if (applyPackageSnapshot(activePackage(kit), { styles: !!kit.linkStyles })) saveAppState();
           }
           broadcastFullState();
         }
@@ -20779,6 +21934,8 @@ function handleControlMessage(msg, ws) {
         const copy = JSON.parse(JSON.stringify(src));
         copy.id = brandId();
         copy.name = 'Copy of ' + (src.name || 'Profile');
+        // A copy is YOURS — left tagged as an org kit, the next organization pull deleted it.
+        delete copy._org; delete copy._orgOwner;
         const idMap = {};
         copy.packages = (copy.packages || []).map((p) => { const nid = brandId(); idMap[p.id] = nid; return { ...p, id: nid }; });
         copy.activePackageId = idMap[src.activePackageId] || (copy.packages[0] && copy.packages[0].id) || null;
@@ -20909,6 +22066,10 @@ function handleControlMessage(msg, ws) {
         if (typeof msg.data.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(msg.data.color)) {
           state.teams[msg.data.side].color = msg.data.color;
         }
+        // Abbreviation: the tag typed on the card wins; blank or absent (queue clicks, bracket Go
+        // Live, auto-fill) re-resolves from the library for whoever is NOW on this side, so the
+        // spread above can never carry the previous team's tag forward.
+        state.teams[msg.data.side].abbr = cleanTeamAbbr(msg.data.abbr) || abbrForTeamName(msg.data.name);
         // Optional roster (e.g. picking a seeded start.gg team) → feeds the facecam rows.
         if (Array.isArray(msg.data.players)) {
           state.teams[msg.data.side].players = msg.data.players;
@@ -21028,6 +22189,113 @@ function handleControlMessage(msg, ws) {
       broadcastFullState();
       break;
 
+// ── Brawlhalla HUD (overlay/brawlhalla.html) ────────────────────────────────
+// NOTE: every `case` below keeps its body inside braces. A bare `let`/`const` between cases in
+// this switch is a silent TDZ ReferenceError for every case after it (see
+// test/switch-scope.test.js) — that is how reset_series was killed once already.
+    case 'set_brawlhalla_mode': {        // { mode: '1v1' | '2v2' }
+      const m = (msg.data && msg.data.mode) === '2v2' ? '2v2' : '1v1';
+      state.brawlhalla.mode = m;
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+    case 'set_brawlhalla_stocks': {      // absolute set: { side, value, seat }
+      const d = msg.data || {};
+      if (d.side === 'blue' || d.side === 'orange') {
+        const v = Math.max(0, Math.min(9, Math.round(Number(d.value) || 0)));
+        const seat = Math.max(0, Math.min(1, Math.round(Number(d.seat) || 0)));
+        if (state.brawlhalla.mode === '2v2') state.brawlhalla[d.side].players[seat].stocks = v;
+        else state.brawlhalla[d.side].stocks = v;
+        checkBrawlhallaGameOver();
+        saveAppState();
+        broadcastFullState();
+      }
+      break;
+    }
+    case 'brawlhalla_stock_delta': {     // step: { side, delta, seat } (-1 on a KO, +1 undo)
+      const d = msg.data || {};
+      if (d.side === 'blue' || d.side === 'orange') {
+        const step = Math.round(Number(d.delta)) || 0;
+        const seat = Math.max(0, Math.min(1, Math.round(Number(d.seat) || 0)));
+        const clamp = (n) => Math.max(0, Math.min(9, n));
+        if (state.brawlhalla.mode === '2v2') {
+          const p = state.brawlhalla[d.side].players[seat];
+          p.stocks = clamp((Number(p.stocks) || 0) + step);
+        } else {
+          state.brawlhalla[d.side].stocks = clamp((Number(state.brawlhalla[d.side].stocks) || 0) + step);
+        }
+        checkBrawlhallaGameOver();
+        saveAppState();
+        broadcastFullState();
+      }
+      break;
+    }
+    case 'set_brawlhalla_legend': {      // { side, legend, seat } — free text, resolved to art client-side
+      const d = msg.data || {};
+      if (d.side === 'blue' || d.side === 'orange') {
+        const name = String(d.legend || '').slice(0, 40);
+        const seat = Math.max(0, Math.min(1, Math.round(Number(d.seat) || 0)));
+        if (state.brawlhalla.mode === '2v2') state.brawlhalla[d.side].players[seat].legend = name;
+        else state.brawlhalla[d.side].legend = name;
+        saveAppState();
+        broadcastFullState();
+      }
+      break;
+    }
+    case 'set_brawlhalla_start_stocks': {  // { value } — starting stocks (also # of pips drawn)
+      const v = Math.max(1, Math.min(9, Math.round(Number((msg.data || {}).value) || 3)));
+      state.brawlhalla.startStocks = v;
+      refillBrawlhallaStocks();
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+    case 'reset_brawlhalla_stocks': {      // both sides back to startStocks (new game)
+      _bhGameClosed = false;
+      refillBrawlhallaStocks();
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+    case 'set_brawlhalla_options': {       // { autoAdvance, showRank, showLegend, title, region, rankMode, railPos }
+      const d = msg.data || {};
+      if ('autoAdvance' in d) state.brawlhalla.autoAdvance = !!d.autoAdvance;
+      if ('showRank' in d) state.brawlhalla.showRank = !!d.showRank;
+      if ('showLegend' in d) state.brawlhalla.showLegend = !!d.showLegend;
+      if (typeof d.title === 'string') {
+        state.brawlhalla.title = d.title.slice(0, 40);
+        // Typing a label pins it; clearing the box hands the slot back to the auto-fill.
+        state.brawlhalla.titleManual = !!state.brawlhalla.title;
+      }
+      if (typeof d.region === 'string' && BH_REGIONS.includes(d.region.toUpperCase())) state.brawlhalla.region = d.region.toUpperCase();
+      if (d.rankMode === 'ranked_1v1' || d.rankMode === 'ranked_3v3') state.brawlhalla.rankMode = d.rankMode;
+      if (d.railPos === 'auto' || d.railPos === 'topleft') state.brawlhalla.railPos = d.railPos;
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+    // Link a seat to a Brawlhalla account and pull its ranked card. bhId 0 unlinks (and drops the
+    // card with it, so the board can't keep quoting a rank for a player who is no longer there).
+    case 'link_brawlhalla_player': {       // { side, seat, bhId }
+      const d = msg.data || {};
+      if (d.side === 'blue' || d.side === 'orange') {
+        const seat = Math.max(0, Math.min(1, Math.round(Number(d.seat) || 0)));
+        const id = Math.max(0, Math.round(Number(d.bhId) || 0));
+        const p = state.brawlhalla[d.side].players[seat];
+        p.bhId = id;
+        if (!id) p.card = null;
+        saveAppState();
+        broadcastFullState();
+        if (id) refreshBrawlhallaCard(d.side, seat).then(() => broadcastFullState());
+      }
+      break;
+    }
+    case 'refresh_brawlhalla_cards': {
+      refreshBrawlhallaCards();
+      break;
+    }
+
     // Built-in chat commands config — the master toggle + the Discord invite (!discord).
     case 'set_chat_commands':
       if (msg.data) {
@@ -21139,6 +22407,19 @@ function handleControlMessage(msg, ws) {
         }
       }
       break;
+
+    // Match ▸ Teams abbreviation field applies on change, like the colour picker. Blank = back to
+    // the library/vault tag for the team on that side (or nothing, = initials on the overlays).
+    case 'set_team_abbr': {
+      const d = msg.data || {};
+      if (d.side === 'blue' || d.side === 'orange') {
+        const t = state.teams[d.side] || (state.teams[d.side] = { name: '', logo: null, players: [] });
+        t.abbr = cleanTeamAbbr(d.abbr) || abbrForTeamName(t.name);
+        saveAppState();
+        broadcastFullState();
+      }
+      break;
+    }
 
     case 'set_team_color':
       if ((msg.data.side === 'blue' || msg.data.side === 'orange') && typeof msg.data.color === 'string') {
@@ -21512,6 +22793,9 @@ function handleControlMessage(msg, ws) {
     }
 
     case 'force_hud':
+      // The overlay ignores view_change:hud while it holds the post-game board (sbLocked), so the HUD
+      // button did nothing until "Clear Scoreboard". Releasing the board is what "HUD view" means here.
+      if (state.view === 'scoreboard' || state.scoreboard) { clearPostGameBoard(); break; }
       state.view = 'hud';
       broadcast(bridgeClients, { type: 'view_change', data: { view: 'hud' } });
       break;
@@ -21529,8 +22813,9 @@ function handleControlMessage(msg, ws) {
       break;
 
     case 'save_team': {
-      const { name, logo, oldName, color } = msg.data;
-      const players = Array.isArray(msg.data.players) ? msg.data.players : null;
+      const { name, oldName } = msg.data;
+      let { logo, color } = msg.data;
+      let players = Array.isArray(msg.data.players) ? msg.data.players : null;
       const favorite = typeof msg.data.favorite === 'boolean' ? msg.data.favorite : undefined;
       // abbr: honour whenever the key is present (including null/'' = deliberately cleared);
       // it was silently dropped before, so the editor's Abbreviation field never saved.
@@ -21544,6 +22829,29 @@ function handleControlMessage(msg, ws) {
       let idx = -1;
       if (oldName) idx = savedTeams.findIndex(t => _tn(t.name) === _tn(oldName));
       if (idx === -1) idx = savedTeams.findIndex(t => _tn(t.name) === _tn(name));
+
+      // Importers (teams CSV / JSON) send merge:true. A row that matches a team already in the
+      // library ADDS to it: a blank logo / colour in the file means "the file doesn't say", never
+      // "remove it", and the roster is merged by player name so existing ids, roles, cameras and
+      // links survive. Without this a re-import of a names-only CSV wiped crests and rosters.
+      if (msg.data.merge === true && idx >= 0) {
+        const prevTeam = savedTeams[idx] || {};
+        if (!logo) logo = undefined;
+        if (!color) color = undefined;
+        if (players !== null) {
+          const merged = (Array.isArray(prevTeam.players) ? prevTeam.players : []).slice();
+          const at = new Map(merged.map((p, i) => [_tn(p && p.name), i]));
+          players.forEach((p) => {
+            if (!p || !_tn(p.name)) return;
+            const i = at.get(_tn(p.name));
+            if (i === undefined) { at.set(_tn(p.name), merged.length); merged.push(p); return; }
+            const add = {};
+            Object.keys(p).forEach((k) => { if (k !== 'id' && p[k] !== '' && p[k] != null) add[k] = p[k]; });
+            merged[i] = { ...merged[i], ...add };
+          });
+          players = merged;
+        }
+      }
 
       // Did the producer REMOVE a crest (as opposed to saving a team that simply has none)? Only a
       // genuine removal is passed to the vault as a clear - see upsertFromLibrary's clearLogo.
@@ -21657,6 +22965,16 @@ function handleControlMessage(msg, ws) {
         } catch (e) { console.warn('[TeamVault] save_team write-through failed:', e.message); }
       }
 
+      // A tag edited here follows the team onto the side it is on right now (the side's tag came
+      // from the library unless the card carried its own, which arrives in this same payload).
+      if (hasAbbr) {
+        ['blue', 'orange'].forEach((sd) => {
+          const t = state.teams[sd];
+          if (t && _tn(t.name) === _tn(name)) t.abbr = abbr || abbrForTeamName(t.name);
+        });
+        saveAppState();
+      }
+
       saveTeams();
       broadcastFullState();
       break;
@@ -21670,6 +22988,7 @@ function handleControlMessage(msg, ws) {
         if (src.name)   state.teams[side].name   = src.name;
         if (src.color)  state.teams[side].color  = src.color;
         if (src.logo !== undefined) state.teams[side].logo = src.logo;
+        state.teams[side].abbr = cleanTeamAbbr(src.abbr) || abbrForTeamName(src.name);
         if (Array.isArray(src.players)) {
           state.teams[side].players = src.players.map((p, i) => ({
             id: p.id || (Date.now() + i),
@@ -21835,7 +23154,7 @@ function handleControlMessage(msg, ws) {
     case 'delete_player': {
       const { side, playerId } = msg.data || {};
       if (side && state.teams[side]) {
-        state.teams[side].players = state.teams[side].players?.filter(p => p.id !== playerId) || [];
+        state.teams[side].players = state.teams[side].players?.filter(p => String(p.id) !== String(playerId)) || [];   // bulk delete sends ids as strings
         persistRosterToLibrary(side);   // mirror the removal to the saved-team library
 
         saveAppState();
@@ -22867,50 +24186,37 @@ function handleControlMessage(msg, ws) {
     // Client (overlay/sticky-logos.js) can restore vaulted "@img:<hash>" image refs → opt it into the
     // compact broadcast variant. Purely additive: without this the client always gets whole images.
     case 'imgvault_ready': { ws._imgvault = true; break; }
+    // Safety net: the overlay got an "@img:" ref it can't resolve (its cache and our record of it
+    // disagree). Forget what we think it holds and resend the whole state with every image in full.
+    case 'imgvault_miss': {
+      ws._imgSent = new Set();
+      try { const snap = JSON.stringify(getFullState()); ws.send(snap); _seedImgSent(ws, snap); }
+      catch (e) { console.error('[bridge] imgvault resync failed:', (e && e.message) || e); }
+      break;
+    }
 
     case 'swap_teams': {
-      // Swap names/logos
-      const tempTeams = { ...state.teams.blue };
-      state.teams.blue = { ...state.teams.orange };
-      state.teams.orange = tempTeams;
-      
-      // Swap series scores
-      const tempSeries = state.series.blue;
-      state.series.blue = state.series.orange;
-      state.series.orange = tempSeries;
-
-      // Swap the active/on-air player so each side keeps its selection across the swap.
-      const tempActive = state.activePlayer.blue;
-      state.activePlayer.blue = state.activePlayer.orange;
-      state.activePlayer.orange = tempActive;
-      // The observed player travels with their team.
-      if (state.observedPlayer && state.observedPlayer.side) {
-        state.observedPlayer.side = state.observedPlayer.side === 'blue' ? 'orange' : 'blue';
-      }
-
-      // Smash stocks/fighters/crew follow their team across the swap.
-      if (state.smash) {
-        const tmpS = state.smash.blue;
-        state.smash.blue = state.smash.orange;
-        state.smash.orange = tmpS;
-      }
-
-      // Team records need no swapping now: both auto (stats/startgg) and manual (manualByName) are
-      // keyed by team NAME, so they follow the team across the swap automatically.
-
+      swapTeamSides();
+      // CS2 with auto team names: the next GSI tick would put the game's names straight back and
+      // leave the logos crossed. Hold the producer's swap until the game reports different names.
+      if (state.activeGame === 'csgo' && state.autoTeamsFromGame) _csManualSwapKey = csGameTeamsKey();
       saveAppState();
       broadcastFullState();
       break;
     }
 
+
     case 'reset_all': {
       state.eventName = '';
       state.eventNameSlug = '';
       state.fontFamily = 'Industry';
-      state.banner = { visible: false, images: [], captions: [], interval: 10, slant: 'right', header: '' };
-      state.casters = { visible: true, list: [], lowerThird: '', library: [], vdo: { room: '', password: '' }, rooms: [], lineup: [], activeLayout: '', slotLabels: { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4' }, autoFillSuppress: [] };
+      state.banner = { ...state.banner, visible: false };
+      // The prompt promises a reset of MATCH data. The caster library, VDO rooms, shifts, staff and
+      // API key, and the banner / ticker content are set-up that outlives a match — replacing those
+      // objects wholesale used to wipe all of it. Clear only what belongs to the show on the desk.
+      state.casters = { ...state.casters, visible: true, list: [], lowerThird: '', lineup: [], autoFillSuppress: [] };
       state.breakScreen = { visible: false, title: 'STARTING SOON', message: '', endsAt: null };
-      state.ticker = { visible: false, messages: [], speed: 10, source: 'manual', sponsor: '' };
+      state.ticker = { ...state.ticker, visible: false };
       state.spotlight = { visible: false, playerName: '' };
       state.winner = { visible: false, side: '', name: '', logo: null, color: '', subtitle: '' };
       state.intro  = { visible: false, side: 'blue', title: '', style: 1, showFooter: false };
@@ -22918,8 +24224,8 @@ function handleControlMessage(msg, ws) {
       state.draft  = { ...state.draft, visible: false, ops: [], turn: null, complete: false };
       state.bestOf = 5;
       state.teams = {
-        blue:   { name: 'BLUE TEAM',   logo: null, color: '#055fdb' },
-        orange: { name: 'ORANGE TEAM', logo: null, color: '#e97139' }
+        blue:   { name: 'BLUE TEAM',   logo: null, color: '#055fdb', abbr: null },
+        orange: { name: 'ORANGE TEAM', logo: null, color: '#e97139', abbr: null }
       };
       state.series = { blue: 0, orange: 0 };
       state.game = { blueScore: 0, orangeScore: 0, time: 300, isOT: false, number: 1 };
@@ -23291,6 +24597,85 @@ function handleControlMessage(msg, ws) {
     }
 
 
+    // ── Riot Games API ──────────────────────────────────────────────────────
+    // The producer's own key from developer.riotgames.com. No polling: Riot's per-key limit is
+    // small and a development key dies after 24 hours, so calls only happen on Test / Look up.
+    case 'set_riot_settings': {
+      const d = msg.data || {};
+      if (typeof d.region === 'string' && riot.REGIONS.includes(d.region)) state.riot.region = d.region;
+      if (typeof d.platform === 'string' && riot.PLATFORMS[d.platform]) {
+        state.riot.platform = d.platform;
+        // Keep the two routings in step — a kr platform with an americas region is a 404 that
+        // reads as "player not found", which is the hardest kind of wrong to debug on air.
+        const reg = riot.PLATFORM_REGION[d.platform];
+        if (reg && (typeof d.region !== 'string' || !riot.REGIONS.includes(d.region))) state.riot.region = reg;
+      }
+      // A blank key means "leave it alone" so the panel never has to echo the secret back.
+      if (typeof d.apiKey === 'string' && d.apiKey.trim()) {
+        riotApiKey = d.apiKey.trim();
+        state.riot.lastError = null;
+      }
+      if (d.clearKey) { riotApiKey = ''; state.riot.lastError = null; state.riot.lastPlayer = null; state.riot.lastCheckAt = null; }
+      state.riot.keyKind = riot.keyKind(riotApiKey);
+      saveAppState();
+      broadcastFullState();
+      sendWs(ws, { type: 'riot-result', data: { ok: true, message: riotApiKey ? 'Riot API key saved.' : 'Riot settings saved.' } });
+      break;
+    }
+    case 'riot_test': {
+      (async () => {
+        if (!riotApiKey) {
+          sendWs(ws, { type: 'riot-result', data: { ok: false, message: 'Paste your Riot API key first.' } });
+          return;
+        }
+        const res = await riot.checkKey(riotApiKey, state.riot.platform);
+        state.riot.lastCheckAt = new Date().toISOString();
+        state.riot.lastError = res.ok ? null : res.error;
+        state.riot.keyKind = riot.keyKind(riotApiKey);
+        broadcastFullState();
+        sendWs(ws, { type: 'riot-result', data: {
+          ok: !!res.ok,
+          message: res.ok
+            ? 'Key works — ' + res.platformName + ' reachable.' +
+              (res.keyKind === 'development' ? ' This is a development key, so it stops working 24 hours after you generated it.' : '')
+            : res.error
+        } });
+      })();
+      break;
+    }
+    case 'riot_lookup': {
+      (async () => {
+        const d = msg.data || {};
+        if (!riotApiKey) {
+          sendWs(ws, { type: 'riot-result', data: { ok: false, message: 'Paste your Riot API key first.' } });
+          return;
+        }
+        const out = await riot.lookupPlayer(riotApiKey, {
+          region: state.riot.region, platform: state.riot.platform, riotId: d.riotId || ''
+        });
+        state.riot.lastCheckAt = new Date().toISOString();
+        state.riot.lastError = out.ok ? null : out.error;
+        if (out.ok) {
+          const solo = (out.entries || []).find((e) => e.queue === 'Solo/Duo') || (out.entries || [])[0] || null;
+          state.riot.lastPlayer = {
+            riotId: out.riotId,
+            level: out.summonerLevel,
+            rank: solo ? (solo.tier + ' ' + solo.rank + ' · ' + solo.lp + ' LP (' + solo.wins + 'W ' + solo.losses + 'L)') : '',
+            note: out.note || ''
+          };
+        }
+        broadcastFullState();
+        const p = state.riot.lastPlayer;
+        sendWs(ws, { type: 'riot-result', data: {
+          ok: !!out.ok,
+          message: out.ok
+            ? p.riotId + (p.level != null ? ' · level ' + p.level : '') + (p.rank ? ' · ' + p.rank : '') + (p.note ? ' — ' + p.note : '')
+            : out.error
+        } });
+      })();
+      break;
+    }
+
     // ── Liquipedia (LPDB v3) ────────────────────────────────────────────────
     // Manual-only by design: 60 requests/hour is the whole allowance, so nothing here is
     // triggered by a poll or by an overlay — only by the producer.
@@ -23362,15 +24747,118 @@ function handleControlMessage(msg, ws) {
 
     // ── Challonge ───────────────────────────────────────────────────────────
 
+    // ── Challengermode (challengermode.com — NOT Challonge) ────────────────
+    // Every case keeps its body in braces: a bare let/const between cases in this switch is a
+    // silent TDZ ReferenceError for every case after it (test/switch-scope.test.js).
+    case 'set_challengermode_settings': {
+      const p = msg.data || {};
+      state.challengermode.enabled = !!p.enabled;
+      if (typeof p.tournamentId === 'string') {
+        state.challengermode.tournamentId = parseChallengermodeId(p.tournamentId) || p.tournamentId.trim();
+      }
+      if (typeof p.refreshKey === 'string' && p.refreshKey.trim()) challengermodeRefreshKey = p.refreshKey.trim();
+      if (typeof p.spaceId === 'string') state.challengermode.spaceId = parseChallengermodeId(p.spaceId) || p.spaceId.trim();
+      if (p.pollSec != null) state.challengermode.pollSec = Math.max(10, Math.min(600, Math.round(Number(p.pollSec) || 30)));
+      saveAppState();
+      broadcastFullState();
+      if (state.challengermode.enabled && challengermodeRefreshKey && state.challengermode.tournamentId) {
+        setChallengermodePolling(true);   // re-arms at the new interval
+      }
+      break;
+    }
+    case 'challengermode_test_connection': {
+      (async () => {
+        try {
+          await challengermodeClient().testConnection();
+          state.challengermode.connected = true;
+          state.challengermode.lastError = null;
+          broadcastFullState();
+          sendWs(ws, { type: 'challengermode-result', data: { ok: true, message: 'Connected to Challengermode.' } });
+        } catch (e) {
+          state.challengermode.connected = false;
+          state.challengermode.lastError = e.message;
+          broadcastFullState();
+          sendWs(ws, { type: 'challengermode-result', data: { ok: false, message: e.message } });
+        }
+      })();
+      break;
+    }
+    case 'load_challengermode_tournament': {
+      const raw = (msg.data?.id || state.challengermode.tournamentId || '').trim();
+      if (!raw) { sendWs(ws, { type: 'challengermode-result', data: { ok: false, message: 'Paste a Challengermode tournament link or id.' } }); break; }
+      if (!challengermodeRefreshKey) { sendWs(ws, { type: 'challengermode-result', data: { ok: false, message: 'Add your Challengermode refresh key in Settings first.' } }); break; }
+      (async () => {
+        try {
+          sendWs(ws, { type: 'challengermode-result', data: { ok: true, message: 'Loading tournament…', loading: true } });
+          const r = await loadChallengermodeTournament(raw);
+          state.challengermode.enabled = true;
+          setChallengermodePolling(true);
+          sendWs(ws, { type: 'challengermode-result', data: { ok: true, loaded: true,
+            message: `Loaded "${r.name}" — ${r.teamsCount} entrants, ${r.matchesCount} matches${r.stages > 1 ? `, ${r.stages} stages` : ''}${r.game ? ` (${r.game})` : ''}.` } });
+        } catch (e) {
+          state.challengermode.connected = false;
+          state.challengermode.lastError = e.message;
+          broadcastFullState();
+          sendWs(ws, { type: 'challengermode-result', data: { ok: false, message: e.message } });
+        }
+      })();
+      break;
+    }
+    case 'challengermode_refresh': {
+      (async () => {
+        try {
+          await refreshChallengermodeLive();
+          sendWs(ws, { type: 'challengermode-result', data: { ok: true, message: 'Bracket refreshed.' } });
+        } catch (e) {
+          sendWs(ws, { type: 'challengermode-result', data: { ok: false, message: e.message } });
+        }
+      })();
+      break;
+    }
+    case 'set_challengermode_auto_follow': {
+      state.challengermode.autoFollow = !!msg.data?.enabled;
+      if (state.challengermode.autoFollow) {
+        setActivePlatform('challengermode');   // silence the other platforms' follows
+        setChallengermodePolling(true);
+      }
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+    // Put Challengermode's real finish order on the standings / top-8 board.
+    // 'challengermode-placements' is what tells the poller to keep re-mirroring it.
+    case 'push_challengermode_placements': {
+      const rows = (state.challengermodePlacements.rows || []).slice(0, Math.max(1, Math.min(32, Number(msg.data?.limit) || 8)));
+      if (!rows.length) {
+        sendWs(ws, { type: 'challengermode-result', data: { ok: false, message: 'No finish order yet — Challengermode only assigns a placement once an entrant is out.' } });
+        break;
+      }
+      state.standings.rows = rows.map((r) => ({
+        placement: r.placement, placementText: r.placementText, name: r.name, logo: r.logo || null
+      }));
+      state.standings.source = 'challengermode-placements';
+      state.standings.attribution = '';
+      saveAppState();
+      broadcastFullState();
+      sendWs(ws, { type: 'challengermode-result', data: { ok: true,
+        message: `Top ${rows.length} pushed${state.challengermodePlacements.complete ? '' : ' (tournament still running — it will keep updating)'}.` } });
+      break;
+    }
+
     case 'set_challonge_settings': {
       const p = msg.data || {};
       state.challonge.enabled = !!p.enabled;
       state.challonge.tournamentSlug = (p.tournamentSlug || '').trim();
       if (typeof p.apiKey === 'string' && p.apiKey.trim()) challongeApiKey = p.apiKey.trim();
+      // Poll interval, floored at 15s. Challonge's free plan allows 500 requests a MONTH and each
+      // poll costs three, so this is the dial a producer on a free key needs — see challongeSpend().
+      if (p.pollSec != null) state.challonge.pollSec = Math.max(15, Math.min(600, Math.round(Number(p.pollSec) || 30)));
       saveAppState();
       broadcastFullState();
       if (state.challonge.enabled && challongeApiKey && state.challonge.tournamentSlug) {
-        setChallongePolling(true);
+        setChallongePolling(true);   // re-arms the timer at the new interval
+      } else if (!state.challonge.enabled) {
+        setChallongePolling(false);
       }
       break;
     }
@@ -23407,6 +24895,12 @@ function handleControlMessage(msg, ws) {
     }
 
     case 'clear_active_event': {
+      // The platform that was driving this event keeps polling (and rewriting the bracket / scoreboard)
+      // unless its timer is stopped too — start.gg and FACEIT are handled below.
+      const clearedPlatform = state.activeEvent && state.activeEvent.platform;
+      if (clearedPlatform === 'challonge') setChallongePolling(false);
+      else if (clearedPlatform === 'nxgen') setNxgenPolling(false);
+      else if (clearedPlatform === 'challengermode') setChallengermodePolling(false);
       state.activeEvent = { platform: null, slug: '', name: '', gameName: '', numEntrants: 0, format: '', url: '', loadedAt: null };
       // The title itself stays on air (clearing the event shouldn't blank the overlay mid-show), but
       // it's no longer tied to an event — loading that same event again pulls its name fresh.
@@ -23475,6 +24969,22 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
+    // Put Challonge's real finish order on the standings/top-8 board. 'challonge-placements' is
+    // what tells refreshChallongeLive() to keep re-mirroring it as the bracket resolves.
+    case 'push_challonge_placements': {
+      const rows = (state.challongePlacements.rows || []).slice(0, Math.max(1, Math.min(32, Number(msg.data?.limit) || 8)));
+      if (!rows.length) {
+        ws.send(JSON.stringify({ type: 'challonge-result', data: { ok: false, message: 'No finish order yet — Challonge only fills a placement once a player is eliminated.' } }));
+        break;
+      }
+      state.standings.rows = rows.map((r) => ({ placement: r.placement, name: r.name, logo: r.logo || null }));
+      state.standings.source = 'challonge-placements';
+      state.standings.attribution = '';
+      saveAppState();
+      broadcastFullState();
+      ws.send(JSON.stringify({ type: 'challonge-result', data: { ok: true, message: `Top ${rows.length} pushed${state.challongePlacements.complete ? '' : ' (bracket still running — it will keep updating)'}.` } }));
+      break;
+    }
     case 'challonge_refresh': {
       (async () => {
         try {
@@ -23581,6 +25091,7 @@ function handleControlMessage(msg, ws) {
       saveAppState();
       broadcastFullState();
       if (state.nxgen.enabled && nxgenApiKey && state.nxgen.eventSlug) setNxgenPolling(true);
+      else if (!state.nxgen.enabled) setNxgenPolling(false);
       break;
     }
 
@@ -23737,6 +25248,7 @@ function handleControlMessage(msg, ws) {
       saveAppState();
       broadcastFullState();
       if (state.faceit.enabled && faceitApiKey && state.faceit.competitionId) setFaceitPolling(true);
+      else if (!state.faceit.enabled) setFaceitPolling(false);
       break;
     }
 
@@ -23923,6 +25435,20 @@ function handleControlMessage(msg, ws) {
 
     case 'set_rl_sponsor_roll': {
       state.rlSponsorRoll = !!(msg.data && msg.data.on);
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    case 'set_worlds_sidebar': {
+      state.worldsSidebar = sanitizeWorldsSidebar(msg.data || {});
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    case 'set_worlds_ticker': {
+      state.worldsTicker = !!(msg.data && msg.data.on);
       saveAppState();
       broadcastFullState();
       break;
@@ -25497,6 +27023,16 @@ function handleControlMessage(msg, ws) {
   }
 }
 
+// Normalise a Game Config bundle against the game's BUILT-IN maps + roster (ids, blank overrides,
+// image bounds) — see backend/game-config.js.
+function normalizeGameConfigFor(bundle) {
+  const game = String((bundle && bundle.game) || '');
+  return gameConfigData.normalizeGameConfig(bundle, {
+    maps: vetoData.mapPool(game) || [],
+    characters: (draftData.ROSTERS && draftData.ROSTERS[game]) || []
+  });
+}
+
 function sendImportExportResult(ws, result, message, context) {
   ws.send(JSON.stringify({
     type: 'import-export-result',
@@ -25517,7 +27053,10 @@ function mergeAtTop(savedArray, importedArray, isSameItem) {
 // the first time they see it and thereafter accept a compact "@img:<hash>" reference. This strips the
 // bytes off every subsequent broadcast for those clients — big win for remote overlays. Legacy clients
 // (no script / didn't opt in) get the untouched payload, so nothing regresses.
-const _imgSent = new Set();
+// What each client has ALREADY RECEIVED lives on the socket (ws._imgSent), not in one global set.
+// A global set broke logos on real shows: an overlay that connected or reloaded later only got
+// the images in its connect snapshot, so a logo that came back afterwards (team X plays again,
+// brand kit switched back) arrived as an "@img:" ref that overlay had never seen.
 function _imgHash(s) { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36) + '.' + s.length; }
 // A manual scan instead of one regex over the whole payload — the previous version matched
 // [A-Za-z0-9+/=]{1024,}" directly against each base64 run, and a full-resolution logo can run
@@ -25527,9 +27066,11 @@ function _imgHash(s) { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h 
 // visibility change. indexOf() has no equivalent risk: base64 never contains an unescaped '"', so
 // the first quote after the "data:image/...;base64, prefix IS the payload's real end — no
 // backtracking, and no regex ever runs over the (huge) payload itself.
-function _vaultImages(str) {
+// Split a payload ONCE into plain text runs and vaultable images: { parts: [string | {h, val}], hashes }.
+// Returns null when it holds no image worth vaulting.
+function _imgSegments(str) {
   const PREFIX_RE = /"data:image\/[a-z0-9.+-]+;base64,/gi;   // matches only the short prefix, never the payload
-  let out = '';
+  const parts = [], hashes = [];
   let lastIndex = 0;
   let m;
   while ((m = PREFIX_RE.exec(str))) {
@@ -25538,16 +27079,42 @@ function _vaultImages(str) {
     if (endQuote === -1) { PREFIX_RE.lastIndex = dataStart; continue; }   // malformed/truncated — leave it, keep scanning
     const b64 = str.slice(dataStart, endQuote);
     if (b64.length < 1024) { PREFIX_RE.lastIndex = endQuote + 1; continue; }   // too small to bother vaulting
-    out += str.slice(lastIndex, m.index);
-    const val = m[0].slice(1) + b64;   // same string the old regex hashed: data:image/...;base64,XXXX (no quotes)
+    parts.push(str.slice(lastIndex, m.index));
+    const val = m[0].slice(1) + b64;   // data:image/...;base64,XXXX (no quotes) — what the client hashes
     const h = _imgHash(val);
-    if (_imgSent.has(h)) out += '"@img:' + h + '"';
-    else { _imgSent.add(h); out += '"' + val + '"'; }
+    parts.push({ h, val }); hashes.push(h);
     lastIndex = endQuote + 1;
     PREFIX_RE.lastIndex = lastIndex;
   }
-  out += str.slice(lastIndex);
+  if (!hashes.length) return null;
+  parts.push(str.slice(lastIndex));
+  return { parts, hashes };
+}
+// Render a segmented payload for ONE client: images it already holds become "@img:<hash>", the rest
+// go in full and are recorded as held. `memo` shares the rendered string between clients that are
+// missing the same images (normally every client, so it is built once per broadcast).
+function _vaultFor(seg, ws, memo) {
+  if (!ws._imgSent) ws._imgSent = new Set();
+  const sent = ws._imgSent;
+  const key = seg.hashes.filter((h) => !sent.has(h)).join(',');
+  let out = memo.get(key);
+  if (out === undefined) {
+    out = '';
+    const inThisMsg = new Set();
+    for (const p of seg.parts) {
+      if (typeof p === 'string') { out += p; continue; }
+      if (sent.has(p.h) || inThisMsg.has(p.h)) out += '"@img:' + p.h + '"';
+      else { inThisMsg.add(p.h); out += '"' + p.val + '"'; }
+    }
+    memo.set(key, out);
+  }
+  for (const h of seg.hashes) sent.add(h);
   return out;
+}
+// A client was just sent `str` un-vaulted (connect snapshot, resync): it now holds those images.
+function _seedImgSent(ws, str) {
+  try { const seg = _imgSegments(str); if (!seg) return; if (!ws._imgSent) ws._imgSent = new Set(); seg.hashes.forEach((h) => ws._imgSent.add(h)); }
+  catch (_) { /* seeding is an optimisation only */ }
 }
 // Diagnostic — only ever runs AFTER JSON.stringify has already thrown, so its O(n) cost is moot.
 // Locates the first circular reference or pathologically deep chain in `root` and returns a
@@ -25596,6 +27163,7 @@ function _logSerializeFailure(text, err) {
 }
 let _bcTimer = null, _bcPending = false, _lastLibSig = '', _lastMsgStr = '';
 function _flushFullState() {
+  try { syncOwDraftMap(); } catch (e) { console.warn('[draft] OW map sync failed:', e.message); }
   let data, realStr;
   try {
     data = buildLiveState();
@@ -25624,15 +27192,21 @@ function _flushFullState() {
   // Build the vaulted variant once, only if some connected client can use it. Belt-and-suspenders:
   // vaulting is a bandwidth optimization, never something worth crashing the broadcast over — if it
   // ever throws for any reason, log it and fall through to sending every client the untouched string.
-  let vaultStr = null;
+  let seg = null;
   for (const ws of bridgeClients) {
     if (ws._imgvault) {
-      try { vaultStr = _vaultImages(realStr); } catch (e) { _logSerializeFailure(`_vaultImages: ${e.message}`, e); }
+      try { seg = _imgSegments(realStr); } catch (e) { _logSerializeFailure(`_imgSegments: ${e.message}`, e); }
       break;
     }
   }
+  const memo = new Map();
   for (const ws of bridgeClients) {
-    if (ws.readyState === WebSocket.OPEN) ws.send(ws._imgvault && vaultStr ? vaultStr : realStr);
+    if (ws.readyState !== WebSocket.OPEN) continue;
+    let out = realStr;
+    if (ws._imgvault && seg) {
+      try { out = _vaultFor(seg, ws, memo); } catch (e) { out = realStr; _logSerializeFailure(`_vaultFor: ${e.message}`, e); }
+    }
+    ws.send(out);
   }
   feedDirectorBroadcast();
 }
@@ -25654,6 +27228,10 @@ function broadcastFullState() {
 // ─── HTTP Server (port 3000) — serves overlay ────────────────────────────────
 function startHttpServer(baseDir) {
   const app = express();
+  // FIRST middleware: refuse requests from foreign web pages (any site in the producer's browser
+  // could otherwise read state and fetch the WS token) and answer CORS for allowed callers.
+  // See backend/origin-guard.js for who is allowed.
+  app.use(originGuardMiddleware((m) => console.warn(m)));
   const overlayDir = path.join(baseDir, 'overlay');
   const overridesDir = path.join(dataDir, 'overlay-overrides');
   overlayEditor = createOverlayEditor({ overlayDir, overridesDir });
@@ -25666,6 +27244,16 @@ function startHttpServer(baseDir) {
   // overlay, not just the ones that load scene-base.js (19 didn't, so the control silently did
   // nothing on the main HUD, upcoming, credits, valorant, lol, apex, pulse…). It MUST come after
   // sticky-logos so its WebSocket wrapper sits outside sticky's and observes restored frames.
+  // The bare address (and /index.html) used to be the Classic RL HUD, retired 2026-10. Plenty of OBS
+  // scenes still point at http://localhost:3000/, so send them to the React HUD (query kept, e.g.
+  // ?only=scoreboard). A redirect, not a rewrite: the page's real path is then /rl-hud.html, which
+  // per-overlay settings (background fill, HTML overrides) are keyed on.
+  app.get(['/', '/index.html'], (req, res) => {
+    const q = req.originalUrl.indexOf('?');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.redirect(302, '/rl-hud.html' + (q >= 0 ? req.originalUrl.slice(q) : ''));
+  });
+
   const _stickyTag = '<script src="/sticky-logos.js"></script>\n  <script src="/scene-bg.js"></script>';
   const _resolveOverlayHtml = (reqPath) => {
     const ov = overlayEditor.resolveFileForRequest(reqPath);
@@ -25677,6 +27265,14 @@ function startHttpServer(baseDir) {
     return fs.existsSync(full) ? full : null;
   };
   app.get(/^\/([^?]*\.html)?$/i, (req, res, next) => {
+    // A ?preview=1 URL pasted into an OBS Browser Source must not put sample data on air — see
+    // backend/obs-preview-guard.js. Redirect (not rewrite) so location.search is clean for the
+    // overlays that parse ?preview themselves.
+    const live = obsPreviewRedirect(req.originalUrl, req.headers['user-agent']);
+    if (live) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      return res.redirect(302, live);
+    }
     const file = _resolveOverlayHtml(req.path);
     if (!file || !/\.html$/i.test(file)) return next();
     fs.readFile(file, 'utf8', (err, html) => {
@@ -25698,13 +27294,6 @@ function startHttpServer(baseDir) {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     return res.sendFile(file);
   });
-  app.get('/', (req, res, next) => {
-    const file = overlayEditor.resolveFileForRequest('/');
-    if (!file) return next();
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    return res.sendFile(file);
-  });
-
   app.get('/api/overlay/source', async (req, res) => {
     try {
       const data = await overlayEditor.getSource(req.query.path || '/');
@@ -26026,9 +27615,9 @@ function startHttpServer(baseDir) {
     if (!s) return res.status(404).json({ ok: false, message: 'not found' });
     res.json({ ok: true, session: s });
   });
-  app.post('/api/analytics/start', (req, res) => res.json({ ok: true, live: analytics.startSession(req.body && req.body.label) }));
+  app.post('/api/analytics/start', express.json({ limit: '2mb' }), (req, res) => res.json({ ok: true, live: analytics.startSession(req.body && req.body.label) }));
   app.post('/api/analytics/stop', (req, res) => res.json({ ok: true, session: analytics.stopSession() }));
-  app.post('/api/analytics/auto', (req, res) => { analytics.setAuto(!(req.body && req.body.on === false)); res.json({ ok: true, auto: analytics.getAuto() }); });
+  app.post('/api/analytics/auto', express.json({ limit: '2mb' }), (req, res) => { analytics.setAuto(!(req.body && req.body.on === false)); res.json({ ok: true, auto: analytics.getAuto() }); });
   app.delete('/api/analytics/session/:id', (req, res) => { analytics.deleteSession(req.params.id); res.json({ ok: true, sessions: analytics.getSessions() }); });
   // Clear ALL broadcast sessions (fresh reporting).
   app.delete('/api/analytics/sessions', (req, res) => { try { analytics.clearAllSessions(); } catch (e) {} res.json({ ok: true, sessions: analytics.getSessions() }); });
@@ -26075,7 +27664,7 @@ function startHttpServer(baseDir) {
 
   // ── Import historical results from the producer's own start.gg tournaments ──
   // Runs in the background; progress + final summary are pushed over WS ('startgg_import').
-  app.post('/api/stats/import-startgg', (req, res) => {
+  app.post('/api/stats/import-startgg', express.json({ limit: '2mb' }), (req, res) => {
     if (!startggApiToken) return res.status(400).json({ ok: false, message: 'Connect start.gg in Settings first.' });
     if (_startggImportRunning) return res.status(409).json({ ok: false, message: 'An import is already running.' });
     const nameQuery = (req.body && req.body.nameQuery || 'rocket rush').toString().slice(0, 80);
@@ -26091,7 +27680,7 @@ function startHttpServer(baseDir) {
   });
 
   // Import ONE searched start.gg event (find-and-add) into the stats DB.
-  app.post('/api/stats/import-startgg-event', (req, res) => {
+  app.post('/api/stats/import-startgg-event', express.json({ limit: '2mb' }), (req, res) => {
     if (!startggApiToken) return res.status(400).json({ ok: false, message: 'Connect start.gg in Settings first.' });
     if (_startggImportRunning) return res.status(409).json({ ok: false, message: 'An import is already running.' });
     const eventId = req.body && req.body.eventId;
@@ -26518,6 +28107,34 @@ function startHttpServer(baseDir) {
   });
 
 
+  // ── Overwolf GEP → Valorant live game data ─────────────────────────────
+  // Same relay pattern as /api/ow-gep and /api/mr-gep. Valorant has no first-party live feed of
+  // any kind — no GSI, and its local client API serves nothing resembling match state — so
+  // Overwolf is the route. GEP reads the LOCAL client, so the relay PC must be in the match; an
+  // observer seat counts, and match_info.observing names who that seat is watching.
+  // Body shape and the fields Valorant does NOT expose: backend/integrations/valorant-gep.js.
+  app.post('/api/val-gep', express.json({ limit: '64kb' }), (req, res) => {
+    try {
+      applyValorantGep(req.body || {});
+      // The watchdog is what turns the HUD's "not detected" badge back on when the relay stops.
+      // Start it on first contact so a producer who never switched the app to Valorant still
+      // gets an honest scoreboard rather than a frozen one.
+      startValorantWatchdog();
+      const VAL_EVENT_TRIGGERS = { match_start: 'val_match_start', match_end: 'val_match_end',
+        spike_planted: 'val_spike_planted', spike_defused: 'val_spike_defused', spike_detonated: 'val_spike_detonated' };
+      (Array.isArray(req.body && req.body.events) ? req.body.events : []).forEach((ev) => {
+        const name = String((typeof ev === 'string' ? ev : (ev && ev.name)) || '').toLowerCase();
+        const trig = VAL_EVENT_TRIGGERS[name];
+        if (trig) flowBus.emit(trig, { map: state.valorant.map.displayName || null, round: state.valorant.round.number,
+          score: { a: state.valorant.order.score, b: state.valorant.chaos.score } });
+      });
+      res.json({ ok: true });
+    } catch (e) {
+      console.error('[val-gep] relay update failed:', e && e.message);
+      res.status(400).json({ ok: false, message: e && e.message });
+    }
+  });
+
   // ── In-app bug report → Discord webhook + GitHub Issues + website ticket ─────
   // This route is registered before the global express.json() below, so it needs
   // its own body parser — otherwise req.body is empty and reports look blank.
@@ -26805,6 +28422,14 @@ function startHttpServer(baseDir) {
 
   // Serve userData (clips, logos, exports) — with CORS so the control-panel can
   // draw clip frames to canvas for thumbnails (file:// → localhost cross-origin).
+  // /data exists to serve MEDIA (clips, the media library). The folder also holds state.json, the
+  // cloud session and the WS token — never hand those out: no root-level files, no data files.
+  app.use('/data', (req, res, next) => {
+    let p = '';
+    try { p = decodeURIComponent(req.path || ''); } catch (_) { return res.status(400).end(); }
+    if (p.indexOf('/', 1) < 0 || /\.(json|bak|tmp|log|db|sqlite|env)$/i.test(p)) return res.status(404).end();
+    next();
+  });
   app.use('/data', express.static(dataDir, {
     setHeaders: (res) => {
       res.setHeader('Access-Control-Allow-Origin', '*');
@@ -27014,6 +28639,9 @@ function startHttpServer(baseDir) {
     try {
       const { filePath, label } = req.body || {};
       if (!filePath) return res.status(400).json({ ok: false, message: 'filePath required' });
+      // The import COPIES the file into data/clips, which is served over HTTP — so only video files,
+      // never an arbitrary local file.
+      if (typeof filePath !== 'string' || !/\.(mp4|mkv|mov|flv|webm|ts|m4v|avi)$/i.test(filePath)) return res.status(400).json({ ok: false, message: 'Not a video file' });
       if (!fs.existsSync(filePath)) return res.status(400).json({ ok: false, message: 'File not found' });
       if (!clipSystem) return res.status(503).json({ ok: false, message: 'Clip system not ready' });
 
@@ -27059,19 +28687,8 @@ function startHttpServer(baseDir) {
     res.json({ ok: true, jobId });
   });
 
-  // The control panel runs from a file:// origin (Electron loadFile), so allow it to
-  // read these localhost-only API responses cross-origin.
-  app.use((req, res, next) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    // DELETE was missing, which silently blocked every REST delete route on this server from the
-    // control panel: the panel is a file:// page, so a DELETE is a non-simple cross-origin request
-    // and the browser refuses to send it once the preflight comes back without DELETE listed. The
-    // fetch then rejects, or falls through to an HTML error page ("Unexpected token < in JSON").
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    if (req.method === 'OPTIONS') return res.sendStatus(204);
-    next();
-  });
+  // CORS for the file:// control panel (incl. DELETE in the preflight) is answered by the origin
+  // guard registered first in startHttpServer — it covers every route, not just the ones below.
 
   // Hands the WS bridge auth token to same-host clients (control panel + overlay browser
   // sources) so they can open ws://…:3001/?token=… — see getOrCreateWsToken() / the
@@ -27116,7 +28733,7 @@ function startHttpServer(baseDir) {
   // (state.pulse.publish) + only when the cloud is linked — otherwise a no-op. Stops publishing (and
   // clears the row) when disabled. The teams come from the shared library, the score/clock from live
   // state, so an observer keys in nothing beyond flipping the toggle.
-  const PULSE_UNIT = { 'rocket-league': 'g', 'csgo': 'rd', 'valorant': 'rd', 'rainbow6': 'rd', 'cod': 'rd', 'overwatch': 'pt', 'marvel-rivals': 'pt', 'league': 'pt', 'dota2': 'pt', 'mobile-legends': 'pt', 'honor-of-kings': 'pt', 'bedwars': 'pt', 'the-finals': 'pt' };
+  const PULSE_UNIT = { 'rocket-league': 'g', 'csgo': 'rd', 'valorant': 'rd', 'rainbow6': 'rd', 'cod': 'rd', 'overwatch': 'pt', 'marvel-rivals': 'pt', 'league': 'pt', 'dota2': 'pt', 'mobile-legends': 'pt', 'honor-of-kings': 'pt', 'bedwars': 'pt', 'the-finals': 'pt', 'brawlhalla': 'st' };
   // Short crest label for grid tiles: an acronym for multi-word names ("Team BDS" -> TBD is wrong,
   // so drop filler words), otherwise the first 3 letters.
   const PULSE_FILLER = new Set(['team', 'the', 'esports', 'esport', 'gaming', 'gg', 'club', 'academy']);
@@ -27153,8 +28770,8 @@ function startHttpServer(baseDir) {
         teams: {
           // score = the LIVE map/game score (each producer's own HUD shows it too); series = maps won,
           // which is what a GRID-style tile bar puts next to the crests.
-          a: { name: blue.name || 'Team A', abbr: pulseAbbr(blue.name), logo: blue.logo || null, color: blue.color || null, score: Number(live.blueScore || 0), series: Number(ser.blue || 0) },
-          b: { name: orange.name || 'Team B', abbr: pulseAbbr(orange.name), logo: orange.logo || null, color: orange.color || null, score: Number(live.orangeScore || 0), series: Number(ser.orange || 0) }
+          a: { name: blue.name || 'Team A', abbr: blue.abbr || pulseAbbr(blue.name), logo: blue.logo || null, color: blue.color || null, score: Number(live.blueScore || 0), series: Number(ser.blue || 0) },
+          b: { name: orange.name || 'Team B', abbr: orange.abbr || pulseAbbr(orange.name), logo: orange.logo || null, color: orange.color || null, score: Number(live.orangeScore || 0), series: Number(ser.orange || 0) }
         },
         clock: Number(live.time || 0),
         status: (state.roundLabel || (state.match && state.match.format) || '').toString().slice(0, 60),
@@ -28032,6 +29649,181 @@ function startHttpServer(baseDir) {
 
   // ── Challonge API routes ──────────────────────────────────────────────────
 
+  // ── Challengermode (challengermode.com) ────────────────────────────────────
+  // NOT Challonge. GraphQL behind a bot token — see backend/integrations/challengermode-client.js.
+
+  // Verify the refresh key without touching tournament data.
+  app.post('/api/challengermode/test-token', async (req, res) => {
+    const key = (req.body?.refreshKey || challengermodeRefreshKey || '').trim();
+    if (!key) return res.status(400).json({ ok: false, error: 'Refresh key required' });
+    try {
+      const client = (key === challengermodeRefreshKey) ? challengermodeClient() : createChallengermodeClient(key);
+      await client.testConnection();
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(400).json({ ok: false, error: e.message });
+    }
+  });
+
+  // Browse tournaments to load. Two ways in, because organisers think in both:
+  //   spaceId  → "my organisation's tournaments"
+  //   gameSlug → "every open tournament for this game"
+  app.post('/api/challengermode/tournaments', async (req, res) => {
+    if (!challengermodeRefreshKey) return res.status(400).json({ ok: false, error: 'Challengermode refresh key required' });
+    const spaceId = parseChallengermodeId(req.body?.spaceId || '') || '';
+    const gameSlug = String(req.body?.gameSlug || '').trim();
+    const completed = !!req.body?.completed;
+    // The filter is a @oneOf input — exactly one selector, never both.
+    const tournamentFilter = completed ? { completedTournamentSelector: {} } : { openTournamentSelector: {} };
+    try {
+      let rows = [];
+      if (spaceId) {
+        const d = await challengermodeClient().query(cmData.SPACE_QUERY, {
+          input: { spaceId, tournamentFilter, includeUnlisted: true, includeInviteOnly: true }
+        });
+        rows = (d && d.tournamentsForSpace) || [];
+      } else if (gameSlug) {
+        const d = await challengermodeClient().query(cmData.SEARCH_QUERY, {
+          input: { gameSlug, tournamentFilter }
+        });
+        rows = (d && d.tournamentsForGame) || [];
+      } else {
+        return res.status(400).json({ ok: false, error: 'Give a Space id (your organisation) or a game slug.' });
+      }
+      res.json({
+        ok: true,
+        tournaments: rows.map((t) => ({
+          id: t.id,
+          name: t.name || '',
+          state: t.state || '',
+          gameName: (t.gameTitle && (t.gameTitle.title || t.gameTitle.slug)) || '',
+          gameSlug: (t.gameTitle && t.gameTitle.slug) || '',
+          // Which of OUR games it is, so the picker can show what loading it will switch to.
+          gameId: resolveGameId((t.gameTitle && t.gameTitle.slug) || (t.gameTitle && t.gameTitle.title) || '', Object.keys(GAMES)),
+          entrants: (((t.attendance || {}).roster || {}).lineupCount) || 0,
+          url: `https://www.challengermode.com/tournaments/${t.id}`
+        }))
+      });
+    } catch (e) {
+      res.status(502).json({ ok: false, error: e.message });
+    }
+  });
+
+  // One tournament's detail, for the confirm step before loading it.
+  app.post('/api/challengermode/tournament-detail', async (req, res) => {
+    if (!challengermodeRefreshKey) return res.status(400).json({ ok: false, error: 'Challengermode refresh key required' });
+    const id = parseChallengermodeId(req.body?.id || '');
+    if (!id) return res.status(400).json({ ok: false, error: 'Paste a Challengermode tournament link or id.' });
+    try {
+      const t = await fetchChallengermodeTournament(id, { live: false });
+      const series = cmData.allSeries(t);
+      res.json({
+        ok: true,
+        tournament: {
+          id: t.id, name: t.name || '', state: t.state || '',
+          gameName: (t.gameTitle && (t.gameTitle.title || t.gameTitle.slug)) || '',
+          gameId: resolveGameId((t.gameTitle && t.gameTitle.slug) || '', Object.keys(GAMES)),
+          stages: (t.stages || []).map((st) => ({ index: st.index, format: st.format })),
+          entrants: (((t.attendance || {}).roster || {}).lineupCount) || 0,
+          url: `https://www.challengermode.com/tournaments/${id}`
+        },
+        entrants: cmData.buildEventTeams(t).map((x) => ({ name: x.name, seed: x.seed, logo: x.logo })),
+        matches: series.length,
+        live: series.filter((x) => x.state === 'RUNNING').length,
+        placements: cmData.buildPlacements(t, 8).rows.length
+      });
+    } catch (e) {
+      res.status(502).json({ ok: false, error: e.message });
+    }
+  });
+
+  // ── Brawlhalla API (api.brawlhalla.com v1) ─────────────────────────────────
+  // No API key — v1 dropped the key requirement — so these routes work out of the box. Budget is
+  // 2000 requests / 5 min; backend/brawlhalla.js caches so a panel polling these can't blow it.
+  //
+  // There is NO live match feed for Brawlhalla. These routes serve the IDENTITY layer (who this
+  // player is, how they rank, what they play); stocks and the legend on air stay producer-driven.
+
+  // Find a player by name. This is a ranked-LEADERBOARD search — the only name lookup v1 has — so
+  // an unranked player genuinely cannot be found this way. `hits: []` means "not on the ladder",
+  // not "lookup failed"; the response says so in `note` for the panel to print.
+  app.post('/api/brawlhalla/search', async (req, res) => {
+    const q = String(req.body?.query || '').trim();
+    if (!q) return res.status(400).json({ ok: false, error: 'query required' });
+    try {
+      const hits = await brawlhalla().searchPlayers(q, {
+        mode: req.body?.mode || '1v1',
+        region: req.body?.region || state.brawlhalla.region || 'ALL',
+        limit: Math.min(25, Number(req.body?.limit) || 10)
+      });
+      res.json({ ok: true, hits, note: hits.length ? '' : 'No ranked player by that name. Brawlhalla can only be searched through the ranked leaderboard, so an unranked player will not appear — link them by Brawlhalla ID instead.' });
+    } catch (e) {
+      res.status(502).json({ ok: false, error: e.message });
+    }
+  });
+
+  // One player's ranked card (ELO, tier, peak, ranks, season W/L, most-played legends).
+  app.post('/api/brawlhalla/card', async (req, res) => {
+    const id = Number(req.body?.brawlhallaId) || 0;
+    if (!id) return res.status(400).json({ ok: false, error: 'brawlhallaId required' });
+    try {
+      const card = await brawlhalla().playerCard(id, { mode: req.body?.mode || state.brawlhalla.rankMode, force: !!req.body?.force });
+      if (!card) return res.json({ ok: true, card: null, note: 'No ranked record for that Brawlhalla ID this season.' });
+      res.json({ ok: true, card });
+    } catch (e) {
+      res.status(502).json({ ok: false, error: e.message });
+    }
+  });
+
+  // A region's ranked ladder — a standings/top-N board that needs no bracket at all.
+  app.post('/api/brawlhalla/leaderboard', async (req, res) => {
+    try {
+      const r = await brawlhalla().leaderboard({
+        mode: req.body?.mode || '1v1',
+        region: req.body?.region || state.brawlhalla.region || 'ALL',
+        page: Number(req.body?.page) || 1,
+        limit: Math.min(50, Number(req.body?.limit) || 25),
+        orderBy: req.body?.orderBy || ''
+      });
+      res.json({ ok: true, ...r });
+    } catch (e) {
+      res.status(502).json({ ok: false, error: e.message });
+    }
+  });
+
+  // Push a ranked ladder straight onto the standings board. The board is game-agnostic, so this is
+  // the same graphic every other source fills — it just arrives from a ladder instead of a bracket.
+  app.post('/api/brawlhalla/push-leaderboard', async (req, res) => {
+    try {
+      const region = String(req.body?.region || state.brawlhalla.region || 'ALL').toUpperCase();
+      const mode = req.body?.mode || '1v1';
+      const limit = Math.min(50, Number(req.body?.limit) || 8);
+      const r = await brawlhalla().leaderboard({ mode, region, limit });
+      state.standings.rows = r.rows.map((row) => ({
+        placement: row.placement, name: row.name, wins: row.wins, losses: row.losses, points: row.rating
+      }));
+      state.standings.source = 'manual';   // a one-shot snapshot: nothing re-mirrors a ladder
+      state.standings.title = state.standings.title || `Brawlhalla ${mode} — ${region === 'ALL' ? 'Global' : region}`;
+      state.standings.subtitle = 'Ranked ladder';
+      state.standings.attribution = 'Brawlhalla Ranked';
+      saveAppState();
+      broadcastFullState();
+      res.json({ ok: true, rows: state.standings.rows.length });
+    } catch (e) {
+      res.status(502).json({ ok: false, error: e.message });
+    }
+  });
+
+  // The static legend table. The shipped overlay/brawlhalla-legends.js is the offline copy of
+  // this — the route exists so assets/fetch-brawlhalla-legends.js can regenerate it after a patch.
+  app.get('/api/brawlhalla/legends', async (req, res) => {
+    try {
+      res.json({ ok: true, legends: await brawlhalla().legends({ force: req.query.force === '1' }) });
+    } catch (e) {
+      res.status(502).json({ ok: false, error: e.message });
+    }
+  });
+
   app.post('/api/challonge/test-token', async (req, res) => {
     const key = (req.body?.apiKey || challongeApiKey || '').trim();
     if (!key) return res.status(400).json({ error: 'API key required' });
@@ -28593,7 +30385,7 @@ function startHttpServer(baseDir) {
     try { eventSubService.stop(); } catch (e) { console.error('[EventSub] stop failed:', e.message); }
 
     saveTwitchData();
-    broadcast(bridgeClients, { type: 'full_state', data: state });
+    broadcastFullState();
 
     res.json({ success: true, message: 'Disconnected' });
   });
@@ -28843,6 +30635,8 @@ function startHttpServer(baseDir) {
   // much. scene-base.js samples this and offsets. Deliberately not in full_state: a value that
   // changes every tick would churn the broadcast payload for something only clients need on connect.
   app.get('/api/time', (req, res) => res.json({ now: Date.now() }));
+  // Promo strip campaigns (control panel only; see backend/promos.js).
+  app.get('/api/promos', (req, res) => res.json({ promos: appPromos.list() }));
 
   app.get('/api/oauth/discord/status', (req, res) => {
     res.json({
@@ -28944,7 +30738,7 @@ function startHttpServer(baseDir) {
   app.get('/api/oauth/discord/callback', async (req, res) => {
     const { code, state: stateParam, error, error_description } = req.query;
     if (error) {
-      return res.send(`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>NE Broadcast Suite</title><style>*{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:#111318;color:#e8eaf0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;display:flex;align-items:center;justify-content:center}.card{background:#1a1d24;border:1px solid #2a2e3a;border-radius:16px;padding:40px 36px;text-align:center;width:320px;animation:fadeIn .3s ease-out}.logo{width:36px;height:36px;object-fit:contain;margin-bottom:20px;opacity:.85}.ring{width:64px;height:64px;border-radius:50%;background:rgba(245,101,101,.1);border:2px solid rgba(245,101,101,.3);display:flex;align-items:center;justify-content:center;margin:0 auto 20px}.title{font-size:17px;font-weight:600;margin-bottom:8px}.msg{font-size:13px;color:#6b7280;margin-bottom:24px;line-height:1.5}.btn{background:#2a2e3a;border:none;color:#e8eaf0;padding:8px 20px;border-radius:8px;font-size:13px;cursor:pointer}.btn:hover{background:#333740}@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}</style></head><body><div class="card"><img src="/assets/images/small.png" class="logo" alt=""><div class="ring"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#f56565" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></div><div class="title">Discord Error</div><div class="msg">${error_description || error}</div><button class="btn" onclick="window.close()">Close Window</button></div></body></html>`);
+      return res.send(`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>NE Broadcast Suite</title><style>*{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:#111318;color:#e8eaf0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;display:flex;align-items:center;justify-content:center}.card{background:#1a1d24;border:1px solid #2a2e3a;border-radius:16px;padding:40px 36px;text-align:center;width:320px;animation:fadeIn .3s ease-out}.logo{width:36px;height:36px;object-fit:contain;margin-bottom:20px;opacity:.85}.ring{width:64px;height:64px;border-radius:50%;background:rgba(245,101,101,.1);border:2px solid rgba(245,101,101,.3);display:flex;align-items:center;justify-content:center;margin:0 auto 20px}.title{font-size:17px;font-weight:600;margin-bottom:8px}.msg{font-size:13px;color:#6b7280;margin-bottom:24px;line-height:1.5}.btn{background:#2a2e3a;border:none;color:#e8eaf0;padding:8px 20px;border-radius:8px;font-size:13px;cursor:pointer}.btn:hover{background:#333740}@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}</style></head><body><div class="card"><img src="/assets/images/small.png" class="logo" alt=""><div class="ring"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#f56565" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></div><div class="title">Discord Error</div><div class="msg">${String(error_description || error || '').replace(/[<>&"']/g, '')}</div><button class="btn" onclick="window.close()">Close Window</button></div></body></html>`);
     }
     if (!code) {
       return res.status(400).send('Missing authorization code');
@@ -29341,7 +31135,7 @@ function startHttpServer(baseDir) {
       try { analytics.event('wheel_spin'); } catch (e) {}
 
       // Broadcast spin state
-      broadcast(bridgeClients, { type: 'full_state', data: state });
+      broadcastFullState();
       saveTwitchData();
 
       res.json({
@@ -29366,7 +31160,7 @@ function startHttpServer(baseDir) {
 
     try {
       wheelManager.clearParticipants();
-      broadcast(bridgeClients, { type: 'full_state', data: state });
+      broadcastFullState();
       saveTwitchData();
 
       res.json({ success: true, message: 'Participants cleared' });
@@ -29977,6 +31771,24 @@ function startHttpServer(baseDir) {
   });
   httpServer.keepAliveTimeout = 2000;
   httpServer.headersTimeout = 3000;
+
+  // IPv6 loopback twin. "localhost" resolves to ::1 FIRST on Windows, and the IPv4-only bind above never
+  // answers there — so when any other dev server holds port 3000 on all interfaces (a Next/Vite dev server
+  // is the classic one), http://localhost:3000/live.html (or any overlay URL typed with "localhost") is served
+  // by THAT program and comes back as its 404 page, while http://127.0.0.1:3000 works. Binding ::1 as well
+  // takes precedence over their wildcard listener on the same port (measured), so both spellings reach us.
+  // Best-effort only: no IPv6 stack, or ::1 already taken, must never stop the app — IPv4 is the real listener.
+  try {
+    httpServer6 = require('http').createServer(app);
+    httpServer6.on('error', (err) => {
+      console.warn('[HTTP] IPv6 loopback listener unavailable (' + (err && err.code || err) + ') — use http://127.0.0.1:' + HTTP_PORT + ' if "localhost" misbehaves.');
+      try { httpServer6.close(); } catch (e) {}
+      httpServer6 = null;
+    });
+    httpServer6.keepAliveTimeout = 2000;
+    httpServer6.headersTimeout = 3000;
+    httpServer6.listen(HTTP_PORT, '::1');
+  } catch (e) { httpServer6 = null; }
 }
 
 // ─── Start ───────────────────────────────────────────────────────────────────
@@ -30212,7 +32024,7 @@ module.exports.start = function(baseDir) {
   startBridgeServer();
   bootMark('startBridgeServer');
   connectToRL();
-  if (state.activeGame === 'valorant') startValorantPolling();
+  if (state.activeGame === 'valorant') startValorantWatchdog();
   if (state.activeGame === 'league') startLolPolling();
   if (state.activeGame === 'apex') startApexServer();
   startResourceWatchdog();
@@ -30249,6 +32061,13 @@ module.exports.start = function(baseDir) {
   if (state.activeEvent && state.activeEvent.platform === 'nxgen' && nxgenApiKey && (state.nxgen.eventSlug || '').trim()) {
     state.nxgen.enabled = true;
     setNxgenPolling(true);
+  }
+  // Challengermode's queue, feed and placements are transient too — without this a restart leaves
+  // a loaded tournament showing as linked with an empty bracket until someone presses Refresh.
+  if (state.activeEvent && state.activeEvent.platform === 'challengermode'
+      && challengermodeRefreshKey && (state.challengermode.tournamentId || '').trim()) {
+    state.challengermode.enabled = true;
+    setChallengermodePolling(true);
   }
 
 
@@ -30317,8 +32136,8 @@ module.exports.start = function(baseDir) {
   clipSystem = createClipSystem({
     dataDir,
     getObsClient: () => obsClient,
-    onUpdate: (clipsState) => {
-      state.clips = { ...clipsState, encode: state.encode };
+    onUpdate: () => {
+      syncClipsState();   // keeps captureMode / autoMontage — a bare getState() copy reset them to manual
       broadcastClipsUpdate();
     },
     onEncodeProgress: (progress) => {
@@ -30327,7 +32146,7 @@ module.exports.start = function(baseDir) {
       if (onEncodeProgressCallback) onEncodeProgressCallback(progress);
     }
   });
-  state.clips = clipSystem.getState();
+  syncClipsState();
   bootMark('clip system');
   bootReport('server.start()');
 };
@@ -31639,7 +33458,7 @@ app.post('/api/social/clip/download', async (req, res) => {
     if (clipSystem) {
       clip = await clipSystem.manager.importReplayFile(tmp, { label: title || 'Twitch Clip', type: 'twitch-clip' });
       try { fs.unlinkSync(tmp); } catch {}
-      state.clips = clipSystem.getState();
+      syncClipsState();
       broadcastClipsUpdate();
     }
     res.json({ ok: true, clip });
@@ -31863,7 +33682,7 @@ app.post('/api/twitch/marker', async (req, res) => {
 
 // ─── Graceful Shutdown ───────────────────────────────────────────────────────
 module.exports.shutdown = function () {
-  stopValorantPolling();
+  stopValorantWatchdog();
   if (_watchdogInterval) { clearInterval(_watchdogInterval); _watchdogInterval = null; }
   if (_bridgeHeartbeat) { clearInterval(_bridgeHeartbeat); _bridgeHeartbeat = null; }
   if (_bcTimer) { clearTimeout(_bcTimer); _bcTimer = null; }
@@ -31877,7 +33696,9 @@ module.exports.shutdown = function () {
   bridgeClients.clear();
 
   if (bridgeWss) { bridgeWss.close(() => {}); bridgeWss = null; }
+  if (bridgeHttp6) { try { bridgeHttp6.close(() => {}); } catch (e) {} bridgeHttp6 = null; }
   if (httpServer) { httpServer.close(() => {}); httpServer = null; }
+  if (httpServer6) { try { httpServer6.close(() => {}); } catch (e) {} httpServer6 = null; }
 
   try { flushBrandKitsSave(); } catch (e) { /* ignore */ }     // a deferred Desk Show topic edit must not die with the app
   try { _saveAppStateNow(true); } catch (e) { /* ignore */ }   // sync flush so the write completes before exit
@@ -31888,6 +33709,8 @@ module.exports.shutdown = function () {
 };
 
 // Test hook: run the real restore against a state file (test/loadstate-restore.test.js).
+// Brand-kit style rules (test/brand-styles.test.js): what activating / importing may change.
+module.exports._testBrandStyles = { applyKitStyles, applyPackageSnapshot, applyProfileBundle, getState: () => state };
 module.exports._testLoadState = function (file) { stateFile = file; _stateLoadAbort = null; loadState(); return { state, abort: _stateLoadAbort }; };
 
 module.exports.broadcastCrashAlert = function (message) {

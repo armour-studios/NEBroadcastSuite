@@ -30,7 +30,7 @@
   .lb-header { display: flex; align-items: center; gap: 22px; }
   .lb-brand { height: 76px; max-width: 300px; object-fit: contain; filter: drop-shadow(0 4px 14px rgba(0,0,0,.5)); }
   .lb-headtext { display: flex; flex-direction: column; gap: 4px; }
-  .lb-eyebrow { font-size: 15px; font-weight: 800; letter-spacing: .34em; text-transform: uppercase; color: var(--accent); }
+  .lb-eyebrow { font-size: 15px; font-weight: 800; letter-spacing: .34em; text-transform: uppercase; color: var(--accent-ink, var(--accent)); }
   .lb-title { font-size: 52px; font-weight: 900; letter-spacing: .01em; line-height: .98; color: #fff; text-transform: uppercase; }
   .lb-subtitle { font-size: 19px; font-weight: 600; color: #aeb4c4; letter-spacing: .02em; }
   .lb-count { margin-left: auto; display: flex; flex-direction: column; align-items: center; line-height: 1;
@@ -55,7 +55,8 @@
   .lb-player-cell { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
   .lb-name { font-size: 25px; font-weight: 800; color: #fff; letter-spacing: .01em; }
   .lb-team { font-size: 14px; font-weight: 700; color: #8b93a6; letter-spacing: .04em; text-transform: uppercase; }
-  .lb-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #6a7080; font-size: 22px; }
+  /* In flow, under the header — absolutely centred it landed on top of the header (see league-stats.html). */
+  .lb-empty { margin-top: 28px; text-align: center; color: #6a7080; font-size: 22px; }
 
   .lb-sponsors { position: absolute; left: 0; right: 0; bottom: 26px; display: flex; align-items: center; justify-content: center; gap: 26px; }
   .lb-sponsors.is-empty { display: none; }

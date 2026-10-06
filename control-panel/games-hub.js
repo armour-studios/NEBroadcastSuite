@@ -25,15 +25,26 @@
     league: 'Live Client Data API', apex: 'LiveAPI', fortnite: 'Manual scoring', rainbow6: 'Overwolf relay', bedwars: 'Server plugin' };
   const SHORT = { csgo: 'CS2', league: 'League', rainbow6: 'Rainbow Six', bedwars: 'Bedwars', 'marvel-rivals': 'Rivals',
     'mobile-legends': 'MLBB', 'honor-of-kings': 'HoK', overwatch: 'Overwatch', ggstrive: 'GG Strive', 'marvel-tokon': 'Tokon',
-    'the-finals': 'The Finals', sf6: 'SF6', eafc: 'EA FC', smash: 'Smash' };
-  const SOURCES = {
-    'rocket-league': [['/', 'Classic HUD'], ['/rl-hud.html', 'React HUD'], ['/rl-hud.html?only=scoreboard', 'Post-game scoreboard only']],
-    csgo: [['/csgo.html', 'CS2 HUD']],
-    valorant: [['/valorant.html', 'Valorant HUD']],
-    league: [['/lol-hud.html', 'In-game HUD']],
+    'the-finals': 'The Finals', sf6: 'SF6', eafc: 'EA FC', smash: 'Smash', brawlhalla: 'Brawlhalla' };
+  // Browser sources = every overlay LAYOUT the server registers for the game (games[id].themes, from
+  // OVERLAY_LAYOUTS in server.js) plus the sources below that aren't layouts. It used to be a second
+  // hand-kept list, and the RL Worlds HUD was added to the layouts but never here, so it had no row.
+  const EXTRA_SOURCES = {
+    'rocket-league': [['/rl-hud.html?only=scoreboard', 'Post-game scoreboard only']],
     apex: [['/apex.html?live=1', 'Observer HUD']],
     fortnite: [['/br-leaderboard.html', 'Leaderboard'], ['/br-rail.html', 'Standings rail'], ['/br-match.html', 'Match results']],
   };
+  // Friendlier row labels where the layout name is terse.
+  const SOURCE_LABEL = { '/rl-player.html': 'Player HUD (playing on this PC)' };
+  function sourcesFor(d, id) {
+    const g = games(d)[id] || {};
+    const seen = new Set(), out = [];
+    const add = (path, label) => { if (!path || seen.has(path)) return; seen.add(path); out.push([path, SOURCE_LABEL[path] || label]); };
+    (Array.isArray(g.themes) ? g.themes : []).forEach((t) => add(t && t.path, (t && t.name) || 'Overlay'));
+    (EXTRA_SOURCES[id] || []).forEach(([path, label]) => add(path, label));
+    if (!out.length && g.overlay) add(g.overlay, 'Scoreboard');
+    return out;
+  }
   const SET_TABS = [['connection', 'Connection'], ['overlay', 'Overlay'], ['automation', 'Automation'], ['scoring', 'Scoring'],
     ['teams', 'Teams'], ['options', 'Options'], ['content', 'Custom content']];
   // Dashboard: [tab, label, pane]. Standard vocabulary, fixed order.
@@ -41,6 +52,7 @@
     'rocket-league': [['look', 'Look', 'look'], ['sponsors', 'Sponsors', 'sponsors'], ['players', 'Players', 'playercams']],
     csgo: [['players', 'Players', 'playercams']],
     smash: [['players', 'Players', 'smash']],
+    brawlhalla: [['players', 'Players', 'brawlhalla']],
     'marvel-tokon': [['format', 'Format', 'tokon']],
   };
 
@@ -112,6 +124,42 @@
       document.addEventListener('click', (e) => { if (!host.contains(e.target)) closePop(host); });
     }
   }
+  // Settings variant: a full-height list down the left side (search + Live data / Other games),
+  // so every game is one click away and nothing scrolls sideways.
+  function renderSideList(host, selected, onSelect) {
+    if (!host) return;
+    const d = S(), active = d.activeGame;
+    const ids = orderedIds(d);
+    const sig = JSON.stringify([selected, active, ids.map((id) => [id, status(id, d).st])]);
+    host._onSelect = onSelect;
+    if (!host._wired) {
+      host._wired = true;
+      host.innerHTML = '<input type="search" class="input-text ghl-search" placeholder="Search games" aria-label="Search games"><div class="ghl-list" role="listbox"></div>';
+      host.addEventListener('click', (e) => { const r = e.target.closest('[data-game]'); if (r) host._onSelect && host._onSelect(r.dataset.game); });
+      host.querySelector('.ghl-search').addEventListener('input', () => { host.dataset.sig = ''; renderSideList(host, host._sel, host._onSelect); });
+    }
+    host._sel = selected;
+    if (host.dataset.sig === sig) return;
+    host.dataset.sig = sig;
+    const needle = host.querySelector('.ghl-search').value.trim().toLowerCase();
+    const match = (id) => !needle || nameOf(d, id).toLowerCase().includes(needle) || id.includes(needle);
+    const row = (id) => {
+      const st = status(id, d), logo = logoOf(d, id);
+      return `<button type="button" class="ghl-item${id === selected ? ' is-sel' : ''}" data-game="${esc(id)}" role="option" aria-selected="${id === selected}" title="${esc(nameOf(d, id))}: ${esc(st.text)}">`
+        + (logo ? `<img class="ghl-logo" src="${esc(logo)}" alt="">` : '<span class="ghl-logo"></span>')
+        + `<span class="ghl-name">${esc(nameOf(d, id))}</span>`
+        + (id === active ? '<span class="ghl-active">Active</span>' : '')
+        + (st.st !== 'none' ? `<span class="ghl-dot" data-st="${st.st}"></span>` : '')
+        + '</button>';
+    };
+    const live = ids.filter((id) => (SECTION[id] || id === active) && match(id));
+    const other = ids.filter((id) => !SECTION[id] && id !== active && match(id));
+    host.querySelector('.ghl-list').innerHTML =
+      (live.length ? '<div class="ghl-group">Live data</div>' + live.map(row).join('') : '')
+      + (other.length ? '<div class="ghl-group">Other games</div>' + other.map(row).join('') : '')
+      + (!live.length && !other.length ? '<div class="ghl-empty">No games match.</div>' : '');
+  }
+
   function closePop(host) { const p = host.querySelector('.gp-pop'); if (p && !p.hidden) { p.hidden = true; host.dataset.sig = ''; } }
   function fillPop(host, q) {
     const d = S(), active = d.activeGame, needle = String(q || '').trim().toLowerCase();
@@ -164,9 +212,9 @@
     if (!Object.keys(g).length) return;
     const id = (sView && g[sView]) ? sView : (g[d.activeGame] ? d.activeGame : Object.keys(g)[0]);
     const key = SECTION[id] || 'generic';
-    renderPicker($('gh-picker'), id, (gid) => { sView = gid; renderSettings(); });
+    renderSideList($('gh-picker'), id, (gid) => { sView = gid; renderSettings(); });
     const isActive = paintHead({ logo: 'gh-logo', name: 'gh-name', status: 'gh-status', badge: 'gh-active-badge', make: 'gh-make-active' }, id, d);
-    const sub = $('gh-sub'); if (sub) sub.textContent = FEED[id] ? 'Live data: ' + FEED[id] : 'No live-data setup';
+    const sub = $('gh-sub'); if (sub) sub.textContent = FEED[id] || 'No live data feed';
 
     const tabs = settingsTabsFor(key);
     if (!tabs.some(([k]) => k === sTab)) sTab = 'connection';
@@ -209,11 +257,33 @@
     b.querySelectorAll('.game-section.active .gh-pane').forEach((p) => { p.hidden = p.dataset.gtab !== tab; });
     b.querySelectorAll('.gh-shared').forEach((p) => { p.hidden = p.dataset.gtab !== tab; });
 
-    // Overlay tab: the layout picker only means something for the game on air.
+    // Overlay tab: the active game uses the shared picker (#select-design, kept in sync with the
+    // header/dashboard copies). Any other game gets its own picker, so its layout can be chosen
+    // ahead of time instead of being gated behind "make it active first".
     const layout = $('gh-layout-slot'), hint = $('gh-layout-inactive');
     if (layout) layout.hidden = !isActive;
-    if (hint) { hint.hidden = isActive; hint.textContent = 'Make ' + nameOf(d, id) + ' the active game to choose its overlay layout.'; }
-    const srcs = SOURCES[id] || (g[id] && g[id].overlay ? [[g[id].overlay, 'Scoreboard']] : []);
+    if (hint) {
+      const themes = (g[id] && g[id].themes) || [];
+      hint.hidden = isActive || !themes.length;
+      if (!isActive && themes.length) {
+        let sel = $('gh-layout-other');
+        if (!sel) {
+          hint.textContent = '';
+          sel = document.createElement('select');
+          sel.id = 'gh-layout-other'; sel.className = 'input-select';
+          sel.addEventListener('change', () => { if (typeof send === 'function') send('set_theme', { game: sel.dataset.game, theme: sel.value }); });
+          hint.appendChild(sel);
+        }
+        const cur = ((d.themesByGame || {})[id]) || (themes[0] && themes[0].id) || '';
+        const k = JSON.stringify([id, themes.map((t) => t.id)]);
+        if (sel.dataset.key !== k) {
+          sel.dataset.key = k; sel.dataset.game = id;
+          sel.innerHTML = themes.map((t) => '<option value="' + esc(t.id) + '">' + esc(t.name || t.id) + '</option>').join('');
+        }
+        if (document.activeElement !== sel) sel.value = cur;
+      }
+    }
+    const srcs = sourcesFor(d, id);
     const grp = $('gh-sources-group'), list = $('gh-sources');
     if (grp) grp.hidden = !srcs.length;
     if (list) {
@@ -221,10 +291,15 @@
       if (list.dataset.sig !== ssig) {
         list.dataset.sig = ssig;
         list.innerHTML = srcs.map(([path, label]) => {
-          const url = 'http://127.0.0.1:3000' + path;
+          const url = 'http://localhost:3000' + path;
           return `<div class="gh-src"><span class="gh-src-name">${esc(label)}</span><code class="gh-src-url">${esc(url)}</code>`
             + `<button type="button" class="btn btn-ghost btn-sm" data-copy="${esc(url)}">Copy</button>`
-            + `<a class="btn btn-ghost btn-sm" href="${esc(url)}" target="_blank" rel="noopener">Open</a></div>`;
+            + `<a class="btn btn-ghost btn-sm" href="${esc(url)}" target="_blank" rel="noopener">Open</a>`
+            // Not for ?only=scoreboard: that source is cut to in OBS and always shows the board, so over a
+            // game it just sits there. The main HUD already raises and drops the board on its own.
+            + (window.electronAPI && window.electronAPI.openGameOverlay && !/only=scoreboard/.test(path)
+              ? `<button type="button" class="btn btn-ghost btn-sm" data-over-game="${esc(path)}" data-label="${esc(nameOf(d, id) + ' ' + label)}" title="Pop out over your game: transparent, always on top, click-through">Over game</button>` : '')
+            + '</div>';
         }).join('');
       }
     }
@@ -314,6 +389,14 @@
 
     $('gh-tabs')?.addEventListener('click', (e) => { const b = e.target.closest('[data-gtab]'); if (b) { sTab = b.dataset.gtab; renderSettings(); } });
     $('gh-sources')?.addEventListener('click', (e) => {
+      const og = e.target.closest('[data-over-game]');
+      if (og) {
+        const path = og.dataset.overGame;
+        window.electronAPI.openGameOverlay({ url: 'http://localhost:3000' + path, path, name: og.dataset.label, nativeW: 1920, nativeH: 1080 })
+          .then((r) => { if ((!r || !r.ok) && typeof showToast === 'function') showToast('Could not open the overlay window.', '#ef4444'); })
+          .catch(() => { if (typeof showToast === 'function') showToast('Could not open the overlay window.', '#ef4444'); });
+        return;
+      }
       const b = e.target.closest('[data-copy]'); if (!b) return;
       const done = () => { const t = b.textContent; b.textContent = 'Copied'; setTimeout(() => { b.textContent = t; }, 1200); };
       try { navigator.clipboard.writeText(b.dataset.copy).then(done, done); } catch (_) { done(); }

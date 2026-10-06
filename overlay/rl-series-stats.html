@@ -100,7 +100,7 @@
   .pcard .cs{font-size:38px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;}
   .pcard.best .cs{color:var(--gold);}
   .pcard .cl{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--dim);font-weight:700;margin-top:3px;}
-  .pcard .cgrid{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin-top:13px;
+  .pcard .cgrid{display:grid;grid-template-columns:repeat(var(--cn,5),1fr);gap:4px;margin-top:13px;
     border-top:1px solid var(--hair);padding-top:11px;}
   .pcard .cgrid div{text-align:center;}
   .pcard .cgrid .v{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;}
@@ -345,7 +345,7 @@
       const cards = rows.map((r) => '<div class="pcard' + (r.name === mvpName ? ' best' : '') + '">'
         + '<div class="cn">' + esc(r.name) + '</div>'
         + '<div class="cs">' + fmt(r.score) + '</div><div class="cl">Series score</div>'
-        + '<div class="cgrid">' + COLS.slice(1).map((c) =>
+        + '<div class="cgrid" style="--cn:' + Math.max(1, COLS.length - 1) + '">' + COLS.slice(1).map((c) =>
             '<div><div class="v">' + num(r[c.key]) + '</div><div class="k">' + c.label + '</div></div>').join('')
         + '</div></div>').join('');
       return '<div class="teamsec" style="--row-accent:' + esc(team.color) + '">'
@@ -503,6 +503,8 @@
     function sameHue(a, b){const x=_rgb(a),y=_rgb(b);
       return Math.abs(x[0]-y[0])+Math.abs(x[1]-y[1])+Math.abs(x[2]-y[2]) < 24;}
 
+    function setHtml(node, html) { if (node._h !== html) { node._h = html; node.innerHTML = html; } }
+
     function render(data) {
       const ss = data.seriesStats || {};
       pickCols(data);
@@ -531,16 +533,16 @@
       // Table design shares one grid template between its header and rows; it has to follow COLS.
       document.documentElement.style.setProperty('--tbl-cols', '1fr repeat(' + COLS.length + ',80px)');
       const design = DESIGNS[ss.design] ? ss.design : 'table';
-      $('body').innerHTML = tt.all.length
+      setHtml($('body'), tt.all.length
         ? DESIGNS[design](tt, teams, data.bestOf)
-        : '<div class="nodata">No games played in this series yet</div>';
+        : '<div class="nodata">No games played in this series yet</div>');
 
       // Per-game strip — banked games only (the live game has no final score yet).
       const games = Array.isArray(ss.games) ? ss.games : [];
-      $('gstrip').innerHTML = games.map((g) => '<div class="gpip">'
+      setHtml($('gstrip'), games.map((g) => '<div class="gpip">'
         + '<span class="gl">Game ' + num(g.number) + '</span>'
         + '<span class="gv">' + num(g.blueScore) + ' - ' + num(g.orangeScore) + '</span>'
-        + '</div>').join('');
+        + '</div>').join(''));
 
       $('wrap').classList.toggle('show', !!ss.visible);
     }
