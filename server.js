@@ -7461,6 +7461,8 @@ function finalizeAndResetSeries() {
   state.game.number = 1;
   state.series.blue = 0;
   state.series.orange = 0;
+  // Hero bans belong to the series — a fresh series starts with none on any map.
+  clearAllOwBans();
   // New series = new stat sheet. This is the shared close-out (reset_series WS case, start.gg push,
   // auto-follow), so the board can never carry the previous match's numbers onto the next one.
   if (state.seriesStats) { state.seriesStats.games = []; state.seriesStats.liveBanked = false; }
@@ -14479,6 +14481,14 @@ function clearOwMapBans(idx) {
   const bansByMap = [...((state.owMatch && state.owMatch.bansByMap) || [])];
   if (bansByMap[idx]) { bansByMap[idx] = {}; state.owMatch = { ...state.owMatch, bansByMap }; }
 }
+// Wipe the hero bans on EVERY map of the series, then reload the live board (it is map-scoped,
+// so it comes back empty). The map pool and HUD read bansByMap directly, so stale entries on
+// other maps would otherwise keep showing after the board looks clear.
+function clearAllOwBans() {
+  if (state.owMatch) state.owMatch = { ...state.owMatch, bansByMap: [] };
+  const d = state.draft;
+  if (d && d.game === 'overwatch' && Array.isArray(d.sequence)) { d.ops = []; owDraftLoadMap(); }
+}
 // Overwatch ban order for a total ban count: one each (A, B) or snake two each (A, B, B, A).
 function owBanSequence(count, teamStart) {
   const steps = count >= 4 ? [0, 1, 1, 0] : [0, 1];
@@ -18445,6 +18455,7 @@ registerWsHandlers({
   },
   draft_undo()       { draftUndo();  saveAppState(); broadcastFullState(); },
   draft_reset()      { draftReset(); saveAppState(); broadcastFullState(); },
+  draft_clear_all()  { clearAllOwBans(); saveAppState(); broadcastFullState(); },
   draft_visible(msg) { if (state.draft) setExclusiveGfxVisible('draft', !!(msg.data && msg.data.visible)); saveAppState(); broadcastFullState(); }
 });
 

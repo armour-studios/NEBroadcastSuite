@@ -2858,6 +2858,8 @@ function _borrowGraphicsToDash() {
       const undoBtn = el('btn-draft-front-undo'); if (undoBtn) undoBtn.disabled = !hasOps;
       // Reset stays live once started: with no bans it still re-applies Goes first / ban count.
       const resetBtn = el('btn-draft-front-reset'); if (resetBtn) resetBtn.disabled = !started;
+      // Clear-all is live whenever ANY map of the series has a ban, even if this map's board is empty.
+      const clearAllBtn = el('btn-draft-front-clear-all'); if (clearAllBtn) clearAllBtn.disabled = !owSeriesHasBans(data);
       const owWrap = el('gfx-front-draft-ow');
       if (owWrap) {
         owWrap.style.display = isOwActive ? '' : 'none';
@@ -16496,6 +16498,23 @@ el('btn-draft-undo')?.addEventListener('click', () => send('draft_undo', {}));
 el('btn-draft-reset')?.addEventListener('click', () => {
   appConfirm('Reset the draft board? Every pick and ban made so far will be wiped and cannot be recovered.', 'Reset', true).then((ok) => {
     if (ok) send('draft_reset', {});
+  });
+});
+// Hero bans on ANY map of the series (the map pool + HUD read owMatch.bansByMap, not just the live map).
+function owSeriesHasBans(data) {
+  return ((data && data.owMatch && data.owMatch.bansByMap) || []).some((entry) => {
+    if (!entry) return false;
+    return ['a', 'b'].some((side) => {
+      const v = entry[side];
+      return Array.isArray(v) ? v.some((x) => x && x.hero) : !!(v && v.hero);
+    });
+  });
+}
+// Clears hero bans on every map of the series — the map pool and HUD follow.
+el('btn-draft-front-clear-all')?.addEventListener('click', () => {
+  if (!owSeriesHasBans(currentState)) return;
+  appConfirm('Clear the hero bans on every map of this series? The map pool and the HUD will be emptied too.', 'Clear all maps', true).then((ok) => {
+    if (ok) send('draft_clear_all', {});
   });
 });
 el('btn-draft-show')?.addEventListener('click', () => send('draft_visible', { visible: true }));
