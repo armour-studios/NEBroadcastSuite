@@ -35,7 +35,13 @@ function createLive(deps) {
   function configure(h) {
     hints = h && typeof h === 'object' ? h : null;
     if (!hints || !hints.push) { stop(); return; }
-    if (!rt) start();
+    if (rt) return;
+    // A checkout without the ably package (npm install not run yet) stays on polling.
+    try { start(); }
+    catch (e) {
+      rt = null;
+      if (!configure.warned) { configure.warned = true; log.warn('[live] push unavailable, staying on polling:', (e && e.message) || e); }
+    }
   }
 
   function start() {
