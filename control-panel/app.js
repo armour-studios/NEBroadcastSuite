@@ -2730,6 +2730,27 @@ function _borrowGraphicsToDash() {
 })();
 
 // ── Graphics hub (Production → Graphics) ─────────────────────────────────────
+// ── Graphics actions: what showing / hiding each graphic does ─────────────────────────────────
+// Every path that takes a graphic on or off air (its own buttons, Hide all, showing another graphic,
+// the deck, the rundown, automations) calls gfxShow(key) / gfxHide(key). They used to .click() the
+// scene's hidden button, so a button whose handler did more than hide ran that extra work from
+// every one of those paths: Hide all emptied the schedule that way. A graphic that has not
+// registered its actions falls back to its button.
+const GFX_ACTIONS = { show: Object.create(null), hide: Object.create(null) };
+function gfxAction(kind, key, fn, btnId) {
+  GFX_ACTIONS[kind][key] = fn;
+  if (btnId) el(btnId)?.addEventListener('click', function (...a) { return fn.apply(this, a); });
+}
+function gfxSceneMetaOf(key) { return (window._gfxSceneMeta && window._gfxSceneMeta[key]) || {}; }
+function gfxHide(key) {
+  const fn = GFX_ACTIONS.hide[key]; if (fn) return fn();
+  const m = gfxSceneMetaOf(key); el(m.clearId || ('btn-hide-' + key))?.click();
+}
+function gfxShow(key) {
+  const fn = GFX_ACTIONS.show[key]; if (fn) return fn();
+  const m = gfxSceneMetaOf(key); el(m.pushId || ('btn-show-' + key))?.click();
+}
+
 (function buildGraphicsHub() {
   const gtab = document.getElementById('prod-graphics-tab');
   if (!gtab) return;
@@ -2879,7 +2900,7 @@ function _borrowGraphicsToDash() {
   // Clear ALL GFX scenes (one-click clear everything) — top bar only.
   function clearAllGfxScenes() {
     Object.entries(SCENE_META).forEach(([k, meta]) => {
-      if (meta.hasClear) el(meta.clearId || ('btn-hide-' + k))?.click();
+      if (meta.hasClear) gfxHide(k);
     });
     send('set_gfx_active', { scene: null });
     // Optimistic update — the server round-trip hasn't landed yet, so reflect "nothing live" in
@@ -2895,9 +2916,9 @@ function _borrowGraphicsToDash() {
     const meta = SCENE_META[key] || {};
     const prev = currentState && currentState.gfxActive;
     if (prev && prev !== key && SCENE_META[prev]) {
-      const pm = SCENE_META[prev]; el(pm.clearId || ('btn-hide-' + prev))?.click();
+      gfxHide(prev);
     }
-    el(meta.pushId || ('btn-show-' + key))?.click();
+    gfxShow(key);
     send('set_gfx_active', { scene: key });
     // Optimistic update — reflect the new live scene immediately rather than waiting on the
     // server round-trip (same reasoning as clearAllGfxScenes above).
@@ -3263,8 +3284,7 @@ function _borrowGraphicsToDash() {
     modal.querySelectorAll('[data-popout-close]').forEach((b) => b.addEventListener('click', () => closeGfxPopout(key)));
     modal.querySelectorAll('[data-popout-push]').forEach((b) => b.addEventListener('click', () => doPush(key)));
     modal.querySelectorAll('[data-popout-clear]').forEach((b) => b.addEventListener('click', () => {
-      const meta = SCENE_META[key] || {};
-      el(meta.clearId || ('btn-hide-' + key))?.click();
+      gfxHide(key);
     }));
     modal.querySelectorAll('[data-popout-apply]').forEach((b) => b.addEventListener('click', () => applyScene(key)));
     modal.querySelectorAll('[data-popout-queue]').forEach((b) => b.addEventListener('click', () => el('btn-queue-' + key)?.click()));
@@ -3406,7 +3426,7 @@ function _borrowGraphicsToDash() {
   // Take ONE scene off air (its own hide button), and drop gfxActive if it was the live layer.
   window._gfxDoClear = (key) => {
     const meta = SCENE_META[key]; if (!meta) return;
-    if (meta.hasClear) el(meta.clearId || ('btn-hide-' + key))?.click();
+    if (meta.hasClear) gfxHide(key);
     if (currentState && currentState.gfxActive === key) { send('set_gfx_active', { scene: null }); currentState.gfxActive = null; }
     refreshTopBar(currentKey);
   };
@@ -3414,12 +3434,12 @@ function _borrowGraphicsToDash() {
   // ── Battle-royale scenes ────────────────────────────────────────────────────
   // doPush()/clearAllGfxScenes() drive scenes through hidden btn-show-*/btn-hide-* buttons, so
   // the BR graphics need theirs wired the same way rather than being special-cased in the hub.
-  el('btn-show-brdrop')?.addEventListener('click', () => send('set_br_dropmap', { visible: true }));
-  el('btn-hide-brdrop')?.addEventListener('click', () => send('set_br_dropmap', { visible: false }));
-  el('btn-show-brcompare')?.addEventListener('click', () => send('set_br_compare', { visible: true }));
-  el('btn-hide-brcompare')?.addEventListener('click', () => send('set_br_compare', { visible: false }));
-  el('btn-show-brvictory')?.addEventListener('click', () => send('set_br_victory', { visible: true }));
-  el('btn-hide-brvictory')?.addEventListener('click', () => send('set_br_victory', { visible: false }));
+  gfxAction('show', 'brdrop', () => send('set_br_dropmap', { visible: true }), 'btn-show-brdrop');
+  gfxAction('hide', 'brdrop', () => send('set_br_dropmap', { visible: false }), 'btn-hide-brdrop');
+  gfxAction('show', 'brcompare', () => send('set_br_compare', { visible: true }), 'btn-show-brcompare');
+  gfxAction('hide', 'brcompare', () => send('set_br_compare', { visible: false }), 'btn-hide-brcompare');
+  gfxAction('show', 'brvictory', () => send('set_br_victory', { visible: true }), 'btn-show-brvictory');
+  gfxAction('hide', 'brvictory', () => send('set_br_victory', { visible: false }), 'btn-hide-brvictory');
 
   // Drop-map settings (the only BR content that has no home in Match — Lobby).
   el('gfx-brdrop-title')?.addEventListener('change', function () { send('set_br_dropmap', { title: this.value }); });
@@ -3592,8 +3612,8 @@ function _borrowGraphicsToDash() {
   });
 
   // Veto push live / clear (hidden delegation targets wired here).
-  el('btn-show-veto-gfx')?.addEventListener('click', () => send('set_veto', { visible: true }));
-  el('btn-hide-veto-gfx')?.addEventListener('click', () => send('set_veto', { visible: false }));
+  gfxAction('show', 'veto', () => send('set_veto', { visible: true }), 'btn-show-veto-gfx');
+  gfxAction('hide', 'veto', () => send('set_veto', { visible: false }), 'btn-hide-veto-gfx');
 
   // ── Map Pool (manual mode) ────────────────────────────────────────────────
   // A simpler alternative to the guided pick/ban sequence: choose each map from the active
@@ -4250,27 +4270,27 @@ function _borrowGraphicsToDash() {
   };
 
   // Ticker — hide (push uses the existing btn-ticker-apply).
-  el('btn-hide-ticker')?.addEventListener('click', () => send('set_ticker', { visible: false }));
+  gfxAction('hide', 'ticker', () => send('set_ticker', { visible: false }), 'btn-hide-ticker');
 
   // Draft — show/hide the champion draft overlay.
-  el('btn-show-draft')?.addEventListener('click', () => send('draft_visible', { visible: true }));
-  el('btn-hide-draft')?.addEventListener('click', () => send('draft_visible', { visible: false }));
+  gfxAction('show', 'draft', () => send('draft_visible', { visible: true }), 'btn-show-draft');
+  gfxAction('hide', 'draft', () => send('draft_visible', { visible: false }), 'btn-hide-draft');
 
   // Spotlight — route push to the active mode (Teams to Watch vs Team Spotlight).
-  el('btn-show-spotlight')?.addEventListener('click', () => {
+  gfxAction('show', 'spotlight', () => {
     const mode = (typeof _spMode !== 'undefined' ? _spMode : 'watch');
     if (mode === 'solo') send('set_team_spotlight', { visible: true });
     else send('set_watchlist', { visible: true });
-  });
-  el('btn-hide-spotlight')?.addEventListener('click', () => {
+  }, 'btn-show-spotlight');
+  gfxAction('hide', 'spotlight', () => {
     send('set_watchlist', { visible: false });
     send('set_team_spotlight', { visible: false });
-  });
+  }, 'btn-hide-spotlight');
 
 
   // Bracket — show/hide the bracket overlay.
-  el('btn-show-bracket')?.addEventListener('click', () => send('set_bracket_settings', { visible: true }));
-  el('btn-hide-bracket')?.addEventListener('click', () => send('set_bracket_settings', { visible: false }));
+  gfxAction('show', 'bracket', () => send('set_bracket_settings', { visible: true }), 'btn-show-bracket');
+  gfxAction('hide', 'bracket', () => send('set_bracket_settings', { visible: false }), 'btn-hide-bracket');
 
   // Real-time preview: debounced auto-push on field change.
   function debounce(fn, ms) { let t; return function() { clearTimeout(t); t = setTimeout(fn, ms); }; }
@@ -4339,8 +4359,8 @@ function _borrowGraphicsToDash() {
   // ── Series Stats (Rocket League) ──
   // Push/clear go through the standard btn-show-/btn-hide-<key> pair so doPush() and the top bar
   // drive this scene exactly like every other one.
-  el('btn-show-seriesstats')?.addEventListener('click', () => send('set_series_stats', { visible: true }));
-  el('btn-hide-seriesstats')?.addEventListener('click', () => send('set_series_stats', { visible: false }));
+  gfxAction('show', 'seriesstats', () => send('set_series_stats', { visible: true }), 'btn-show-seriesstats');
+  gfxAction('hide', 'seriesstats', () => send('set_series_stats', { visible: false }), 'btn-hide-seriesstats');
   // Both copies of the opt-in write the same field; the server is the single source of truth and
   // the next full_state re-hydrates whichever copy the producer did not touch.
   ['chk-series-stats', 'gfx-ss-enabled'].forEach((id) => {
@@ -4967,7 +4987,7 @@ function _borrowGraphicsToDash() {
     stdRenderFighters();
   });
 
-  el('btn-gfx-standings-push')?.addEventListener('click', () => {
+  gfxAction('show', 'standings', () => {
     // On the Top 8 board the BUILDER owns the rows (placement / player / fighter). A producer can
     // hand-build that board with no source at all, so an unconfigured source is NOT an error
     // there -- only an empty builder is. Every other board still needs its source.
@@ -4991,10 +5011,10 @@ function _borrowGraphicsToDash() {
     send('set_standings', { ...payload, layout: stdLayoutChoice(), rows, visible: true });
     gfxStdStatus('Pushed live' + (r.ok && r.msg ? ' ' + r.msg : '') + '.', false);
   });
-  el('btn-gfx-standings-clear')?.addEventListener('click', () => {
+  gfxAction('hide', 'standings', () => {
     send('set_standings', { visible: false });
     gfxStdStatus('Standings hidden.', false);
-  });
+  }, 'btn-gfx-standings-clear');
   el('gfx-std-add')?.addEventListener('click', () => {
     const list = el('gfx-std-rows-list'); if (!list) return;
     const idx = list.querySelectorAll('.gfx-std-edit-row').length;
@@ -5185,7 +5205,7 @@ function _borrowGraphicsToDash() {
     const sig = list.length + '|' + (list[0] || '') + '|' + (list[list.length - 1] || '');
     if (dl.dataset.sig === sig) return;
     dl.dataset.sig = sig;
-    dl.innerHTML = list.map((n) => '<option value="' + n.replace(/"/g, '&quot;') + '"></option>').join('');
+    dl.innerHTML = list.map((n) => '<option value="' + n.replace(/"/g, '&quot;', 'btn-gfx-standings-push') + '"></option>').join('');
   }
   el('gfx-sch-add-front')?.addEventListener('click', () => {
     const a = (el('gfx-sch-add-a')?.value || '').trim();
@@ -5326,14 +5346,14 @@ function _borrowGraphicsToDash() {
   }
 
   // Push to live (top-bar button)
-  el('btn-gfx-schedule-push')?.addEventListener('click', () => {
+  gfxAction('show', 'schedule', () => {
     const payload = buildScheduleContentPayload();
     send('set_upcoming', { ...payload, visible: true });
     const st = el('gfx-sch-status');
     if (st) { st.textContent = `Pushed ${payload.matches.length} match${payload.matches.length !== 1 ? 'es' : ''} live.`; setTimeout(() => { st.textContent = ''; }, 2500); }
-  });
+  }, 'btn-gfx-schedule-push');
   // Taking the Schedule graphic off air (Hide, Hide all, or showing another graphic) only hides it.
-  el('btn-hide-schedule-gfx')?.addEventListener('click', () => { send('set_upcoming', { visible: false }); });
+  gfxAction('hide', 'schedule', () => { send('set_upcoming', { visible: false }); }, 'btn-hide-schedule-gfx');
   el('btn-gfx-schedule-clear')?.addEventListener('click', async () => {
   // Full reset — hide the overlay, empty the board, AND detach from start.gg so the
   // next poll can't refill it (that refill made a linked event impossible to clear).
@@ -7771,8 +7791,7 @@ el('bb-trigger-go')?.addEventListener('click', () => {
   // unified gfx.html source. Mirrors the plain toggle path exactly.
   const prevScene = currentState && currentState.gfxActive;
   if (prevScene && prevScene !== g.sceneKey && window._gfxSceneMeta && window._gfxSceneMeta[prevScene]) {
-    const pm = window._gfxSceneMeta[prevScene];
-    el(pm.clearId || ('btn-hide-' + prevScene))?.click();
+    gfxHide(prevScene);
   }
   send(g.msg, g.show());
   if (g.sceneKey) {
@@ -16820,7 +16839,7 @@ el('select-break-preset')?.addEventListener('change', function() {
   if (customRow) customRow.style.display = this.value === '__custom__' ? '' : 'none';
 });
 
-el('btn-show-break')?.addEventListener('click', () => {
+gfxAction('show', 'break', () => {
   send('set_break', {
     visible: true,
     title: getBreakTitle(),
@@ -16829,7 +16848,7 @@ el('btn-show-break')?.addEventListener('click', () => {
     seconds: Math.round((parseFloat(el('input-break-minutes')?.value) || 0) * 60),
     thenScene: el('select-break-thenscene')?.value || ''
   });
-});
+}, 'btn-show-break');
 
 el('btn-update-break')?.addEventListener('click', () => {
   // Update text without touching the running countdown
@@ -16839,9 +16858,9 @@ el('btn-update-break')?.addEventListener('click', () => {
   });
 });
 
-el('btn-hide-break')?.addEventListener('click', () => {
+gfxAction('hide', 'break', () => {
   send('set_break', { visible: false });
-});
+}, 'btn-hide-break');
 
 // ── Production: Winner / Post-match ─────────────────────────────────────────
 el('select-winner-side')?.addEventListener('change', function() {
@@ -16859,15 +16878,15 @@ function winnerPayload(visible) {
   if (isSide) return { visible, side: sel, name: '', subtitle };
   return { visible, side: '', name: window._winnerNameFromSel ? window._winnerNameFromSel(sel) : '', subtitle };
 }
-el('btn-show-winner')?.addEventListener('click', () => send('set_winner', winnerPayload(true)));
-el('btn-hide-winner')?.addEventListener('click', () => {
+gfxAction('show', 'winner', () => send('set_winner', winnerPayload(true)), 'btn-show-winner');
+gfxAction('hide', 'winner', () => {
   if (window._winnerAuto) window._winnerAuto = { sideManual: false, subTouched: false, lastScore: '' };   // re-arm for next match
   send('set_winner', { visible: false });
-});
+}, 'btn-hide-winner');
 
 // ── Production: Stream Credits — no config, just visibility ─────────────────
-el('btn-show-credits')?.addEventListener('click', () => send('set_credits', { visible: true }));
-el('btn-hide-credits')?.addEventListener('click', () => send('set_credits', { visible: false }));
+gfxAction('show', 'credits', () => send('set_credits', { visible: true }), 'btn-show-credits');
+gfxAction('hide', 'credits', () => send('set_credits', { visible: false }), 'btn-hide-credits');
 
 // ── Production: Team Line-up / Intro ────────────────────────────────────────
 function introPayload(visible) {
@@ -16879,8 +16898,8 @@ function introPayload(visible) {
     showRealName: el('check-intro-realname') ? !!el('check-intro-realname').checked : false
   };
 }
-el('btn-show-intro')?.addEventListener('click', () => send('set_intro', introPayload(true)));
-el('btn-hide-intro')?.addEventListener('click', () => send('set_intro', { visible: false }));
+gfxAction('show', 'intro', () => send('set_intro', introPayload(true)), 'btn-show-intro');
+gfxAction('hide', 'intro', () => send('set_intro', { visible: false }), 'btn-hide-intro');
 
 // ── Production: Map Veto board ──────────────────────────────────────────────
 // Parse "Map | action | team | mode" lines into veto map objects.
@@ -18923,8 +18942,7 @@ GOLIVE_TRIGGERS.forEach((t) => {
       // Clear whichever GFX scene is currently active before pushing ours.
       const prev = currentState && currentState.gfxActive;
       if (prev && prev !== t.sceneKey && window._gfxSceneMeta && window._gfxSceneMeta[prev]) {
-        const pm = window._gfxSceneMeta[prev];
-        el(pm.clearId || ('btn-hide-' + prev))?.click();
+        gfxHide(prev);
       }
       if (!t.pushOnly) send(t.msg, t.show());
       send('set_gfx_active', { scene: t.sceneKey });
@@ -20018,8 +20036,7 @@ function _qkIsLive(item) {
 function _qkGfxToggle(key) {
   const live = currentState && currentState.gfxActive === key;
   if (live) {
-    const meta = (window._gfxSceneMeta && window._gfxSceneMeta[key]) || {};
-    el(meta.clearId || ('btn-hide-' + key))?.click();
+    gfxHide(key);
     send('set_gfx_active', { scene: null });
     if (currentState) currentState.gfxActive = null;
     if (typeof window._gfxRefreshTopBar === 'function') window._gfxRefreshTopBar();
@@ -28943,7 +28960,7 @@ function onairPut(s, on) {
     const liveScene = currentState && currentState.gfxActive;
     if (liveScene && liveScene !== key) {
       const sm = (typeof window._gfxSceneMeta !== 'undefined') ? window._gfxSceneMeta : {};
-      const pm = sm[liveScene]; if (pm) el(pm.clearId || ('btn-hide-' + liveScene))?.click();
+      if (sm[liveScene]) gfxHide(liveScene);
     }
     const gfxKey = GFX_ONAIR_SCENE_KEY[key] || key;
     send('set_gfx_active', { scene: gfxKey });

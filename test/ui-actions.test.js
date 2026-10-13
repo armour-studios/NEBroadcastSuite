@@ -19,7 +19,12 @@ const ok = (cond, why) => { assert.ok(cond, why); pass++; };
 // schedule and switched start.gg auto-fill off. Taking Schedule off air must only hide it.
 ok(/schedule:\s*\{[^}]*clearId: 'btn-hide-schedule-gfx'/.test(app), 'Schedule hide uses its own hide-only button');
 ok(/id="btn-hide-schedule-gfx"/.test(html), 'hide-only Schedule button exists');
-ok(/el\('btn-hide-schedule-gfx'\)\?\.addEventListener\('click', \(\) => \{ send\('set_upcoming', \{ visible: false \}\); \}\);/.test(app), 'Schedule hide sends visible:false and nothing else');
+ok(/gfxAction\('hide', 'schedule', \(\) => \{ send\('set_upcoming', \{ visible: false \}\); \}, 'btn-hide-schedule-gfx'\);/.test(app), 'Schedule hide sends visible:false and nothing else');
+// Refactor step 4: showing / hiding graphics goes through gfxShow / gfxHide (one registry), never by
+// clicking a scene's hidden button from another code path.
+ok((app.match(/(?:clearId|pushId) \|\| \('btn-(?:hide|show)-'/g) || []).length === 2, 'only gfxHide / gfxShow fall back to a hidden button (graphics without a registered action)');
+['break', 'winner', 'intro', 'credits', 'veto', 'draft', 'spotlight', 'bracket', 'seriesstats', 'standings', 'schedule', 'brdrop', 'brcompare', 'brvictory']
+  .forEach((k) => ok(new RegExp("gfxAction\\('hide', '" + k + "'").test(app), k + ' registers its hide action'));
 ok((app.match(/el\('btn-gfx-schedule-clear'\)\?\.addEventListener/g) || []).length === 1, 'Schedule reset handler registered once (it fired twice per click)');
 ok(/el\('btn-gfx-schedule-clear'\)\?\.addEventListener\('click', async \(\) => \{[\s\S]{0,600}appConfirm\('Clear the schedule\?/.test(app), 'Schedule full reset asks first');
 
