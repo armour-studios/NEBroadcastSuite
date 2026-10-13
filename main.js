@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { readConsoleMessage } = require('./backend/console-message');
 
 let app, BrowserWindow, ipcMain, nativeTheme, Tray, Menu, nativeImage, globalShortcut;
 
@@ -377,7 +378,8 @@ function createControlPanel() {
   // Forward renderer errors to the main-process stdout so real crashes are visible even when
   // the DevTools console is flooded with VDO.ninja WebRTC spam (postMessage/sequence errors
   // from their embedded iframes repeat every ~300ms and bury our own error output).
-  controlPanel.webContents.on('console-message', (_ev, level, message, line, sourceId) => {
+  controlPanel.webContents.on('console-message', (...args) => {
+    const { level, message, line, sourceId } = readConsoleMessage(...args);
     if (level < 2) return; // 0=verbose 1=info 2=warning 3=error
     const msg = message || '', src = sourceId || '';
     const isVdoNoise =

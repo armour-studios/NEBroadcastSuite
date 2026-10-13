@@ -10,6 +10,7 @@
 'use strict';
 const { app, BrowserWindow } = require('electron');
 const path = require('path');
+const { readConsoleMessage } = require('../backend/console-message');
 const http = require('http');
 
 const PANEL = path.join(__dirname, '..', 'control-panel', 'index.html');
@@ -50,7 +51,8 @@ app.whenReady().then(async () => {
   const problems = [];
   const win = new BrowserWindow({ show: false, width: 1600, height: 1000, webPreferences: { offscreen: true } });
   const wc = win.webContents;
-  wc.on('console-message', (_e, level, message, line, sourceId) => {
+  wc.on('console-message', (...args) => {
+    const { level, message, line, sourceId } = readConsoleMessage(...args);
     // Test the SOURCE as well as the text: a long third-party error arrives split across messages,
     // so the tail of a VDO.ninja stack shows up as a bare number that no text filter can catch.
     if (level === 3 && !noisy(message) && !noisy(sourceId || '')) {

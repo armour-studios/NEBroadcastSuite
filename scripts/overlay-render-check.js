@@ -17,9 +17,10 @@
 const { app, BrowserWindow } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const { readConsoleMessage } = require('../backend/console-message');
 const http = require('http');
 
-const BASE = 'http://127.0.0.1:3000';
+const BASE = process.env.NE_RENDER_BASE || 'http://127.0.0.1:3000';   // point elsewhere to check a test server
 const OVERLAY_DIR = path.join(__dirname, '..', 'overlay');
 const SETTLE_MS = Number(process.env.SETTLE_MS || 2500);
 
@@ -52,7 +53,8 @@ async function checkPage(page) {
   });
   const wc = win.webContents;
 
-  wc.on('console-message', (_e, level, message, line, sourceId) => {
+  wc.on('console-message', (...args) => {
+    const { level, message, line, sourceId } = readConsoleMessage(...args);
     // 3 = error. Warnings are noisy and mostly upstream (fonts, autoplay).
     if (level === 3) problems.push(`console error: ${message}` + (sourceId ? `  (${sourceId}:${line})` : ''));
   });
