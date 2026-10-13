@@ -1414,6 +1414,24 @@ const ONAIR_SCENES = [
 ];
 window.ONAIR_SCENES = ONAIR_SCENES;   // TDZ-safe handle for early-init render hooks
 
+// Camera layers on the in-game HUD (the RL and CS2 HUDs draw player webcams). Not graphics: they
+// are never part of Hide all, graphic exclusivity, the deck or the rundown, but they are switched
+// wherever the producer turns things on and off (the Control room's Live now card, the dock's On
+// screen card, search). Same shape as ONAIR_SCENES (msg / path / check / showData / hideData);
+// games = where it does anything; setup = the game settings tab that configures it.
+const HUD_LAYERS = [
+  { key: 'facecams', label: 'Player webcams', hint: 'Every player cam on the in-game HUD',
+    msg: 'set_facecams_enabled', path: 'facecamsEnabled', check: (s) => !!s && s.facecamsEnabled !== false,
+    showData: { enabled: true }, hideData: { enabled: false }, games: ['rocket-league', 'csgo'], setup: 'cameras' },
+  { key: 'replaycams', label: 'Webcams during replays', hint: 'The full cam grid while a goal replay plays',
+    msg: 'set_replay_cams', path: 'replayCams', check: (s) => !!s && s.replayCams !== false,
+    showData: { enabled: true }, hideData: { enabled: false }, games: ['rocket-league'], setup: 'cameras' }
+];
+window.HUD_LAYERS = HUD_LAYERS;
+// The layers that apply to the game being produced.
+function hudLayersFor(game) { return HUD_LAYERS.filter((l) => !l.games || l.games.includes(game)); }
+window.hudLayersFor = hudLayersFor;
+
 // Inline SVG icon set (Lucide-style stroke icons) — no emojis.
 const ICON_SVG = {
   gamepad: '<line x1="6" x2="10" y1="11" y2="11"/><line x1="8" x2="8" y1="9" y2="13"/><line x1="15" x2="15.01" y1="12" y2="12"/><line x1="18" x2="18.01" y1="10" y2="10"/><path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.545-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.151A4 4 0 0 0 17.32 5z"/>',

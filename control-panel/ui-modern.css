@@ -644,6 +644,9 @@ html[data-ui="modern"] .mx-switch i { position: relative; width: 34px; height: 2
 html[data-ui="modern"] .mx-switch i::after { content: ''; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .15s; }
 html[data-ui="modern"] .mx-switch input:checked + i { background: var(--mx-accent); }
 html[data-ui="modern"] .mx-switch input:checked + i::after { transform: translateX(14px); }
+/* Control room > Live now > Webcams: one full-width row per switch (label left, switch right) */
+html[data-ui="modern"] .mx-cam-list { display: flex; flex-direction: column; gap: 6px; }
+html[data-ui="modern"] .mx-cam-row { display: flex; justify-content: space-between; width: 100%; margin-left: 0; padding: 9px 10px 9px 12px; border-radius: 10px; background: var(--surface2, rgba(255,255,255,.04)); font-size: 13.5px; color: var(--text); }
 html[data-ui="modern"] .mx-switch input:focus-visible + i { outline: 2px solid var(--mx-ring); outline-offset: 2px; }
 /* Up next: one card per match */
 html[data-ui="modern"] .mx-next-list { display: flex; flex-direction: column; gap: 8px; }

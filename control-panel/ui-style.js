@@ -822,6 +822,7 @@
       +       '<div class="mx-pgm-scenes"></div>'
       +       '<div class="mx-live-sub"><span>Graphics showing</span><button type="button" class="mx-link" data-cr="clear" title="Hide every graphic">Hide all</button></div>'
       +       '<div class="mx-air-list"></div>'
+      +       '<div class="mx-cams" hidden><div class="mx-live-sub"><span>Webcams</span><button type="button" class="mx-link" data-cr="cam-setup" title="Link player names to their cams, layout and sizes">Set up</button></div><div class="mx-cam-list"></div></div>'
       +       '<button type="button" class="mx-btn mx-btn-wide" data-cr="dock">' + svg('graphics') + 'Show a graphic</button>'
       +     '</div>'
       +     '<div class="mx-card mx-look">'
@@ -926,6 +927,7 @@
       else if (k === 'setup-hide') { try { localStorage.setItem(SETUP_KEY, '1'); } catch (e2) {} cr._setupSig = ''; }
       else if (k === 'setup-go') { var dest = b.getAttribute('data-go'); if (ITEM[dest]) go(ITEM[dest].go); }
       else if (k === 'off') { var src = b.__src; if (src && document.contains(src)) src.click(); }
+      else if (k === 'cam-setup') { var gs = (state() || {}).activeGame; if (typeof window._ghOpen === 'function' && gs) window._ghOpen(gs + ':cameras'); }
       setTimeout(renderControlRoom, 80);
     }
   }
@@ -1248,7 +1250,35 @@
 
   // On air now: the program scene plus every graphic that is live, each with a Take off button that
   // presses the On Air rail's chip (so configurable graphics behave exactly as they do there).
+  // Webcam switches (HUD_LAYERS in app/08-production.js) for the game being produced.
+  // A webcam switch flips its HUD layer (same message the Game settings switch sends).
+  document.addEventListener('change', function (e) {
+    var t = e.target && e.target.closest && e.target.closest('[data-cam]');
+    if (!t || typeof send !== 'function') return;
+    var l = (window.HUD_LAYERS || []).find(function (x) { return x.key === t.getAttribute('data-cam'); });
+    if (l) send(l.msg, t.checked ? l.showData : l.hideData);
+  });
+  function renderCams(s) {
+    var box = cr.querySelector('.mx-cams');
+    if (!box) return;
+    var layers = typeof window.hudLayersFor === 'function' ? window.hudLayersFor(s.activeGame) : [];
+    box.hidden = !layers.length;
+    var host = box.querySelector('.mx-cam-list');
+    var sig = layers.map(function (l) { return l.key + (l.check(s) ? '1' : '0'); }).join('|');
+    if (host._sig === sig) return;
+    host._sig = sig;
+    host.textContent = '';
+    layers.forEach(function (l) {
+      var row = mk('label', 'mx-switch mx-cam-row');
+      row.title = l.hint;
+      row.innerHTML = '<span></span><input type="checkbox" data-cam="' + l.key + '"><i></i>';
+      row.querySelector('span').textContent = l.label;
+      row.querySelector('input').checked = l.check(s);
+      host.appendChild(row);
+    });
+  }
   function renderAir(s) {
+    renderCams(s);
     var obs = s.obs || {};
     var pg = cr.querySelector('.mx-pgm');
     var sv = pg.querySelector('.mx-pgm-v');

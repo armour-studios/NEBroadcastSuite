@@ -78,9 +78,14 @@
   // The list comes from app.js's ONAIR_SCENES (the On Air grid), so every switch here is the same
   // flag the rest of the app toggles. The break screen has its own card, so it is not offered.
   const OS_KEY = 'ne_dkc_onscreen';
-  const OS_DEFAULT = ['ticker', 'casters', 'banner'];
+  const OS_DEFAULT = ['ticker', 'casters', 'banner', 'facecams'];
   let osEditing = false;
-  function osAll() { return (window.ONAIR_SCENES || []).filter((x) => x && x.key && x.key !== 'break'); }
+  // Graphics, then the webcam layers of the game being produced (app/08-production.js HUD_LAYERS).
+  function osAll() {
+    const st = (typeof currentState !== 'undefined' && currentState) || {};
+    const cams = typeof window.hudLayersFor === 'function' ? window.hudLayersFor(st.activeGame) : [];
+    return (window.ONAIR_SCENES || []).filter((x) => x && x.key && x.key !== 'break').concat(cams);
+  }
   function osChosen() {
     try { const a = JSON.parse(localStorage.getItem(OS_KEY) || 'null'); if (Array.isArray(a)) return a.filter((k) => typeof k === 'string'); } catch (e) {}
     return OS_DEFAULT.slice();

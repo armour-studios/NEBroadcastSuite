@@ -489,6 +489,19 @@
       }));
     },
 
+    // Webcam layers of the in-game HUD: the words producers use ("webcams", "facecams", "hide cams")
+    // land on the game's Cameras settings with the switch flashed. The Control room's Live now card
+    // has the same switches.
+    function webcams() {
+      const s = st();
+      const layers = typeof window.hudLayersFor === 'function' ? window.hudLayersFor(s.activeGame) : [];
+      return layers.map((l) => ({
+        n: l.label, sub: (l.check(s) ? 'Showing' : 'Hidden') + ' · show / hide', w: 'Webcams', group: 'Graphics',
+        k: 'webcam webcams web cam facecam facecams face cam cams camera cameras player cams hud overlay show hide turn off on ' + l.key,
+        go: () => nav({ game: s.activeGame + ':' + (l.setup || 'cameras'), flash: l.key === 'replaycams' ? 'check-replay-cams' : 'check-facecams-enabled' })
+      }));
+    },
+
     function games() {
       const g = st().games || {};
       return Object.keys(g).map((id) => ({
