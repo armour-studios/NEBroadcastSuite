@@ -10,9 +10,10 @@ const path = require('path');
 const Module = require('module');
 
 const root = path.join(__dirname, '..');
-const src = fs.readFileSync(path.join(root, 'server.js'), 'utf8').replace(/\r\n/g, '\n');
-// Twitch services moved out of server.js (refactor step 3).
-const twitchSrc = fs.readFileSync(path.join(root, 'backend', 'twitch', 'services.js'), 'utf8').replace(/\r\n/g, '\n');
+// server.js plus the modules split out of it (refactor step 3): checks look code up by name,
+// wherever it lives now (test/lib/server-source.js).
+const src = require('./lib/server-source').serverSource();
+const twitchSrc = src;
 function fn(name) {
   const start = src.indexOf('\nfunction ' + name + '(');
   assert.ok(start >= 0, name + ' not found');

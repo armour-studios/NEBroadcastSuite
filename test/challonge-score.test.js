@@ -15,7 +15,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+const src = require('./lib/server-source').serverSource();   // server.js + modules split out of it
 
 // Pull out `const GAME_RE = ...` through the end of `function parseScore(...) { ... }`.
 const start = src.indexOf('const GAME_RE =');
