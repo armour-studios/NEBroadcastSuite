@@ -86,6 +86,7 @@
       "obs/**/*",
       "overlay/**/*",
       "control-panel/**/*",
+      "!control-panel/app/**",
       "assets/**/*",
       "streamdeck-plugin/dist/*.streamDeckPlugin"
     ]
