@@ -133,7 +133,10 @@ function startServerProcess(baseDir) {
       }
     });
   }
-  spawn();
+  // Electron before 22 has no utilityProcess (a checkout whose node_modules was not reinstalled):
+  // run the server in this process instead. Deferred so main.js has registered its callbacks.
+  if (!utilityProcess || typeof utilityProcess.fork !== 'function') setImmediate(() => fallbackToMain('no utilityProcess in this Electron'));
+  else spawn();
 
   function fallbackToMain(code) {
     crashLog('server process could not start (code ' + code + '); running the server in the main process');
