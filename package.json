@@ -51,22 +51,25 @@
       "output": "dist"
     },
     "win": {
-      "icon": "assets/icon.png",
+      "icon": "assets/installer/app.ico",
       "target": [
         "nsis"
       ],
       "sign": "./sign.js"
     },
     "nsis": {
-      "oneClick": false,
+      "oneClick": true,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
+      "runAfterFinish": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "runAfterFinish": true,
       "shortcutName": "NE Broadcast Suite",
-      "installerHeader": "assets/installer/header.bmp",
-      "installerSidebar": "assets/installer/sidebar.bmp",
+      "installerIcon": "assets/installer/app.ico",
+      "uninstallerIcon": "assets/installer/app.ico",
+      "installerHeaderIcon": "assets/installer/app.ico",
+      "uninstallDisplayName": "NE Broadcast Suite",
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "NE-Broadcast-Suite-Setup-${version}.${ext}",
       "include": "build/installer.nsh"
     },
     "publish": [

@@ -200,7 +200,7 @@ function syncRlHideNativeUiHotkey() {
 }
 
 function createTray() {
-  const iconPath = path.join(__dirname, 'assets', 'icon.png');
+  const iconPath = path.join(__dirname, 'assets', 'app-icon.png');
   let icon;
   try {
     icon = nativeImage.createFromPath(iconPath);
@@ -280,7 +280,7 @@ function createControlPanel() {
     minHeight: 600,
     show: false,   // paint fully before showing to eliminate white-flash
     title: 'NE | Broadcast Studio',
-    icon: path.join(__dirname, 'assets', 'icon.png'),
+    icon: path.join(__dirname, 'assets', 'app-icon.png'),
     backgroundColor: '#0b0c0f',
     // Frameless: drop the OS title bar so our header sits at the very top, but keep
     // the native min/max/close buttons overlaid at the top-right (no custom IPC needed).
@@ -436,7 +436,7 @@ function setupPopoutHandler() {
     const authWin = new BrowserWindow({
       width: 500, height: 760,
       title: 'Sign in with Discord',
-      icon: path.join(__dirname, 'assets', 'icon.png'),
+      icon: path.join(__dirname, 'assets', 'app-icon.png'),
       backgroundColor: '#111318',
       parent: controlPanel,
       modal: false,
@@ -474,7 +474,7 @@ function setupPopoutHandler() {
     const authWin = new BrowserWindow({
       width: 520, height: 780,
       title: 'Sign in with Twitch',
-      icon: path.join(__dirname, 'assets', 'icon.png'),
+      icon: path.join(__dirname, 'assets', 'app-icon.png'),
       backgroundColor: '#18181b',
       parent: controlPanel,
       modal: false,
@@ -521,7 +521,7 @@ function setupPopoutHandler() {
       minWidth: isTimer ? 320 : 640, minHeight: isTimer ? 380 : 400,
       alwaysOnTop: isTimer,
       title: 'NE | ' + label,
-      icon: path.join(__dirname, 'assets', 'icon.png'),
+      icon: path.join(__dirname, 'assets', 'app-icon.png'),
       backgroundColor: '#0b0c0f',
       titleBarStyle: 'hidden',
       titleBarOverlay: { color: 'rgba(0,0,0,0.40)', symbolColor: '#ffffff', height: 36 },

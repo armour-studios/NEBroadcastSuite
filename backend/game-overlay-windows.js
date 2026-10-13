@@ -239,7 +239,7 @@ function open(app, opts) {
     focusable: true,
     alwaysOnTop: true,
     title: 'NE Overlay — ' + (opts.name || key),
-    icon: path.join(__dirname, '..', 'assets', 'icon.png'),
+    icon: path.join(__dirname, '..', 'assets', 'app-icon.png'),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
