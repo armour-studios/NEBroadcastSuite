@@ -6,7 +6,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+const src = require('./lib/server-source').serverSource();
 const start = src.indexOf('function normalizeTokonLayout');
 assert.ok(start > 0, 'normalizeTokonLayout not found in server.js');
 const end = src.indexOf('\n}', start) + 2;

@@ -15,7 +15,7 @@ const competition = require('../backend/competition.js');
 
 // Normalised to LF: on a Windows checkout (core.autocrlf=true) server.js is CRLF, and the handler
 // slicing below searches for LF-delimited closing braces.
-const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8').replace(/\r\n/g, '\n');
+const src = require('./lib/server-source').serverSource().replace(/\r\n/g, '\n');
 function fn(name) {
   let start = src.indexOf('\nfunction ' + name + '(');
   if (start < 0) start = src.indexOf('\nasync function ' + name + '(');

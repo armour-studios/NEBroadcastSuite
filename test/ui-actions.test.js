@@ -11,7 +11,7 @@ const read = (p) => fs.readFileSync(path.join(root, p), 'utf8').replace(/\r\n/g,
 const app = read('control-panel/app.js');
 const html = read('control-panel/index.html');
 const gc = read('control-panel/gameconfig.js');
-const server = read('server.js');
+const server = require('./lib/server-source').serverSource();   // server.js + modules split out of it
 let pass = 0;
 const ok = (cond, why) => { assert.ok(cond, why); pass++; };
 

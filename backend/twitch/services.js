@@ -1,5 +1,5 @@
 // backend/twitch/services.js — Twitch EventSub, stream state (viewers, ads, stream info), chat
-// (IRC + automations), the EventSub HTTP routes and Twitch clips. Moved out of server.js unchanged
+// (IRC + automations), the EventSub HTTP routes and Twitch clips. moved out of server.js unchanged
 // (refactor step 3); server.js creates it once with createTwitchServices(ctx).
 //
 // ctx: stable references (the state object, helpers, the flow bus) plus live getters for the

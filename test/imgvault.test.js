@@ -7,7 +7,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+const src = require('./lib/server-source').serverSource();
 const start = src.indexOf('function _imgHash(');
 const end = src.indexOf('// Diagnostic', start);
 assert.ok(start > 0 && end > start, 'image vault functions not found in server.js');

@@ -8,7 +8,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+const src = require('./lib/server-source').serverSource();
 const between = (a, b) => {
   const i = src.indexOf(a), j = src.indexOf(b, i + 1);
   assert.ok(i >= 0 && j > i, 'markers not found: ' + a + ' .. ' + b);
@@ -38,9 +38,9 @@ function makeWorld() {
   const WS_HANDLERS = { set_winner: (m) => { winnerCalls.push(m.data); if ('visible' in m.data) state.winner.visible = !!m.data.visible; } };
   const flowBus = { emit() {} };
   // eslint-disable-next-line no-new-func
-  const api = new Function('state', 'WS_HANDLERS', 'flowBus', 'savedTeams', 'abbrForTeamName', 'retuneRoundLabel',
+  const api = new Function('state', 'WS_HANDLERS', 'flowBus', 'savedTeams', 'abbrForTeamName', 'retuneRoundLabel', 'ctx',
     code + '\nreturn { parseWeapons, trackShots, updateKillfeed, csApplyAutoTeams, csShowAutoWinner, csHideAutoWinner, swapTeamSides, setManualSwap: (k) => { _csManualSwapKey = k; }, csGameTeamsKey };')(
-    state, WS_HANDLERS, flowBus, [], () => null, () => {});
+    state, WS_HANDLERS, flowBus, [], () => null, () => {}, { state, savedTeams: [], abbrForTeamName: () => null, retuneRoundLabel: () => {} });
   return { state, api, winnerCalls };
 }
 

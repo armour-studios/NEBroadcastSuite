@@ -10,6 +10,7 @@ const assert = require('assert');
 
 const root = path.join(__dirname, '..');
 const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
+// The dispatcher's switch lives in server.js; split-out modules are scanned for registry entries below.
 const server = read('server.js');
 let pass = 0;
 const ok = (c, why) => { assert.ok(c, why); pass++; };

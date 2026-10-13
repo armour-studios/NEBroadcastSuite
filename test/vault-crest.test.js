@@ -9,11 +9,12 @@ const os = require('os');
 const path = require('path');
 const teamDb = require('../backend/team-db.js');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+const src = require('./lib/server-source').serverSource();
 const start = src.indexOf('function propagateVaultCrest');
 assert.ok(start > 0, 'propagateVaultCrest not found in server.js');
 const end = src.indexOf('\n}', start) + 2;
-const make = new Function('savedTeams', 'state', 'teamDb', src.slice(start, end) + ' return propagateVaultCrest;');
+// Split-out code reads some values as ctx.<name> (live getters): give it a ctx of the same stand-ins.
+const make = (savedTeams, state, teamDb) => new Function('savedTeams', 'state', 'teamDb', 'ctx', src.slice(start, end) + ' return propagateVaultCrest;')(savedTeams, state, teamDb, { savedTeams, state });
 
 const OLD = 'data:image/png;base64,OLD', NEW = 'data:image/png;base64,NEW';
 

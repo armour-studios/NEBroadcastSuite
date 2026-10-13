@@ -9,7 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const competition = require('../backend/competition.js');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8').replace(/\r\n/g, '\n');
+const src = require('./lib/server-source').serverSource().replace(/\r\n/g, '\n');
 function fn(name) {
   let start = src.indexOf('\nfunction ' + name + '(');
   if (start < 0) start = src.indexOf('\nasync function ' + name + '(');

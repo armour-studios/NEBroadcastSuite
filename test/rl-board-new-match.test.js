@@ -7,7 +7,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8').replace(/\r\n/g, '\n');
+const src = require('./lib/server-source').serverSource().replace(/\r\n/g, '\n');
 function fn(name) {
   const start = src.indexOf('\nfunction ' + name + '(');
   assert.ok(start >= 0, name + ' not found');

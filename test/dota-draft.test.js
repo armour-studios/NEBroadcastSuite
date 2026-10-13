@@ -8,7 +8,7 @@ const path = require('path');
 const root = path.join(__dirname, '..');
 const draft = require('../backend/draft');
 const gsi = require('../backend/dota-gsi');
-const server = fs.readFileSync(path.join(root, 'server.js'), 'utf8').replace(/\r\n/g, '\n');
+const server = require('./lib/server-source').serverSource().replace(/\r\n/g, '\n');
 const overlay = fs.readFileSync(path.join(root, 'overlay', 'draft.html'), 'utf8');
 let pass = 0;
 const ok = (cond, why) => { assert.ok(cond, why); pass++; };

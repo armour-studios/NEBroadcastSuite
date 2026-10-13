@@ -2,7 +2,11 @@
 // with createChallengermode(ctx). ctx carries stable references plus live getters (ctx.<name>) for values
 // server.js replaces at runtime, and set_<name>(v) for the ones this code writes.
 module.exports = function createChallengermode(ctx) {
-  const { https, createChallengermodeClient, parseChallengermodeId, cmData, state, saveTeams, adoptEventGame, pollLoop, saveAppState, pushEntrantToSide, retuneRoundLabel, syncActiveBracketPhase, adoptEventName, broadcastFullState } = ctx;
+  const { https, createChallengermodeClient, cmData, state, saveTeams, adoptEventGame, pollLoop, saveAppState, pushEntrantToSide, broadcastFullState } = ctx;
+  const parseChallengermodeId = (...a) => ctx.parseChallengermodeId(...a);   // created later in server.js: resolved on call
+  const retuneRoundLabel = (...a) => ctx.retuneRoundLabel(...a);   // created later in server.js: resolved on call
+  const syncActiveBracketPhase = (...a) => ctx.syncActiveBracketPhase(...a);   // created later in server.js: resolved on call
+  const adoptEventName = (...a) => ctx.adoptEventName(...a);   // created later in server.js: resolved on call
 
 // ─── Challengermode integration ──────────────────────────────────────────────
 // challengermode.com — NOT Challonge. GraphQL, bot-token auth, stage-based tournaments.

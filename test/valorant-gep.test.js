@@ -59,7 +59,7 @@ check(!/\bp\[`\$\{slot\}_util`\]/.test(overlay) && !/p\[slot\s*\+\s*'_util'\]/.t
 check(!/spentCredits/.test(overlay), 'the overlay no longer reads spentCredits');
 
 // The dead League poller must not come back.
-const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+const server = require('./lib/server-source').serverSource();
 check(!/_valorantFetch/.test(server) && !/startValorantPolling/.test(server),
   'the League-endpoint Valorant poller is gone from server.js');
 check(/applyValorantGep/.test(server) && /\/api\/val-gep/.test(server),

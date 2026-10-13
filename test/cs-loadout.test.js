@@ -16,7 +16,7 @@ const path = require('path');
 const vm = require('vm');
 const assert = require('assert');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+const src = require('./lib/server-source').serverSource();
 const start = src.indexOf('const CS_NADE_ORDER');
 const fnAt = src.indexOf('function parseWeapons(');
 if (start < 0 || fnAt < 0 || start > fnAt) { console.error('FAIL: parseWeapons / CS_NADE_ORDER not found in server.js'); process.exit(1); }

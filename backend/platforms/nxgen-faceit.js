@@ -2,7 +2,13 @@
 // with createNxgenFaceit(ctx). ctx carries stable references plus live getters (ctx.<name>) for values
 // server.js replaces at runtime, and set_<name>(v) for the ones this code writes.
 module.exports = function createNxgenFaceit(ctx) {
-  const { https, getNxgenEventLive, faceit, state, adoptEventGame, pollLoop, saveAppState, touchMyEvents, upsertPlayerProfile, finalizeAndResetSeries, formatTickerFeed, setStartggQueuePolling, setChallongePolling, setChallengermodePolling, logoForTeamName, retuneRoundLabel, syncActiveBracketPhase, fetchEventSeeding, adoptEventName, pickEventImage, broadcastFullState } = ctx;
+  const { https, getNxgenEventLive, faceit, state, adoptEventGame, pollLoop, saveAppState, touchMyEvents, upsertPlayerProfile, finalizeAndResetSeries, formatTickerFeed, setStartggQueuePolling, setChallongePolling, setChallengermodePolling, broadcastFullState } = ctx;
+  const logoForTeamName = (...a) => ctx.logoForTeamName(...a);   // created later in server.js: resolved on call
+  const retuneRoundLabel = (...a) => ctx.retuneRoundLabel(...a);   // created later in server.js: resolved on call
+  const syncActiveBracketPhase = (...a) => ctx.syncActiveBracketPhase(...a);   // created later in server.js: resolved on call
+  const fetchEventSeeding = (...a) => ctx.fetchEventSeeding(...a);   // created later in server.js: resolved on call
+  const adoptEventName = (...a) => ctx.adoptEventName(...a);   // created later in server.js: resolved on call
+  const pickEventImage = (...a) => ctx.pickEventImage(...a);   // created later in server.js: resolved on call
 
 // ─── NXGEN integration ────────────────────────────────────────────────────────
 
