@@ -126,7 +126,17 @@ function forNode() {
   const noHost = () => Promise.reject(new Error('needs the app (not available in plain node)'));
   return {
     mode,
-    dialog: undefined, shell: undefined, app: undefined, powerMonitor: undefined,
+    dialog: undefined, shell: undefined, powerMonitor: undefined,
+    // NE_USERDATA (tests): enough of `app` for server.start() to run in plain node.
+    app: process.env.NE_USERDATA ? {
+      isPackaged: false,
+      getVersion: () => { try { return require('../package.json').version; } catch (e) { return '0.0.0'; } },
+      getName: () => 'ne-broadcast-suite',
+      getAppPath: () => require('path').join(__dirname, '..'),
+      getPath: (name) => (name === 'userData' ? process.env.NE_USERDATA : require('os').tmpdir()),
+      isReady: () => true,
+      quit: () => {}
+    } : undefined,
     secrets: {
       encrypt: (plain) => (plain ? String(plain) : ''),
       decrypt: (stored) => (!stored || typeof stored !== 'string' || /^enc2?:/.test(stored)) ? '' : stored
