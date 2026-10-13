@@ -21108,6 +21108,15 @@ function checkSmashGameOver() {
   return true;
 }
 
+// A message no handler knows (a typo in a button, a handler lost in a refactor) used to vanish
+// silently. Log each unknown type once; test/ws-handlers.test.js keeps the senders covered.
+const _unhandledTypes = new Set();
+function warnUnhandledType(type) {
+  const t = String(type || '(none)').slice(0, 60);
+  if (_unhandledTypes.has(t) || _unhandledTypes.size > 200) return;
+  _unhandledTypes.add(t);
+  console.warn("[bridge] no handler for message type '" + t + "'");
+}
 function handleControlMessage(msg, ws) {
   const h = WS_HANDLERS[msg.type];
   if (h) return void h(msg, ws);
@@ -29364,6 +29373,7 @@ function handleControlMessage(msg, ws) {
     }
 
     default:
+      warnUnhandledType(msg.type);
       break;
   }
 }
