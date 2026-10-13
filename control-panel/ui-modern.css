@@ -1696,6 +1696,8 @@ html[data-ui="modern"] .integration-panel div[style*="rgba(5, 95, 219"], html[da
   background: var(--surface2) !important; border: 1px solid var(--border) !important; border-radius: 12px !important;
 }
 html[data-ui="modern"] .integration-panel input[type="checkbox"] { width: 18px; height: 18px; }
+/* ...except the checkboxes drawn as switches (.msp-toggle): squeezed to 18px the knob slid out over the label text. */
+html[data-ui="modern"] .integration-panel .msp-toggle input[type="checkbox"], html[data-ui="modern"] .msp-toggle input[type="checkbox"] { width: 34px; height: 19px; min-width: 34px; }
 html[data-ui="modern"] .integration-panel label[for^="check-"] { font-weight: 600 !important; color: var(--text) !important; }
 html[data-ui="modern"] .integration-panel .int-card-status { font-size: 11.5px; }
 /* An <a> styled as a button must read as a button, not a link. */

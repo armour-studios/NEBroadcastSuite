@@ -257,7 +257,7 @@
     { n: 'Diagnostics / show timeline', w: 'Settings', k: 'diagnostics timeline log logs what happened debug stuck scene frozen wrong score troubleshoot problems errors health status history', to: { settings: 'diagnostics' } },
     { n: 'Appearance & Accent', w: 'Settings', k: 'theme colour color accent appearance dark light mode skin brand look', to: { settings: 'appearance', flash: 'settings-appearance' } },
     { n: 'Broadcast Defaults', w: 'Settings', k: 'default best of series overlay font clock defaults auto reload', to: { settings: 'broadcast', flash: 'settings-broadcast-defaults' } },
-    { n: 'Rocket League Automation', w: 'Settings', k: 'rl rocket league kickoff scene scoreboard replay transitions stats api pause', to: { game: 'rocket-league:automation' } },
+    { n: 'Rocket League Automation', w: 'Settings', k: 'rl rocket league kickoff scene scoreboard replay transitions stats api pause auto save replay clip each goal post game cut casters after scoreboard', to: { game: 'rocket-league:automation' } },
     { n: 'Replays & Clips', w: 'Settings', k: 'replay buffer clips montage encoder folders staging', to: { settings: 'replays', flash: 'set-sec-replays' } },
     { n: 'Brand Kits', w: 'Settings', k: 'brand kit sponsors packages logo colours colors', to: { settings: 'brandkits', flash: 'set-sec-brandkits' } },
     { n: 'Settings', w: 'Settings', k: 'settings preferences options organization org cloud account update bug report tour getting started', to: { tab: 'ajustes' } },

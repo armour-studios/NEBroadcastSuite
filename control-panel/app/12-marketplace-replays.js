@@ -1750,7 +1750,7 @@ async function poolPlayLive(ids) {
   _plLiveItems = (ids || []).map((id) => lib.find((cl) => cl.id === id)).filter(Boolean).map(clipToLiveItem);
   if (!_plLiveItems.length) return;
   const programScene = (el('rp-program-scene')?.value || '').trim();
-  if (!programScene) showToast('No OBS scene selected — set "Plays in" at the top of the Replays page so OBS switches to the replay-player source.', '#fbbf24', 5000);
+  if (!programScene) showToast('No scene selected: set "Plays in" at the top of Replay Studio so your streaming software switches to the replay player.', '#fbbf24', 5000);
   _plLoop = !!el('rp-loop')?.checked;
   _plReturnScene = '';
   _plScene = programScene;

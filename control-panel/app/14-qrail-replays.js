@@ -1731,7 +1731,7 @@ let _rpCaptureBusy = false;
 function rpCaptureReplay(source) {
   if (_rpCaptureBusy) return;
   const obs = (currentState && currentState.obs) || {};
-  if (!obs.connected) { showToast('Connect to OBS first (Settings ▸ OBS).', '#f56565'); return; }
+  if (!obs.connected) { showToast('Connect your streaming software first (Apps > Streaming software).', '#f56565'); return; }
   _rpCaptureBusy = true;
   rpSyncCaptureUi();
   const t = new Date();
