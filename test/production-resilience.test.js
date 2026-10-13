@@ -159,7 +159,7 @@ const ok = (cond, why) => { assert.ok(cond, why); pass++; };
   ok(/if \(\(sceneName \|\| ''\) === prev\) return;/.test(src), 'same-scene reports ignored');
   ok(/if \(!sceneName\) \{ broadcastFullState\(\); return; \}/.test(src), 'disconnect (empty scene) runs no flows and keeps previousScene');
   ok(/if \(state\.commercial && state\.commercial\.active\) \{?[^\n]{0,80}return/.test(fn('startCommercial')), 'a second commercial start cannot strand the show');
-  ok(/if \(cutSeq !== _manualCutSeq\)/.test(src), 'a slow transition-armed cut cannot land after a newer cut');
+  ok(/if \(cutSeq !== (?:ctx\.)?_manualCutSeq\)/.test(src), 'a slow transition-armed cut cannot land after a newer cut');
 
   // Runaway flows pause themselves.
   {

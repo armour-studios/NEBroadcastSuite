@@ -28,7 +28,8 @@ function scanRegistry(file, src) {
   for (const b of src.matchAll(/registerWsHandlers\(Object\.fromEntries\(\s*\[([^\]]+)\]/g)) {
     for (const m of b[1].matchAll(/'([a-z0-9_]+)'/g)) registry.set(m[1], file);
   }
-  for (const b of src.matchAll(/registerWsHandlers\(\{([\s\S]*?)\n\}\);/g)) {
+  // registerWsHandlers({ ... }) in server.js, or a backend/ws/ module's `const handlers = { ... };`
+  for (const b of src.matchAll(/(?:registerWsHandlers\(\{|\nconst handlers = \{)([\s\S]*?)\n\}\)?;/g)) {
     for (const m of b[1].matchAll(/^ {2}(?:async )?([a-z0-9_]+)\s*\([^)]*\)\s*\{/gm)) {
       if (/^(if|for|while|switch|catch|return|function)$/.test(m[1])) continue;
       assert.ok(!registry.has(m[1]), `'${m[1]}' is registered twice (${registry.get(m[1])} and ${file})`);
