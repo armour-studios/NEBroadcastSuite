@@ -4085,6 +4085,8 @@ function loadState() {
             ? { host: saved.casters.showRoles.host || '', observer: saved.casters.showRoles.observer || '' }
             : { host: '', observer: '' },
           shifts: Array.isArray(saved.casters.shifts) ? saved.casters.shifts : [],
+          // Prev shift undo history (capped at 10 by the shift handler) survives a restart too.
+          shiftHistory: Array.isArray(saved.casters.shiftHistory) ? saved.casters.shiftHistory.slice(-10) : [],
           activeShiftId: typeof saved.casters.activeShiftId === 'string' ? saved.casters.activeShiftId : '',
           // Show Deck support crew — EVENT-scoped [{crewId, role}] so deck add/remove never
           // rewrites the crew record's durable group. Non-array → migrated from crew groups below.
@@ -4222,7 +4224,8 @@ function loadState() {
           side: (saved.intro.side === 'orange' || saved.intro.side === 'blue') ? saved.intro.side : 'blue',
           title: saved.intro.title || '',
           style: [1, 2].includes(Number(saved.intro.style)) ? Number(saved.intro.style) : 1,
-          showFooter: false   // always reset — was auto-true before; opt-in via checkbox now
+          showFooter: false,  // always reset — was auto-true before; opt-in via checkbox now
+          showRealName: saved.intro.showRealName !== false   // was dropped on every restart (persist-roundtrip test)
         };
       }
       if (saved.owMatch && typeof saved.owMatch === 'object') {
@@ -4558,6 +4561,14 @@ function loadState() {
         if (riot.PLATFORMS[saved.riot.platform]) state.riot.platform = saved.riot.platform;
       }
       state.riot.keyKind = riot.keyKind(riotApiKey);
+      if (saved.background && typeof saved.background === 'object') {
+        const bg = saved.background;
+        if (['solid', 'gradient', 'image'].includes(bg.type)) state.background.type = bg.type;
+        if (typeof bg.color1 === 'string') state.background.color1 = bg.color1.slice(0, 20);
+        if (typeof bg.color2 === 'string') state.background.color2 = bg.color2.slice(0, 20);
+        if (typeof bg.angle === 'number') state.background.angle = Math.max(0, Math.min(360, bg.angle));
+        if (typeof bg.imageUrl === 'string') state.background.imageUrl = bg.imageUrl.slice(0, 2000);
+      }
       if (saved.liquipedia && typeof saved.liquipedia === 'object') {
         const lq = saved.liquipedia;
         state.liquipedia.enabled = !!lq.enabled;
@@ -4900,211 +4911,221 @@ function loadState() {
   }
 }
 
+// The persisted shape of the app: everything loadState() restores. Pure (no I/O) so the save/load
+// round trip can be tested (test/persist-roundtrip.test.js).
+function buildSaveSnapshot() {
+  return {
+    activeGame: state.activeGame,
+    themesByGame: state.themesByGame,
+    activeBrandKitId: state.activeBrandKitId,
+    useBrandColors: state.useBrandColors,
+    colorMode: state.colorMode,
+    clock24h: state.clock24h,
+    followSetGame: !!state.followSetGame,
+    showSeries: state.showSeries,
+    rlReplayTransitions: state.rlReplayTransitions,
+    rlSponsorRoll: state.rlSponsorRoll,
+    worldsSidebar: state.worldsSidebar,
+    worldsTicker: state.worldsTicker,
+    rlScoreboardSeparate: state.rlScoreboardSeparate,
+    seriesStats: state.seriesStats,
+    defaultBestOf: state.defaultBestOf,
+    eventName: state.eventName,
+    eventNameSlug: state.eventNameSlug || '',
+    gameLabel: state.gameLabel,
+    roundLabel: state.roundLabel,
+    speedUnit: state.speedUnit,
+    teamRecord: state.teamRecord,
+    perfMode: (function () { const pm = state.perfMode || {}; return {
+      enabled: pm.enabled !== false, always: !!pm.always,
+      reduceAnimations: !!pm.reduceAnimations, pausePreviews: !!pm.pausePreviews,
+      broadcastRate: pm.broadcastRate || 'smooth' }; })(),
+    orgLibrary: (function () { const o = state.orgLibrary || {}; return { autoSync: o.autoSync !== false, profileId: o.profileId || null }; })(),
+    autoTeamsFromGame: state.autoTeamsFromGame,
+    // Settings only — the vault's records live in team-db.json (see backend/team-db.js).
+    teamVault: (function () { const v = state.teamVault || {}; return { enabled: v.enabled !== false, autoLink: v.autoLink !== false, autoEnrich: v.autoEnrich !== false }; })(),
+    startggLeagueStandings: state.startggLeagueStandings,
+    fontFamily: state.fontFamily,
+    facecamsEnabled: state.facecamsEnabled,
+    lanSeats: (() => { const { seats, seen, agentError, ...keep } = state.lanSeats || {}; return keep; })(),
+    replayCams: state.replayCams,
+    deskFooter: state.deskFooter,
+    preshow: state.preshow,
+    banner: state.banner,
+    casters: state.casters,
+    credits: state.credits,
+    ticker: state.ticker,
+    draftAuto: { enabled: !!(state.draft && state.draft.auto && state.draft.auto.enabled), lockfilePath: (state.draft && state.draft.auto && state.draft.auto.lockfilePath) || '' },
+    draftLook: draftLookPrefs(state.draft),
+    dota: { cfgPath: state.dota.cfgPath || '', autoDraft: state.dota.autoDraft !== false, radiantSide: state.dota.radiantSide === 'b' ? 'b' : 'a' },
+    lolHudMode: (state.lol && state.lol.hudMode) || 'auto',
+    lolOcr: { enabled: !!(state.lol && state.lol.ocr && state.lol.ocr.enabled), displayId: (state.lol && state.lol.ocr && state.lol.ocr.displayId) || '', regions: (state.lol && state.lol.ocr && state.lol.ocr.regions) || undefined },
+    br: {
+      enabled: state.br.enabled, game: state.br.game, event: state.br.event, format: state.br.format,
+      scoringPreset: state.br.scoringPreset, scoring: state.br.scoring,
+      results: state.br.results, playerResults: state.br.playerResults, source: state.br.source,
+      // Lobby: mode/format/field are event setup and must survive a restart mid-show. The
+      // graphics (compare/victory) and live counters are not saved — they're this-moment state.
+      mode: state.br.mode, teamFormat: state.br.teamFormat, lobby: state.br.lobby,
+      dropmap: state.br.dropmap,
+      leagueId: state.br.leagueId, seriesId: state.br.seriesId,
+      matrixId: state.br.matrixId, matchMultipliers: state.br.matchMultipliers,
+      liveMatch: (state.br.live && state.br.live.match) || 1
+    },
+    pointMatrices: state.pointMatrices || [],
+    apex: { scoring: state.apex && state.apex.scoring, teamMap: (state.apex && state.apex.teamMap) || {}, event: (state.apex && state.apex.event) || {}, games: (state.apex && state.apex.games) || [], port: (state.apex && state.apex.port) || 7777 },
+    // Settings only. gepData/data are live payloads from a spectator client or MC server —
+    // restoring a stale scoreboard on boot would be worse than starting empty.
+    r6: { autoScore: !!(state.r6 && state.r6.autoScore) },
+    bedwars: { autoScore: !!(state.bedwars && state.bedwars.autoScore) },
+    bedwarsToken: encryptSecret(bedwarsToken),
+    adProofSessions: state.adProofSessions || [],
+    playerProfiles: state.playerProfiles || {},
+    overtime: state.overtime,
+    replay: (({ program, preview, ...look }) => look)(state.replay || {}),   // buses are runtime-only
+    scoreboardAd: state.scoreboardAd,
+    // Post-game board style (Default/Glass/Block/Radar/Compare) + show-stats. loadState() already
+    // restored this, but it was never written, so the pick reset to Default on every restart.
+    rlStatsScreen: state.rlStatsScreen,
+    watchlist: state.watchlist,
+    teamSpotlight: state.teamSpotlight,
+    breakScreen: {
+      visible: state.breakScreen.visible,
+      title: state.breakScreen.title,
+      message: state.breakScreen.message,
+      finalMessage: state.breakScreen.finalMessage
+    },
+    // Persist content for the momentary production graphics; visibility is reset on restart.
+    winner: { side: state.winner.side, name: state.winner.name, logo: state.winner.logo, color: state.winner.color, subtitle: state.winner.subtitle, style: state.winner.style },
+    veto: { title: state.veto.title, maps: state.veto.maps },
+    intro: { side: state.intro.side, title: state.intro.title, style: state.intro.style, showFooter: state.intro.showFooter, showRealName: state.intro.showRealName !== false },
+    owMatch: { visible: !!state.owMatch.visible, format: state.owMatch.format, currentMapIdx: state.owMatch.currentMapIdx, bansByMap: state.owMatch.bansByMap, attackSide: state.owMatch.attackSide || null, showAttack: !!state.owMatch.showAttack, gameMode: state.owMatch.gameMode || 'escort', showMapLabels: state.owMatch.showMapLabels !== false, mapWinners: Array.isArray(state.owMatch.mapWinners) ? state.owMatch.mapWinners : [], mapModes: Array.isArray(state.owMatch.mapModes) ? state.owMatch.mapModes : [], seriesLabel: state.owMatch.seriesLabel === 'bo' ? 'bo' : 'ft' },
+    mrMatch: (function(){ const m=state.mrMatch||{}; return { visible: m.visible !== false, format: m.format || 'BO5', bansByMap: m.bansByMap || [], gameMode: m.gameMode || 'convergence', showMapLabels: m.showMapLabels !== false, mapWinners: Array.isArray(m.mapWinners)?m.mapWinners:[], mapModes: Array.isArray(m.mapModes)?m.mapModes:[], gepData: m.gepData||null }; })(),
+    customOverlayLayouts: state.customOverlayLayouts || {},
+    gameConfigs: state.gameConfigs || {},
+    gameConfigVersions: state.gameConfigVersions || {},
+    gameConfigFrom: state.gameConfigFrom || {},
+    bestOf: state.bestOf,
+    teams: state.teams,
+    series: state.series,
+    activePlayer: state.activePlayer,
+    observedPlayer: state.observedPlayer,
+    smash: state.smash,
+    brawlhalla: state.brawlhalla,
+    tokon: state.tokon,
+    chatCommands: state.chatCommands,
+    pulse: state.pulse,
+    matchTitles: { twitch: state.matchTitles.twitch, vod: state.matchTitles.vod, stripSponsors: state.matchTitles.stripSponsors, vodLog: state.matchTitles.vodLog },
+    match: state.match,
+    leagues: state.leagues,
+    myEvents: state.myEvents,
+    eventOps: state.eventOps,
+    game: { number: state.game.number },
+    startgg: state.startgg,
+    startggApiToken: encryptSecret(startggApiToken),
+    challonge: { enabled: state.challonge.enabled, tournamentSlug: state.challonge.tournamentSlug, selectedTournament: state.challonge.selectedTournament, logoMap: state.challonge.logoMap, autoFollow: state.challonge.autoFollow, gameId: state.challonge.gameId, pollSec: state.challonge.pollSec, budget: state.challonge.budget },
+    challengermode: { enabled: state.challengermode.enabled, tournamentId: state.challengermode.tournamentId,
+      selectedTournament: state.challengermode.selectedTournament, logoMap: state.challengermode.logoMap,
+      autoFollow: state.challengermode.autoFollow, gameId: state.challengermode.gameId,
+      pollSec: state.challengermode.pollSec, spaceId: state.challengermode.spaceId },
+    challengermodeRefreshKey: encryptSecret(challengermodeRefreshKey),
+    challongeApiKey: encryptSecret(challongeApiKey),
+    nxgen: { enabled: state.nxgen.enabled, eventSlug: state.nxgen.eventSlug, selectedEvent: state.nxgen.selectedEvent, logoMap: state.nxgen.logoMap, autoFollow: state.nxgen.autoFollow },
+    nxgenApiKey: encryptSecret(nxgenApiKey),
+    liquipediaApiKey: encryptSecret(liquipediaApiKey),
+    riot: { region: state.riot.region, platform: state.riot.platform },
+    riotApiKey: encryptSecret(riotApiKey),
+    // Persisted so the rolling hour survives a restart (Liquipedia's window keeps running
+    // regardless) and so cached results are re-used, which their terms explicitly ask for.
+    liquipediaBudget: _lpBudget.toJSON(),
+    liquipediaCache: _lpCache.toJSON(),
+    faceit: { enabled: state.faceit.enabled, competitionId: state.faceit.competitionId, competitionType: state.faceit.competitionType, organizerId: state.faceit.organizerId, organizerName: state.faceit.organizerName, selectedEvent: state.faceit.selectedEvent, logoMap: state.faceit.logoMap, autoFollow: state.faceit.autoFollow },
+    faceitApiKey: encryptSecret(faceitApiKey),
+    ballchasing: state.ballchasing,
+    ballchasingApiKey: encryptSecret(ballchasingApiKey),
+    sheets: { enabled: state.sheets.enabled, sheetUrl: state.sheets.sheetUrl, sheetId: state.sheets.sheetId,
+      title: state.sheets.title, saEmail: state.sheets.saEmail, autoSyncSec: state.sheets.autoSyncSec, maps: state.sheets.maps },
+    sheetsServiceAccount: encryptSecret(sheetsServiceAccount),
+    competitionApiKey: encryptSecret(competitionApiKey),
+    competitionFeedTokens: Object.keys(competitionFeedTokens).length ? encryptSecret(JSON.stringify(competitionFeedTokens)) : '',
+    competition: state.competition,
+    siteEvent: state.siteEvent,
+    activeEvent: state.activeEvent,
+    obs: {
+      enabled: state.obs.enabled,
+      app: state.obs.app,
+      url: state.obs.url,
+      slobsUrl: state.obs.slobsUrl,
+      autoSwitch: state.obs.autoSwitch,
+      autoReplayOnGoal: state.obs.autoReplayOnGoal,
+      postGameToCastersSec: state.obs.postGameToCastersSec,
+      kickoff: state.obs.kickoff,
+      scoreboardScene: state.obs.scoreboardScene,
+      postGame: state.obs.postGame,
+      commercialAutoReturn: state.obs.commercialAutoReturn,
+      scenes: state.obs.scenes
+    },
+    obsStinger: state.obsStinger,
+    obsPassword: encryptSecret(obsPassword),
+    slobsToken: encryptSecret(slobsToken),
+    vmix: { enabled: state.vmix.enabled, host: state.vmix.host, port: state.vmix.port },
+    switcher: { target: state.switcher.target },
+    // Persist the full bracket so it renders instantly on restart (then refreshes)
+    bracket: state.bracket,
+    upcoming: state.upcoming,
+    standings: state.standings,
+    brand: state.brand || null,                 // global accent fallback (Settings ▸ Appearance) when no kit is active
+    preshowPresets: state.preshowPresets || [], // Desk Show named topic rundowns
+    csgoCfgPath: state.csgo.cfgPath,
+    csgoAutoWinner: state.csgo.autoWinner !== false,
+    csgoShowHistory: !!state.csgo.showHistory,
+    csgoBuiltinRadar: state.csgo.builtinRadar !== false,
+    csgoProLayout: state.csgo.proLayout === 'stacked' ? 'stacked' : 'wide',
+    csgoAutoHud: state.csgo.autoHud !== false,
+    csgoObserverAssist: state.csgo.observerAssist !== false,
+    csgoRadarLayout: state.csgo.radarLayout || null,
+    csgoCinematic: { enabled: !!state.csgo.cinematic.enabled, port: state.csgo.cinematic.port, shots: state.csgo.cinematic.shots || {} },
+    director: {
+      enabled: state.director?.enabled !== false,
+      sensitivity: state.director?.sensitivity ?? 0.5,
+      autoSwitch: !!state.director?.autoSwitch
+    },
+    ai: {
+      shield: !!state.ai?.shield,
+      telemetry: {
+        enabled: state.ai?.telemetry?.enabled !== false,
+        uploadEnabled: !!state.ai?.telemetry?.uploadEnabled,
+        lastUploadAt: state.ai?.telemetry?.lastUploadAt || null,
+        lastUploadCount: state.ai?.telemetry?.lastUploadCount || 0
+      }
+    },
+    clips: {
+      captureMode: state.clips?.captureMode || 'manual',
+      autoCapture: state.clips?.captureMode === 'auto',   // derived from the mode; default OFF, never forced on
+      autoMontage: !!state.clips?.autoMontage,
+      replayFolder: state.clips?.replayFolder || '',
+      captureRules: state.clips?.captureRules || {}
+    },
+    rlSpectatorUi: state.rlSpectatorUi || rlSpectatorUi.DEFAULTS,
+    // Persist the measured goal-replay length so the FIRST goal of a session is timed off the real
+    // value instead of the overlay's 6000ms fallback (that's why goal 1 was off and the rest fine).
+    rlReplayLenMs: state.rlReplayLenMs || 0,
+    vdo: state.vdo,
+    flows: state.flows || [],
+    sceneBg: state.sceneBg || {},
+    scenePresets: state.scenePresets || {},
+    crew: state.crew || [],
+    // Read back by loadState() but never written before 2026-10-13 (persist-roundtrip test):
+    dateFormat: state.dateFormat === 'intl' ? 'intl' : 'us',
+    liquipedia: { enabled: !!state.liquipedia.enabled, wiki: state.liquipedia.wiki || '', contact: state.liquipedia.contact || '' },
+    liquipediaBudget: _lpBudget ? _lpBudget.toJSON() : undefined,   // keeps the rate limit across restarts
+    background: state.background
+  };
+}
 function _saveAppStateNow(sync = false) {
   let toSave = null;   // hoisted so the catch can diagnose it on a serialization failure
   try {
-    toSave = {
-      activeGame: state.activeGame,
-      themesByGame: state.themesByGame,
-      activeBrandKitId: state.activeBrandKitId,
-      useBrandColors: state.useBrandColors,
-      colorMode: state.colorMode,
-      clock24h: state.clock24h,
-      followSetGame: !!state.followSetGame,
-      showSeries: state.showSeries,
-      rlReplayTransitions: state.rlReplayTransitions,
-      rlSponsorRoll: state.rlSponsorRoll,
-      worldsSidebar: state.worldsSidebar,
-      worldsTicker: state.worldsTicker,
-      rlScoreboardSeparate: state.rlScoreboardSeparate,
-      seriesStats: state.seriesStats,
-      defaultBestOf: state.defaultBestOf,
-      eventName: state.eventName,
-      eventNameSlug: state.eventNameSlug || '',
-      gameLabel: state.gameLabel,
-      roundLabel: state.roundLabel,
-      speedUnit: state.speedUnit,
-      teamRecord: state.teamRecord,
-      perfMode: (function () { const pm = state.perfMode || {}; return {
-        enabled: pm.enabled !== false, always: !!pm.always,
-        reduceAnimations: !!pm.reduceAnimations, pausePreviews: !!pm.pausePreviews,
-        broadcastRate: pm.broadcastRate || 'smooth' }; })(),
-      orgLibrary: (function () { const o = state.orgLibrary || {}; return { autoSync: o.autoSync !== false, profileId: o.profileId || null }; })(),
-      autoTeamsFromGame: state.autoTeamsFromGame,
-      // Settings only — the vault's records live in team-db.json (see backend/team-db.js).
-      teamVault: (function () { const v = state.teamVault || {}; return { enabled: v.enabled !== false, autoLink: v.autoLink !== false, autoEnrich: v.autoEnrich !== false }; })(),
-      startggLeagueStandings: state.startggLeagueStandings,
-      fontFamily: state.fontFamily,
-      facecamsEnabled: state.facecamsEnabled,
-      lanSeats: (() => { const { seats, seen, agentError, ...keep } = state.lanSeats || {}; return keep; })(),
-      replayCams: state.replayCams,
-      deskFooter: state.deskFooter,
-      preshow: state.preshow,
-      banner: state.banner,
-      casters: state.casters,
-      credits: state.credits,
-      ticker: state.ticker,
-      draftAuto: { enabled: !!(state.draft && state.draft.auto && state.draft.auto.enabled), lockfilePath: (state.draft && state.draft.auto && state.draft.auto.lockfilePath) || '' },
-      draftLook: draftLookPrefs(state.draft),
-      dota: { cfgPath: state.dota.cfgPath || '', autoDraft: state.dota.autoDraft !== false, radiantSide: state.dota.radiantSide === 'b' ? 'b' : 'a' },
-      lolHudMode: (state.lol && state.lol.hudMode) || 'auto',
-      lolOcr: { enabled: !!(state.lol && state.lol.ocr && state.lol.ocr.enabled), displayId: (state.lol && state.lol.ocr && state.lol.ocr.displayId) || '', regions: (state.lol && state.lol.ocr && state.lol.ocr.regions) || undefined },
-      br: {
-        enabled: state.br.enabled, game: state.br.game, event: state.br.event, format: state.br.format,
-        scoringPreset: state.br.scoringPreset, scoring: state.br.scoring,
-        results: state.br.results, playerResults: state.br.playerResults, source: state.br.source,
-        // Lobby: mode/format/field are event setup and must survive a restart mid-show. The
-        // graphics (compare/victory) and live counters are not saved — they're this-moment state.
-        mode: state.br.mode, teamFormat: state.br.teamFormat, lobby: state.br.lobby,
-        dropmap: state.br.dropmap,
-        leagueId: state.br.leagueId, seriesId: state.br.seriesId,
-        matrixId: state.br.matrixId, matchMultipliers: state.br.matchMultipliers,
-        liveMatch: (state.br.live && state.br.live.match) || 1
-      },
-      pointMatrices: state.pointMatrices || [],
-      apex: { scoring: state.apex && state.apex.scoring, teamMap: (state.apex && state.apex.teamMap) || {}, event: (state.apex && state.apex.event) || {}, games: (state.apex && state.apex.games) || [], port: (state.apex && state.apex.port) || 7777 },
-      // Settings only. gepData/data are live payloads from a spectator client or MC server —
-      // restoring a stale scoreboard on boot would be worse than starting empty.
-      r6: { autoScore: !!(state.r6 && state.r6.autoScore) },
-      bedwars: { autoScore: !!(state.bedwars && state.bedwars.autoScore) },
-      bedwarsToken: encryptSecret(bedwarsToken),
-      adProofSessions: state.adProofSessions || [],
-      playerProfiles: state.playerProfiles || {},
-      overtime: state.overtime,
-      replay: (({ program, preview, ...look }) => look)(state.replay || {}),   // buses are runtime-only
-      scoreboardAd: state.scoreboardAd,
-      // Post-game board style (Default/Glass/Block/Radar/Compare) + show-stats. loadState() already
-      // restored this, but it was never written, so the pick reset to Default on every restart.
-      rlStatsScreen: state.rlStatsScreen,
-      watchlist: state.watchlist,
-      teamSpotlight: state.teamSpotlight,
-      breakScreen: {
-        visible: state.breakScreen.visible,
-        title: state.breakScreen.title,
-        message: state.breakScreen.message,
-        finalMessage: state.breakScreen.finalMessage
-      },
-      // Persist content for the momentary production graphics; visibility is reset on restart.
-      winner: { side: state.winner.side, name: state.winner.name, logo: state.winner.logo, color: state.winner.color, subtitle: state.winner.subtitle, style: state.winner.style },
-      veto: { title: state.veto.title, maps: state.veto.maps },
-      intro: { side: state.intro.side, title: state.intro.title, style: state.intro.style, showFooter: state.intro.showFooter, showRealName: state.intro.showRealName !== false },
-      owMatch: { visible: !!state.owMatch.visible, format: state.owMatch.format, currentMapIdx: state.owMatch.currentMapIdx, bansByMap: state.owMatch.bansByMap, attackSide: state.owMatch.attackSide || null, showAttack: !!state.owMatch.showAttack, gameMode: state.owMatch.gameMode || 'escort', showMapLabels: state.owMatch.showMapLabels !== false, mapWinners: Array.isArray(state.owMatch.mapWinners) ? state.owMatch.mapWinners : [], mapModes: Array.isArray(state.owMatch.mapModes) ? state.owMatch.mapModes : [], seriesLabel: state.owMatch.seriesLabel === 'bo' ? 'bo' : 'ft' },
-      mrMatch: (function(){ const m=state.mrMatch||{}; return { visible: m.visible !== false, format: m.format || 'BO5', bansByMap: m.bansByMap || [], gameMode: m.gameMode || 'convergence', showMapLabels: m.showMapLabels !== false, mapWinners: Array.isArray(m.mapWinners)?m.mapWinners:[], mapModes: Array.isArray(m.mapModes)?m.mapModes:[], gepData: m.gepData||null }; })(),
-      customOverlayLayouts: state.customOverlayLayouts || {},
-      gameConfigs: state.gameConfigs || {},
-      gameConfigVersions: state.gameConfigVersions || {},
-      gameConfigFrom: state.gameConfigFrom || {},
-      bestOf: state.bestOf,
-      teams: state.teams,
-      series: state.series,
-      activePlayer: state.activePlayer,
-      observedPlayer: state.observedPlayer,
-      smash: state.smash,
-      brawlhalla: state.brawlhalla,
-      tokon: state.tokon,
-      chatCommands: state.chatCommands,
-      pulse: state.pulse,
-      matchTitles: { twitch: state.matchTitles.twitch, vod: state.matchTitles.vod, stripSponsors: state.matchTitles.stripSponsors, vodLog: state.matchTitles.vodLog },
-      match: state.match,
-      leagues: state.leagues,
-      myEvents: state.myEvents,
-      eventOps: state.eventOps,
-      game: { number: state.game.number },
-      startgg: state.startgg,
-      startggApiToken: encryptSecret(startggApiToken),
-      challonge: { enabled: state.challonge.enabled, tournamentSlug: state.challonge.tournamentSlug, selectedTournament: state.challonge.selectedTournament, logoMap: state.challonge.logoMap, autoFollow: state.challonge.autoFollow, gameId: state.challonge.gameId, pollSec: state.challonge.pollSec, budget: state.challonge.budget },
-      challengermode: { enabled: state.challengermode.enabled, tournamentId: state.challengermode.tournamentId,
-        selectedTournament: state.challengermode.selectedTournament, logoMap: state.challengermode.logoMap,
-        autoFollow: state.challengermode.autoFollow, gameId: state.challengermode.gameId,
-        pollSec: state.challengermode.pollSec, spaceId: state.challengermode.spaceId },
-      challengermodeRefreshKey: encryptSecret(challengermodeRefreshKey),
-      challongeApiKey: encryptSecret(challongeApiKey),
-      nxgen: { enabled: state.nxgen.enabled, eventSlug: state.nxgen.eventSlug, selectedEvent: state.nxgen.selectedEvent, logoMap: state.nxgen.logoMap, autoFollow: state.nxgen.autoFollow },
-      nxgenApiKey: encryptSecret(nxgenApiKey),
-      liquipediaApiKey: encryptSecret(liquipediaApiKey),
-      riot: { region: state.riot.region, platform: state.riot.platform },
-      riotApiKey: encryptSecret(riotApiKey),
-      // Persisted so the rolling hour survives a restart (Liquipedia's window keeps running
-      // regardless) and so cached results are re-used, which their terms explicitly ask for.
-      liquipediaBudget: _lpBudget.toJSON(),
-      liquipediaCache: _lpCache.toJSON(),
-      faceit: { enabled: state.faceit.enabled, competitionId: state.faceit.competitionId, competitionType: state.faceit.competitionType, organizerId: state.faceit.organizerId, organizerName: state.faceit.organizerName, selectedEvent: state.faceit.selectedEvent, logoMap: state.faceit.logoMap, autoFollow: state.faceit.autoFollow },
-      faceitApiKey: encryptSecret(faceitApiKey),
-      ballchasing: state.ballchasing,
-      ballchasingApiKey: encryptSecret(ballchasingApiKey),
-      sheets: { enabled: state.sheets.enabled, sheetUrl: state.sheets.sheetUrl, sheetId: state.sheets.sheetId,
-        title: state.sheets.title, saEmail: state.sheets.saEmail, autoSyncSec: state.sheets.autoSyncSec, maps: state.sheets.maps },
-      sheetsServiceAccount: encryptSecret(sheetsServiceAccount),
-      competitionApiKey: encryptSecret(competitionApiKey),
-      competitionFeedTokens: Object.keys(competitionFeedTokens).length ? encryptSecret(JSON.stringify(competitionFeedTokens)) : '',
-      competition: state.competition,
-      siteEvent: state.siteEvent,
-      activeEvent: state.activeEvent,
-      obs: {
-        enabled: state.obs.enabled,
-        app: state.obs.app,
-        url: state.obs.url,
-        slobsUrl: state.obs.slobsUrl,
-        autoSwitch: state.obs.autoSwitch,
-        autoReplayOnGoal: state.obs.autoReplayOnGoal,
-        postGameToCastersSec: state.obs.postGameToCastersSec,
-        kickoff: state.obs.kickoff,
-        scoreboardScene: state.obs.scoreboardScene,
-        postGame: state.obs.postGame,
-        commercialAutoReturn: state.obs.commercialAutoReturn,
-        scenes: state.obs.scenes
-      },
-      obsStinger: state.obsStinger,
-      obsPassword: encryptSecret(obsPassword),
-      slobsToken: encryptSecret(slobsToken),
-      vmix: { enabled: state.vmix.enabled, host: state.vmix.host, port: state.vmix.port },
-      switcher: { target: state.switcher.target },
-      // Persist the full bracket so it renders instantly on restart (then refreshes)
-      bracket: state.bracket,
-      upcoming: state.upcoming,
-      standings: state.standings,
-      brand: state.brand || null,                 // global accent fallback (Settings ▸ Appearance) when no kit is active
-      preshowPresets: state.preshowPresets || [], // Desk Show named topic rundowns
-      csgoCfgPath: state.csgo.cfgPath,
-      csgoAutoWinner: state.csgo.autoWinner !== false,
-      csgoShowHistory: !!state.csgo.showHistory,
-      csgoBuiltinRadar: state.csgo.builtinRadar !== false,
-      csgoProLayout: state.csgo.proLayout === 'stacked' ? 'stacked' : 'wide',
-      csgoAutoHud: state.csgo.autoHud !== false,
-      csgoObserverAssist: state.csgo.observerAssist !== false,
-      csgoRadarLayout: state.csgo.radarLayout || null,
-      csgoCinematic: { enabled: !!state.csgo.cinematic.enabled, port: state.csgo.cinematic.port, shots: state.csgo.cinematic.shots || {} },
-      director: {
-        enabled: state.director?.enabled !== false,
-        sensitivity: state.director?.sensitivity ?? 0.5,
-        autoSwitch: !!state.director?.autoSwitch
-      },
-      ai: {
-        shield: !!state.ai?.shield,
-        telemetry: {
-          enabled: state.ai?.telemetry?.enabled !== false,
-          uploadEnabled: !!state.ai?.telemetry?.uploadEnabled,
-          lastUploadAt: state.ai?.telemetry?.lastUploadAt || null,
-          lastUploadCount: state.ai?.telemetry?.lastUploadCount || 0
-        }
-      },
-      clips: {
-        captureMode: state.clips?.captureMode || 'manual',
-        autoCapture: state.clips?.captureMode === 'auto',   // derived from the mode; default OFF, never forced on
-        autoMontage: !!state.clips?.autoMontage,
-        replayFolder: state.clips?.replayFolder || '',
-        captureRules: state.clips?.captureRules || {}
-      },
-      rlSpectatorUi: state.rlSpectatorUi || rlSpectatorUi.DEFAULTS,
-      // Persist the measured goal-replay length so the FIRST goal of a session is timed off the real
-      // value instead of the overlay's 6000ms fallback (that's why goal 1 was off and the rest fine).
-      rlReplayLenMs: state.rlReplayLenMs || 0,
-      vdo: state.vdo,
-      flows: state.flows || [],
-      sceneBg: state.sceneBg || {},
-      scenePresets: state.scenePresets || {},
-      crew: state.crew || []
-    };
+    toSave = buildSaveSnapshot();
     if (_stateLoadAbort && _stateLoadAbort.saved) {
       const disk = _stateLoadAbort.saved;
       Object.keys(toSave).forEach((k) => {
@@ -36384,6 +36405,7 @@ module.exports.shutdown = function () {
 // Test hook: run the real restore against a state file (test/loadstate-restore.test.js).
 // Brand-kit style rules (test/brand-styles.test.js): what activating / importing may change.
 module.exports._testBrandStyles = { applyKitStyles, applyPackageSnapshot, applyProfileBundle, getState: () => state };
+module.exports._testSaveSnapshot = () => JSON.parse(JSON.stringify(buildSaveSnapshot()));
 module.exports._testLoadState = function (file) { stateFile = file; _stateLoadAbort = null; loadState(); return { state, abort: _stateLoadAbort }; };
 
 module.exports.broadcastCrashAlert = function (message) {
