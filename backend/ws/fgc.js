@@ -4,9 +4,9 @@
 // dependencies below are bound once and can be used directly; values server.js reassigns are
 // read and written through ctx (_bhGameClosed, _smashGameClosed).
 let
-  broadcastFullState, checkBrawlhallaGameOver, checkSmashGameOver, normalizeTokonLayout,
-  refillBrawlhallaStocks, refreshBrawlhallaCard, refreshBrawlhallaCards, resizeSmashSides,
-  saveAppState, setSmashMode, state;
+  BH_REGIONS, broadcastFullState, checkBrawlhallaGameOver, checkSmashGameOver,
+  normalizeTokonLayout, refillBrawlhallaStocks, refreshBrawlhallaCard, refreshBrawlhallaCards,
+  resizeSmashSides, saveAppState, setSmashMode, state;
 let ctx;
 
 const handlers = {
@@ -86,6 +86,30 @@ const handlers = {
     broadcastFullState();
   },
 
+  // ── Brawlhalla HUD (overlay/brawlhalla.html) ────────────────────────────────
+  // NOTE: every `case` below keeps its body inside braces. A bare `let`/`const` between cases in
+  // this switch is a silent TDZ ReferenceError for every case after it (see
+  // test/switch-scope.test.js) — that is how reset_series was killed once already.
+  set_brawlhalla_mode(msg, ws) {
+    const m = (msg.data && msg.data.mode) === '2v2' ? '2v2' : '1v1';
+    state.brawlhalla.mode = m;
+    saveAppState();
+    broadcastFullState();
+  },
+
+  set_brawlhalla_stocks(msg, ws) {
+    const d = msg.data || {};
+    if (d.side === 'blue' || d.side === 'orange') {
+      const v = Math.max(0, Math.min(9, Math.round(Number(d.value) || 0)));
+      const seat = Math.max(0, Math.min(1, Math.round(Number(d.seat) || 0)));
+      if (state.brawlhalla.mode === '2v2') state.brawlhalla[d.side].players[seat].stocks = v;
+      else state.brawlhalla[d.side].stocks = v;
+      checkBrawlhallaGameOver();
+      saveAppState();
+      broadcastFullState();
+    }
+  },
+
   brawlhalla_stock_delta(msg, ws) {
     const d = msg.data || {};
     if (d.side === 'blue' || d.side === 'orange') {
@@ -104,9 +128,46 @@ const handlers = {
     }
   },
 
+  set_brawlhalla_legend(msg, ws) {
+    const d = msg.data || {};
+    if (d.side === 'blue' || d.side === 'orange') {
+      const name = String(d.legend || '').slice(0, 40);
+      const seat = Math.max(0, Math.min(1, Math.round(Number(d.seat) || 0)));
+      if (state.brawlhalla.mode === '2v2') state.brawlhalla[d.side].players[seat].legend = name;
+      else state.brawlhalla[d.side].legend = name;
+      saveAppState();
+      broadcastFullState();
+    }
+  },
+
+  set_brawlhalla_start_stocks(msg, ws) {
+    const v = Math.max(1, Math.min(9, Math.round(Number((msg.data || {}).value) || 3)));
+    state.brawlhalla.startStocks = v;
+    refillBrawlhallaStocks();
+    saveAppState();
+    broadcastFullState();
+  },
+
   reset_brawlhalla_stocks(msg, ws) {
     ctx._bhGameClosed = false;
     refillBrawlhallaStocks();
+    saveAppState();
+    broadcastFullState();
+  },
+
+  set_brawlhalla_options(msg, ws) {
+    const d = msg.data || {};
+    if ('autoAdvance' in d) state.brawlhalla.autoAdvance = !!d.autoAdvance;
+    if ('showRank' in d) state.brawlhalla.showRank = !!d.showRank;
+    if ('showLegend' in d) state.brawlhalla.showLegend = !!d.showLegend;
+    if (typeof d.title === 'string') {
+      state.brawlhalla.title = d.title.slice(0, 40);
+      // Typing a label pins it; clearing the box hands the slot back to the auto-fill.
+      state.brawlhalla.titleManual = !!state.brawlhalla.title;
+    }
+    if (typeof d.region === 'string' && BH_REGIONS.includes(d.region.toUpperCase())) state.brawlhalla.region = d.region.toUpperCase();
+    if (d.rankMode === 'ranked_1v1' || d.rankMode === 'ranked_3v3') state.brawlhalla.rankMode = d.rankMode;
+    if (d.railPos === 'auto' || d.railPos === 'topleft') state.brawlhalla.railPos = d.railPos;
     saveAppState();
     broadcastFullState();
   },
@@ -232,9 +293,9 @@ const handlers = {
 module.exports = function createFgcHandlers(c) {
   ctx = c;
   ({
-    broadcastFullState, checkBrawlhallaGameOver, checkSmashGameOver, normalizeTokonLayout,
-    refillBrawlhallaStocks, refreshBrawlhallaCard, refreshBrawlhallaCards, resizeSmashSides,
-    saveAppState, setSmashMode, state
+    BH_REGIONS, broadcastFullState, checkBrawlhallaGameOver, checkSmashGameOver,
+    normalizeTokonLayout, refillBrawlhallaStocks, refreshBrawlhallaCard,
+    refreshBrawlhallaCards, resizeSmashSides, saveAppState, setSmashMode, state
   } = c);
   return handlers;
 };

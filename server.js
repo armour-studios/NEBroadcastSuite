@@ -16018,21 +16018,17 @@ module.exports.hideRlNativeUi = function () {
 
 // ── Panel message handlers that live in backend/ws/ (registered last: every declaration above has run) ──
 registerWsHandlers(require('./backend/ws/battle-royale')({
-  BH_REGIONS, BR_DEFAULT_MODE, BR_SCORING_PRESETS, BR_TEAM_FORMATS, GAMES, HTTP_PORT,
-  announceGameResult, apexLive, brApplyScoringPreset, brBinding, brFormatSize, brMergeLobby,
-  brModeMeta, brModesFor, brNameFromPlayers, brNewMatrixId, brNewSeries, brResolveSeries,
-  brSyncFromLeague, brWriteSheetTemplate, bridgeClients, broadcast, broadcastFullState,
-  buildLiveState, checkBrawlhallaGameOver, computeBrStandings, createStartGgClient,
-  fetchAllEntrants, findMatrix, flowBus, gameTimers, isLobbyGame, logAuto, mapEntrantsToTeams,
-  matrixToScoring, obsAppName, obsSwitch, parseEventSlug, recomputeApexBroadcast,
-  recomputeBrSeason, refillBrawlhallaStocks, resolveClockTarget, sanitizeBrEntrant,
-  sanitizePointMatrix, saveAppState, saveTwitchData, scheduleBreakAutoSwitch, sendWs,
-  setExclusiveGfxVisible, state, syncActiveBracketPhase,
+  BR_DEFAULT_MODE, BR_SCORING_PRESETS, BR_TEAM_FORMATS, GAMES, HTTP_PORT, apexLive,
+  brApplyScoringPreset, brBinding, brFormatSize, brMergeLobby, brModeMeta, brModesFor,
+  brNameFromPlayers, brNewMatrixId, brNewSeries, brResolveSeries, brSyncFromLeague,
+  brWriteSheetTemplate, broadcastFullState, computeBrStandings, createStartGgClient,
+  fetchAllEntrants, findMatrix, isLobbyGame, logAuto, mapEntrantsToTeams, matrixToScoring,
+  obsAppName, parseEventSlug, recomputeApexBroadcast, recomputeBrSeason, sanitizeBrEntrant,
+  sanitizePointMatrix, saveAppState, sendWs, setExclusiveGfxVisible, state,
   get _apexAcc() { return _apexAcc; }, set _apexAcc(v) { _apexAcc = v; },
   get _apexGamesSig() { return _apexGamesSig; }, set _apexGamesSig(v) { _apexGamesSig = v; },
   get gameConfigsVer() { return gameConfigsVer; }, set gameConfigsVer(v) { gameConfigsVer = v; },
   get leaguesVer() { return leaguesVer; }, set leaguesVer(v) { leaguesVer = v; },
-  get miniGameManager() { return miniGameManager; }, set miniGameManager(v) { miniGameManager = v; },
   get obsClient() { return obsClient; }, set obsClient(v) { obsClient = v; },
   get startggApiToken() { return startggApiToken; }, set startggApiToken(v) { startggApiToken = v; }
 }));
@@ -16052,9 +16048,9 @@ registerWsHandlers(require('./backend/ws/lol')({
   get _lolPollTimer() { return _lolPollTimer; }, set _lolPollTimer(v) { _lolPollTimer = v; }
 }));
 registerWsHandlers(require('./backend/ws/fgc')({
-  broadcastFullState, checkBrawlhallaGameOver, checkSmashGameOver, normalizeTokonLayout,
-  refillBrawlhallaStocks, refreshBrawlhallaCard, refreshBrawlhallaCards, resizeSmashSides,
-  saveAppState, setSmashMode, state,
+  BH_REGIONS, broadcastFullState, checkBrawlhallaGameOver, checkSmashGameOver,
+  normalizeTokonLayout, refillBrawlhallaStocks, refreshBrawlhallaCard, refreshBrawlhallaCards,
+  resizeSmashSides, saveAppState, setSmashMode, state,
   get _bhGameClosed() { return _bhGameClosed; }, set _bhGameClosed(v) { _bhGameClosed = v; },
   get _smashGameClosed() { return _smashGameClosed; }, set _smashGameClosed(v) { _smashGameClosed = v; }
 }));
@@ -16170,7 +16166,7 @@ registerWsHandlers(require('./backend/ws/tournaments')({
 }));
 registerWsHandlers(require('./backend/ws/bracket')({
   bracketNameScore, bracketNormName, broadcastFullState, fetchBracket, obsSwitch, saveAppState,
-  sendWs, state, syncActiveBracketPhase, syncStartGgSet
+  sendWs, setExclusiveGfxVisible, state, syncActiveBracketPhase, syncStartGgSet
 }));
 registerWsHandlers(require('./backend/ws/leagues')({
   brBinding, brSyncFromLeague, broadcastFullState, computeBrStandings, lgCaptureFinalize,
@@ -16214,7 +16210,10 @@ registerWsHandlers(require('./backend/ws/match')({
   get savedTeams() { return savedTeams; }, set savedTeams(v) { savedTeams = v; }
 }));
 registerWsHandlers(require('./backend/ws/show')({
-  REPLAY_STYLES, activePackage, bridgeClients, broadcast, broadcastFullState,
-  sanitizePreshowPick, saveAppState, saveBrandKitsSoon, setGfxActive, state,
+  REPLAY_STYLES, activePackage, announceGameResult, bridgeClients, broadcast,
+  broadcastFullState, buildLiveState, flowBus, gameTimers, obsSwitch, resolveClockTarget,
+  sanitizePreshowPick, saveAppState, saveBrandKitsSoon, saveTwitchData,
+  scheduleBreakAutoSwitch, setExclusiveGfxVisible, setGfxActive, state,
+  get miniGameManager() { return miniGameManager; }, set miniGameManager(v) { miniGameManager = v; },
   get savedBrandKits() { return savedBrandKits; }, set savedBrandKits(v) { savedBrandKits = v; }
 }));

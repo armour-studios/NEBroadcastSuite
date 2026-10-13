@@ -4,10 +4,69 @@
 // dependencies below are bound once and can be used directly.
 let
   bracketNameScore, bracketNormName, broadcastFullState, fetchBracket, obsSwitch, saveAppState,
-  sendWs, state, syncActiveBracketPhase, syncStartGgSet;
+  sendWs, setExclusiveGfxVisible, state, syncActiveBracketPhase, syncStartGgSet;
 let ctx;
 
 const handlers = {
+  // (set_watchlist / toggle_watchlist_team / set_team_spotlight migrated to the WS_HANDLERS registry above handleControlMessage)
+
+  // ── Bracket ──────────────────────────────────────────────────────────
+  set_bracket_settings(msg, ws) {
+    const p = msg.data || {};
+    if (typeof p.eventSlug === 'string') {
+      state.bracket.eventSlug = p.eventSlug.trim();
+      // Typing a slug that ISN'T the active event = explicit override → stop following the
+      // active event. Clearing it (or matching the active event) resumes following.
+      state.bracket.followActive = !state.bracket.eventSlug
+        || state.bracket.eventSlug === (state.startgg.eventSlug || '').trim();
+    }
+    if (typeof p.visible === 'boolean') setExclusiveGfxVisible('bracket', p.visible);
+    // Overlay view mode — drives the single bracket source + the live preview.
+    if (typeof p.view === 'string' && ['both', 'winners', 'losers', 'finals', 'schedule', 'standings', 'matrix', 'swiss', 'group', 'pairings'].includes(p.view)) state.bracket.view = p.view;
+    // 0 clears the override and hands the threshold back to the overlay's round-count default.
+    ['swissAdvance', 'swissEliminate'].forEach((k) => {
+      if (p[k] == null) return;
+      const n = parseInt(p[k], 10);
+      if (Number.isFinite(n) && n >= 0 && n <= 12) state.bracket[k] = n;
+    });
+    if (p.rounds != null) { const n = parseInt(p.rounds, 10); if (Number.isFinite(n) && n >= 1 && n <= 20) state.bracket.rounds = n; }
+    if (typeof p.title === 'string') state.bracket.title = p.title.slice(0, 120);
+    if (typeof p.subtitle === 'string') state.bracket.subtitle = p.subtitle.slice(0, 140);
+    if (typeof p.showRecord === 'boolean') state.bracket.showRecord = p.showRecord;
+    if (typeof p.swissColors === 'boolean') state.bracket.swissColors = p.swissColors;
+    // Display filters: hide the grand-final RESET match, and/or hide the first N rounds (clean up a
+    // wide bracket by dropping the early rounds). Applied at render time — the data stays intact.
+    if (typeof p.ignoreReset === 'boolean') state.bracket.ignoreReset = p.ignoreReset;
+    if (p.ignoreRounds != null) { const n = parseInt(p.ignoreRounds, 10); if (Number.isFinite(n) && n >= 0 && n <= 12) state.bracket.ignoreRounds = n; }
+    if (typeof p.hideLogos === 'boolean') state.bracket.hideLogos = p.hideLogos;
+    if (typeof p.logoWatermark === 'boolean') state.bracket.logoWatermark = p.logoWatermark;
+    if (p.watermarkOpacity != null) { const n = parseInt(p.watermarkOpacity, 10); if (Number.isFinite(n) && n >= 0 && n <= 40) state.bracket.watermarkOpacity = n; }
+    saveAppState();
+    broadcastFullState();
+    if (typeof p.visible === 'boolean') obsSwitch(p.visible ? 'bracket' : 'inGame');
+  },
+
+  // Manually-built bracket (no start.gg). Writes the same winners/losers/finals
+  // shape the bracket overlay already renders.
+  // Manual builder is the source of truth for its phases — it sends the whole set.
+  set_bracket_phases(msg, ws) {
+    const p = msg.data || {};
+    if (Array.isArray(p.phases)) state.bracket.phases = p.phases;
+    if (p.activePhaseId != null) state.bracket.activePhaseId = p.activePhaseId;
+    if (typeof p.title === 'string') state.bracket.title = p.title;
+    if (Array.isArray(p.teams)) state.bracket.teams = p.teams;     // [{name,logo}] for overlay logos
+    state.bracket.matches = [];
+    state.bracket.eventSlug = '';      // manual mode is not start.gg-backed
+    state.bracket.mode = 'manual';     // the in-app builder now owns these phases — no external clobber
+    state.bracket.source = '';
+    state.bracket.lastFetchAt = Date.now();
+    syncActiveBracketPhase();          // mirror the active phase to the top-level overlay fields
+    if (typeof p.visible === 'boolean') state.bracket.visible = p.visible;
+    saveAppState();
+    broadcastFullState();
+    if (typeof p.visible === 'boolean') obsSwitch(p.visible ? 'bracket' : 'inGame');
+  },
+
   // Switch which phase is live on the overlay (works for manual OR start.gg phases).
   bracket_select_phase(msg, ws) {
     const p = msg.data || {};
@@ -179,7 +238,8 @@ module.exports = function createBracketHandlers(c) {
   ctx = c;
   ({
     bracketNameScore, bracketNormName, broadcastFullState, fetchBracket, obsSwitch,
-    saveAppState, sendWs, state, syncActiveBracketPhase, syncStartGgSet
+    saveAppState, sendWs, setExclusiveGfxVisible, state, syncActiveBracketPhase,
+    syncStartGgSet
   } = c);
   return handlers;
 };

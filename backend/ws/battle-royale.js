@@ -2,18 +2,15 @@
 // Battle royale (lobbies, results, point matrices, Apex) — panel messages (moved out of server.js's message dispatcher).
 // Registered by server.js through registerWsHandlers once every declaration there has run, so the
 // dependencies below are bound once and can be used directly; values server.js reassigns are
-// read and written through ctx (_apexAcc, _apexGamesSig, gameConfigsVer, leaguesVer, miniGameManager, obsClient, startggApiToken).
+// read and written through ctx (_apexAcc, _apexGamesSig, gameConfigsVer, leaguesVer, obsClient, startggApiToken).
 let
-  BH_REGIONS, BR_DEFAULT_MODE, BR_SCORING_PRESETS, BR_TEAM_FORMATS, GAMES, HTTP_PORT,
-  announceGameResult, apexLive, brApplyScoringPreset, brBinding, brFormatSize, brMergeLobby,
-  brModeMeta, brModesFor, brNameFromPlayers, brNewMatrixId, brNewSeries, brResolveSeries,
-  brSyncFromLeague, brWriteSheetTemplate, bridgeClients, broadcast, broadcastFullState,
-  buildLiveState, checkBrawlhallaGameOver, computeBrStandings, createStartGgClient,
-  fetchAllEntrants, findMatrix, flowBus, gameTimers, isLobbyGame, logAuto, mapEntrantsToTeams,
-  matrixToScoring, obsAppName, obsSwitch, parseEventSlug, recomputeApexBroadcast,
-  recomputeBrSeason, refillBrawlhallaStocks, resolveClockTarget, sanitizeBrEntrant,
-  sanitizePointMatrix, saveAppState, saveTwitchData, scheduleBreakAutoSwitch, sendWs,
-  setExclusiveGfxVisible, state, syncActiveBracketPhase;
+  BR_DEFAULT_MODE, BR_SCORING_PRESETS, BR_TEAM_FORMATS, GAMES, HTTP_PORT, apexLive,
+  brApplyScoringPreset, brBinding, brFormatSize, brMergeLobby, brModeMeta, brModesFor,
+  brNameFromPlayers, brNewMatrixId, brNewSeries, brResolveSeries, brSyncFromLeague,
+  brWriteSheetTemplate, broadcastFullState, computeBrStandings, createStartGgClient,
+  fetchAllEntrants, findMatrix, isLobbyGame, logAuto, mapEntrantsToTeams, matrixToScoring,
+  obsAppName, parseEventSlug, recomputeApexBroadcast, recomputeBrSeason, sanitizeBrEntrant,
+  sanitizePointMatrix, saveAppState, sendWs, setExclusiveGfxVisible, state;
 let ctx;
 
 const handlers = {
@@ -694,123 +691,6 @@ if (!Array.isArray(lg.brSeries)) lg.brSeries = [];
     })();
   },
 
-  // ── Break / "starting soon" standby (countdown scene) ────────────────
-  // Partial updates merge. endsAt = epoch ms target (or null to clear the timer).
-  set_break(msg, ws) {
-    const b = msg.data || {};
-    const cur = state.breakScreen || {};
-    state.breakScreen = {
-      visible: ('visible' in b) ? !!b.visible : !!cur.visible,
-      title: typeof b.title === 'string' ? b.title : (cur.title ?? 'STARTING SOON'),
-      message: typeof b.message === 'string' ? b.message : (cur.message ?? ''),
-      finalMessage: typeof b.finalMessage === 'string' ? b.finalMessage : (cur.finalMessage ?? "WE'RE LIVE!"),
-      // accept either an absolute endsAt, a `seconds` countdown from now, or a
-      // `frozenSeconds` static value (paused producer timer). Running clears frozen.
-      // `until: "23:00"` counts down to a wall-clock time; `seconds` counts down a duration;
-      // `endsAt` is an absolute target; `frozenSeconds` is a paused static value.
-      endsAt: ('frozenSeconds' in b) ? null
-        : ('until' in b) ? resolveClockTarget(b.until)
-        : ('seconds' in b) ? (b.seconds > 0 ? Date.now() + Math.round(b.seconds * 1000) : null)
-        : ('endsAt' in b ? (b.endsAt || null) : (cur.endsAt ?? null)),
-      frozenSeconds: ('frozenSeconds' in b) ? (b.frozenSeconds != null ? Math.max(0, Math.round(b.frozenSeconds)) : null)
-        : (('seconds' in b || 'endsAt' in b || 'until' in b) ? null : (cur.frozenSeconds ?? null)),
-      // Draw the title without a clock. Sticky like the other look settings: a bare timer
-      // mirror ({seconds}/{frozenSeconds}) must not silently switch the clock back on.
-      titleOnly: ('titleOnly' in b) ? !!b.titleOnly : !!cur.titleOnly,
-      // OBS scene to auto-cut to when the countdown reaches 0 ('' = stay on the break screen).
-      // Deliberately the ONLY thing a finished countdown can do: it never rolls a clip/ad playlist.
-      thenScene: typeof b.thenScene === 'string' ? b.thenScene : (cur.thenScene ?? '')
-    };
-    // HIDE DISARMS THE CLOCK. Every consumer treats "break hidden" as "there is no countdown"
-    // (the panel drops its mirror, the desk/replay/countdown-bar scenes blank their clock), but
-    // the merge above kept `endsAt` alive through a Hide — leaving a half state the producer
-    // could not see or clear. The counterpart to this is that those scenes no longer require
-    // `visible`: the top-bar Start arms a segment clock WITHOUT putting the break GRAPHIC on
-    // air, and that clock is exactly what the desk scenes borrow. Same reasoning as
-    // scheduleBreakAutoSwitch: the timer is about the timer, not about which graphic is up.
-    // Only a bare Hide clears it — a message that also sets a timer is setting one, not hiding one.
-    if (b.visible === false && !('seconds' in b) && !('endsAt' in b) && !('until' in b) && !('frozenSeconds' in b)) {
-      state.breakScreen.endsAt = null;
-      state.breakScreen.frozenSeconds = null;
-    }
-
-    // Auto-start minigame when break screen becomes visible
-    const wasVisible = cur.visible;
-    const nowVisible = state.breakScreen.visible;
-    // Keeps gfxActive in sync with .visible — see setExclusiveGfxVisible's own doc.
-    if ('visible' in b) setExclusiveGfxVisible('break', nowVisible);
-
-    if (!wasVisible && nowVisible && ctx.miniGameManager && state.twitch.minigame.settings.enabled) {
-      // Break screen just turned on - auto-start a game
-      const gameType = state.twitch.minigame.settings.breakScreenGameType || 'trivia';
-      console.log('[Twitch] Auto-starting minigame on break screen:', gameType);
-
-      // Create a default game based on type
-      const _blueTeam   = state.teams?.blue?.name   || 'Blue';
-      const _orangeTeam = state.teams?.orange?.name || 'Orange';
-      const _triviaPool = [
-        { q: 'How many players are on a Rocket League team?',       a: ['2', '3', '4', '5'],                                                  c: 1 },
-        { q: 'How long is a standard Rocket League match?',          a: ['3 minutes', '4 minutes', '5 minutes', '6 minutes'],                  c: 2 },
-        { q: 'What does RLCS stand for?',                             a: ['Rocket League Club Series', 'Rocket League Championship Series', 'Rocket League Cup Showdown', 'Rocket League Circuit Season'], c: 1 },
-        { q: 'Which rank is the highest in Rocket League?',           a: ['Grand Champion', 'Champion', 'Diamond', 'Supersonic Legend'],        c: 3 },
-        { q: 'How many goals are needed to win a standard RL match?', a: ['Most in 5 min', 'First to 5', 'First to 3', 'Most in 3 min'],        c: 0 },
-        { q: 'What colour is the Rocket League logo?',                a: ['Blue', 'Red', 'Green', 'Orange'],                                    c: 0 },
-        { q: `Who do you think will win this series — ${_blueTeam} or ${_orangeTeam}?`, a: [_blueTeam, _orangeTeam, 'Going to OT!', 'No idea!'], c: 0 },
-      ];
-      const _trivia = _triviaPool[Math.floor(Math.random() * _triviaPool.length)];
-
-      let autoGame = null;
-      if (gameType === 'trivia') {
-        autoGame = ctx.miniGameManager.createTrivia(_trivia.q, _trivia.a, _trivia.c);
-      } else if (gameType === 'prediction') {
-        autoGame = ctx.miniGameManager.createPrediction(
-          `Who will win — ${_blueTeam} or ${_orangeTeam}?`,
-          [_blueTeam, _orangeTeam]
-        );
-      } else if (gameType === 'vote') {
-        autoGame = ctx.miniGameManager.createVote(
-          `Who do you think wins this series?`,
-          [_blueTeam, _orangeTeam]
-        );
-      } else if (gameType === 'spin') {
-        autoGame = ctx.miniGameManager.createSpin(['Sub Gift', '$10 Gift Card', 'Game Key', 'Shoutout']);
-      }
-
-      if (autoGame) {
-        const gameId = autoGame.id;
-        const duration = autoGame.duration || 30000;
-
-        if (gameTimers.has(gameId)) clearTimeout(gameTimers.get(gameId));
-
-        const timer = setTimeout(() => {
-          if (ctx.miniGameManager && ctx.miniGameManager.currentGame?.id === gameId) {
-            const result = ctx.miniGameManager.finalize();
-            broadcastFullState();
-            saveTwitchData();
-            announceGameResult(result);
-            console.log('[Twitch] Auto-game finalized');
-            setTimeout(() => {
-              if (state.twitch.minigame.current?.id === gameId) {
-                state.twitch.minigame.current = null;
-                broadcast(bridgeClients, { type: 'full_state', data: buildLiveState() });
-              }
-            }, 10000);
-          }
-          gameTimers.delete(gameId);
-        }, duration);
-
-        gameTimers.set(gameId, timer);
-      }
-    }
-
-    if (!wasVisible && nowVisible) flowBus.emit('break_shown', {});
-    if (wasVisible && !nowVisible) flowBus.emit('break_hidden', {});
-    saveAppState();
-    broadcastFullState();
-    obsSwitch(state.breakScreen.visible ? 'break' : 'inGame');
-    scheduleBreakAutoSwitch();
-  },
-
   // Drop-map POIs. Stored inside the game's config bundle (so they export/import with a
   // Producer Profile like every other per-game content set) rather than in their own state key.
   // `pois: null` for a set deletes the override and falls back to the built-in seed table.
@@ -901,141 +781,18 @@ if (!Array.isArray(lg.brSeries)) lg.brSeries = [];
       saveAppState();
     }
   },
-
-  // ── Brawlhalla HUD (overlay/brawlhalla.html) ────────────────────────────────
-  // NOTE: every `case` below keeps its body inside braces. A bare `let`/`const` between cases in
-  // this switch is a silent TDZ ReferenceError for every case after it (see
-  // test/switch-scope.test.js) — that is how reset_series was killed once already.
-  set_brawlhalla_mode(msg, ws) {
-    const m = (msg.data && msg.data.mode) === '2v2' ? '2v2' : '1v1';
-    state.brawlhalla.mode = m;
-    saveAppState();
-    broadcastFullState();
-  },
-
-  set_brawlhalla_stocks(msg, ws) {
-    const d = msg.data || {};
-    if (d.side === 'blue' || d.side === 'orange') {
-      const v = Math.max(0, Math.min(9, Math.round(Number(d.value) || 0)));
-      const seat = Math.max(0, Math.min(1, Math.round(Number(d.seat) || 0)));
-      if (state.brawlhalla.mode === '2v2') state.brawlhalla[d.side].players[seat].stocks = v;
-      else state.brawlhalla[d.side].stocks = v;
-      checkBrawlhallaGameOver();
-      saveAppState();
-      broadcastFullState();
-    }
-  },
-
-  set_brawlhalla_legend(msg, ws) {
-    const d = msg.data || {};
-    if (d.side === 'blue' || d.side === 'orange') {
-      const name = String(d.legend || '').slice(0, 40);
-      const seat = Math.max(0, Math.min(1, Math.round(Number(d.seat) || 0)));
-      if (state.brawlhalla.mode === '2v2') state.brawlhalla[d.side].players[seat].legend = name;
-      else state.brawlhalla[d.side].legend = name;
-      saveAppState();
-      broadcastFullState();
-    }
-  },
-
-  set_brawlhalla_start_stocks(msg, ws) {
-    const v = Math.max(1, Math.min(9, Math.round(Number((msg.data || {}).value) || 3)));
-    state.brawlhalla.startStocks = v;
-    refillBrawlhallaStocks();
-    saveAppState();
-    broadcastFullState();
-  },
-
-  set_brawlhalla_options(msg, ws) {
-    const d = msg.data || {};
-    if ('autoAdvance' in d) state.brawlhalla.autoAdvance = !!d.autoAdvance;
-    if ('showRank' in d) state.brawlhalla.showRank = !!d.showRank;
-    if ('showLegend' in d) state.brawlhalla.showLegend = !!d.showLegend;
-    if (typeof d.title === 'string') {
-      state.brawlhalla.title = d.title.slice(0, 40);
-      // Typing a label pins it; clearing the box hands the slot back to the auto-fill.
-      state.brawlhalla.titleManual = !!state.brawlhalla.title;
-    }
-    if (typeof d.region === 'string' && BH_REGIONS.includes(d.region.toUpperCase())) state.brawlhalla.region = d.region.toUpperCase();
-    if (d.rankMode === 'ranked_1v1' || d.rankMode === 'ranked_3v3') state.brawlhalla.rankMode = d.rankMode;
-    if (d.railPos === 'auto' || d.railPos === 'topleft') state.brawlhalla.railPos = d.railPos;
-    saveAppState();
-    broadcastFullState();
-  },
-
-  // (set_watchlist / toggle_watchlist_team / set_team_spotlight migrated to the WS_HANDLERS registry above handleControlMessage)
-
-  // ── Bracket ──────────────────────────────────────────────────────────
-  set_bracket_settings(msg, ws) {
-    const p = msg.data || {};
-    if (typeof p.eventSlug === 'string') {
-      state.bracket.eventSlug = p.eventSlug.trim();
-      // Typing a slug that ISN'T the active event = explicit override → stop following the
-      // active event. Clearing it (or matching the active event) resumes following.
-      state.bracket.followActive = !state.bracket.eventSlug
-        || state.bracket.eventSlug === (state.startgg.eventSlug || '').trim();
-    }
-    if (typeof p.visible === 'boolean') setExclusiveGfxVisible('bracket', p.visible);
-    // Overlay view mode — drives the single bracket source + the live preview.
-    if (typeof p.view === 'string' && ['both', 'winners', 'losers', 'finals', 'schedule', 'standings', 'matrix', 'swiss', 'group', 'pairings'].includes(p.view)) state.bracket.view = p.view;
-    // 0 clears the override and hands the threshold back to the overlay's round-count default.
-    ['swissAdvance', 'swissEliminate'].forEach((k) => {
-      if (p[k] == null) return;
-      const n = parseInt(p[k], 10);
-      if (Number.isFinite(n) && n >= 0 && n <= 12) state.bracket[k] = n;
-    });
-    if (p.rounds != null) { const n = parseInt(p.rounds, 10); if (Number.isFinite(n) && n >= 1 && n <= 20) state.bracket.rounds = n; }
-    if (typeof p.title === 'string') state.bracket.title = p.title.slice(0, 120);
-    if (typeof p.subtitle === 'string') state.bracket.subtitle = p.subtitle.slice(0, 140);
-    if (typeof p.showRecord === 'boolean') state.bracket.showRecord = p.showRecord;
-    if (typeof p.swissColors === 'boolean') state.bracket.swissColors = p.swissColors;
-    // Display filters: hide the grand-final RESET match, and/or hide the first N rounds (clean up a
-    // wide bracket by dropping the early rounds). Applied at render time — the data stays intact.
-    if (typeof p.ignoreReset === 'boolean') state.bracket.ignoreReset = p.ignoreReset;
-    if (p.ignoreRounds != null) { const n = parseInt(p.ignoreRounds, 10); if (Number.isFinite(n) && n >= 0 && n <= 12) state.bracket.ignoreRounds = n; }
-    if (typeof p.hideLogos === 'boolean') state.bracket.hideLogos = p.hideLogos;
-    if (typeof p.logoWatermark === 'boolean') state.bracket.logoWatermark = p.logoWatermark;
-    if (p.watermarkOpacity != null) { const n = parseInt(p.watermarkOpacity, 10); if (Number.isFinite(n) && n >= 0 && n <= 40) state.bracket.watermarkOpacity = n; }
-    saveAppState();
-    broadcastFullState();
-    if (typeof p.visible === 'boolean') obsSwitch(p.visible ? 'bracket' : 'inGame');
-  },
-
-  // Manually-built bracket (no start.gg). Writes the same winners/losers/finals
-  // shape the bracket overlay already renders.
-  // Manual builder is the source of truth for its phases — it sends the whole set.
-  set_bracket_phases(msg, ws) {
-    const p = msg.data || {};
-    if (Array.isArray(p.phases)) state.bracket.phases = p.phases;
-    if (p.activePhaseId != null) state.bracket.activePhaseId = p.activePhaseId;
-    if (typeof p.title === 'string') state.bracket.title = p.title;
-    if (Array.isArray(p.teams)) state.bracket.teams = p.teams;     // [{name,logo}] for overlay logos
-    state.bracket.matches = [];
-    state.bracket.eventSlug = '';      // manual mode is not start.gg-backed
-    state.bracket.mode = 'manual';     // the in-app builder now owns these phases — no external clobber
-    state.bracket.source = '';
-    state.bracket.lastFetchAt = Date.now();
-    syncActiveBracketPhase();          // mirror the active phase to the top-level overlay fields
-    if (typeof p.visible === 'boolean') state.bracket.visible = p.visible;
-    saveAppState();
-    broadcastFullState();
-    if (typeof p.visible === 'boolean') obsSwitch(p.visible ? 'bracket' : 'inGame');
-  },
 };
 
 module.exports = function createBattleRoyaleHandlers(c) {
   ctx = c;
   ({
-    BH_REGIONS, BR_DEFAULT_MODE, BR_SCORING_PRESETS, BR_TEAM_FORMATS, GAMES, HTTP_PORT,
-    announceGameResult, apexLive, brApplyScoringPreset, brBinding, brFormatSize, brMergeLobby,
-    brModeMeta, brModesFor, brNameFromPlayers, brNewMatrixId, brNewSeries, brResolveSeries,
-    brSyncFromLeague, brWriteSheetTemplate, bridgeClients, broadcast, broadcastFullState,
-    buildLiveState, checkBrawlhallaGameOver, computeBrStandings, createStartGgClient,
-    fetchAllEntrants, findMatrix, flowBus, gameTimers, isLobbyGame, logAuto,
-    mapEntrantsToTeams, matrixToScoring, obsAppName, obsSwitch, parseEventSlug,
-    recomputeApexBroadcast, recomputeBrSeason, refillBrawlhallaStocks, resolveClockTarget,
-    sanitizeBrEntrant, sanitizePointMatrix, saveAppState, saveTwitchData,
-    scheduleBreakAutoSwitch, sendWs, setExclusiveGfxVisible, state, syncActiveBracketPhase
+    BR_DEFAULT_MODE, BR_SCORING_PRESETS, BR_TEAM_FORMATS, GAMES, HTTP_PORT, apexLive,
+    brApplyScoringPreset, brBinding, brFormatSize, brMergeLobby, brModeMeta, brModesFor,
+    brNameFromPlayers, brNewMatrixId, brNewSeries, brResolveSeries, brSyncFromLeague,
+    brWriteSheetTemplate, broadcastFullState, computeBrStandings, createStartGgClient,
+    fetchAllEntrants, findMatrix, isLobbyGame, logAuto, mapEntrantsToTeams, matrixToScoring,
+    obsAppName, parseEventSlug, recomputeApexBroadcast, recomputeBrSeason, sanitizeBrEntrant,
+    sanitizePointMatrix, saveAppState, sendWs, setExclusiveGfxVisible, state
   } = c);
   return handlers;
 };
