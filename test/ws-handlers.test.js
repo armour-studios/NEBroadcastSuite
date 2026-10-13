@@ -1,8 +1,8 @@
 // node test/ws-handlers.test.js
 // Every WebSocket message the control panel, the overlays and the Stream Deck plugin send must have
-// exactly one handler on the server: a `case` in handleControlMessage's switch or an entry in the
-// WS_HANDLERS registry (registerWsHandlers). The switch's default branch drops unknown types, so
-// a typo in a button (or a handler removed in a refactor) would otherwise do nothing, silently.
+// exactly one handler on the server: an entry in the WS_HANDLERS registry (registerWsHandlers, in
+// server.js or a backend module). handleControlMessage only looks the type up; an unknown type is
+// logged, so a typo in a button (or a handler removed in a refactor) shows up instead of doing nothing.
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -18,7 +18,10 @@ const ok = (c, why) => { assert.ok(c, why); pass++; };
 // ── Handlers ──
 const dispatch = server.indexOf('function handleControlMessage(msg, ws) {');
 ok(dispatch > 0, 'handleControlMessage found');
-const switchCases = [...server.slice(dispatch).matchAll(/^ {4}case '([a-z0-9_-]+)':/gm)].map((m) => m[1]);
+const dispatcher = server.slice(dispatch, server.indexOf('\n}\n', dispatch));
+// The 475-case switch became registry entries (refactor, 2026-10-13). Keep it that way.
+ok(!/switch \(msg\.type\)/.test(dispatcher) && /if \(h\) return void h\(msg, ws\);\s*warnUnhandledType\(msg\.type\);/.test(dispatcher), 'handleControlMessage only dispatches through the registry (no switch)');
+const switchCases = [];
 const registry = new Map();   // type -> file
 function scanRegistry(file, src) {
   // Generated form: registerWsHandlers(Object.fromEntries(['a', 'b'].map(...)))
@@ -78,5 +81,5 @@ for (const dir of ['control-panel', 'overlay']) {
 const missing = [...sent.keys()].filter((t) => !handled.has(t)).sort();
 ok(sent.size > 300, 'found ' + sent.size + ' message types sent by the panel, overlays and Stream Deck');
 ok(!missing.length, 'every sent message type has a handler:\n    ' + missing.map((t) => t + '  <- ' + sent.get(t)).join('\n    '));
-ok(/default:\s*\n\s*warnUnhandledType\(msg\.type\);/.test(server), 'unknown message types are logged (once each), not dropped silently');
-console.log(`ws-handlers: all ${pass} checks passed (${switchCases.length} switch cases, ${registry.size} registered, ${sent.size} sent types)`);
+ok(/function warnUnhandledType\(/.test(server), 'unknown message types are logged (once each), not dropped silently');
+console.log(`ws-handlers: all ${pass} checks passed (${registry.size} registered handlers, ${sent.size} sent types)`);

@@ -282,7 +282,7 @@ const M2 = { id: 'm2', teamA: 'y', teamB: 'z', scheduledAt: '2099-01-08T19:00:00
     const p = api.buildLeaguePushPayload(manual);
     assert.strictEqual(p.externalId, 'lg9');
     assert.strictEqual(p.teams.length, 1);
-    const pushCase = src.slice(src.indexOf("case 'cloud_push_league':"), src.indexOf("case 'cloud_list_leagues':"));
+    const pushCase = src.slice(src.indexOf('  cloud_push_league(msg, ws) {'), src.indexOf('  cloud_list_leagues(msg, ws) {'));
     assert.ok(/if \(!payload\)/.test(pushCase) && /read-only/.test(pushCase), 'cloud_push_league refuses a null payload with a read-only message');
     const loop = fn('startCompetitionSyncLoop');
     assert.ok(/s\.type !== 'sheet' && s\.type !== 'feed'/.test(loop), 'per-league timer still skips cloud leagues (pullOrgCompetitions owns them)');
