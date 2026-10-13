@@ -3,6 +3,8 @@
 // (NE_HTTP_PORT / NE_WS_PORT), its own throwaway userData folder, and a fake Streamlabs Desktop.
 // Drives it over the same WebSocket the control panel uses and checks state, disk and HTTP.
 //   Run:  node_modules/electron/dist/electron scripts/e2e-server.js
+//   NE_E2E_SERVER_PROCESS=1 runs the server in its own utility process (backend/server-host.js),
+//   the way the app does, and adds checks for that process: secrets, crash restart, clean stop.
 // Never talks to a real OBS, Streamlabs, Twitch or start.gg.
 const { app } = require('electron');
 const fs = require('fs');
@@ -16,6 +18,8 @@ process.env.NE_WS_PORT = process.env.NE_WS_PORT || '3171';
 process.env.NE_LAN_AGENT_HOST = '127.0.0.1';
 process.env.NE_LAN_AGENT_PORT = process.env.NE_LAN_AGENT_PORT || '3175';
 const HTTP = Number(process.env.NE_HTTP_PORT), WSP = Number(process.env.NE_WS_PORT);
+const SERVER_PROCESS = process.env.NE_E2E_SERVER_PROCESS === '1';
+let host = null;
 const ROOT = path.join(__dirname, '..');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ne-e2e-'));
 app.setPath('userData', TMP);
@@ -68,8 +72,9 @@ function request(method, p, body, headers) {
 }
 
 app.whenReady().then(async () => {
-  console.log('e2e-server: userData ' + TMP + ', ports ' + HTTP + '/' + WSP);
-  require(path.join(ROOT, 'server.js')).start(ROOT);
+  console.log('e2e-server: userData ' + TMP + ', ports ' + HTTP + '/' + WSP + (SERVER_PROCESS ? ', server in its own process' : ''));
+  if (SERVER_PROCESS) host = require(path.join(ROOT, 'backend', 'server-host')).startServerProcess(ROOT);
+  else require(path.join(ROOT, 'server.js')).start(ROOT);
   await wait(4500);
   try {
     await connect();
@@ -286,6 +291,49 @@ app.whenReady().then(async () => {
   check('delete removes it everywhere', await until(() => !(state.customOverlays || []).some((o) => o.id === coId) && /^deleted-/.test(String((state.customOverlayRevs || {})[coId] || ''))));   // a tombstone rev so open OBS sources clear themselves
   const coGone = await request('GET', '/api/custom-overlays/' + coId);
   check('a deleted overlay 404s', coGone.status === 404);
+
+  // Work only the main process can do, asked for by the server (directly, or over the process link).
+  console.log('\nmain-process services');
+  const thumb = await request('GET', '/api/overlay-thumb?file=scorebar.html');
+  check('an overlay thumbnail renders offscreen', thumb.status === 200 && String(thumb.text || '').slice(1, 4) === 'PNG', thumb.status);
+  send('lol_ocr_displays');
+  check('screen capture lists the displays', await until(() => replies.some((m) => m.type === 'lol_ocr_displays' && Array.isArray(m.displays) && m.displays.length > 0)));
+
+  if (SERVER_PROCESS && host.inMainProcess) {
+    console.log('\nserver process');
+    check('the server runs in its own process (it could not start, so the host fell back to main)', false);
+  } else if (SERVER_PROCESS) {
+    console.log('\nserver process');
+    check('the server runs in its own process', host.pid > 0 && host.pid !== process.pid, host.pid);
+    // A new secret is written straight away (enc2:), then in the keychain format once main answers.
+    send('set_ballchasing_settings', { apiKey: 'e2e-secret-123' });
+    check('a new secret is accepted', await until(() => state.ballchasing && state.ballchasing.hasKey));
+    await wait(2500);
+    // Crash: the host restarts the server and the bridge comes back.
+    const oldPid = host.pid;
+    try { process.kill(oldPid); } catch (e) {}
+    await wait(5000);
+    check('a crashed server process is restarted', host.pid > 0 && host.pid !== oldPid, oldPid + ' -> ' + host.pid);
+    state = {};
+    let back = false;
+    try { await connect(); back = await until(() => state.teams && state.ballchasing); } catch (e) {}
+    check('the panel can reconnect after the restart', back);
+    check('the secret was saved before the crash', !!(state.ballchasing && state.ballchasing.hasKey));
+    try { sock.close(); } catch (e) {}
+    await host.shutdown();
+    let saved = {};
+    try { saved = JSON.parse(fs.readFileSync(path.join(TMP, 'data', 'state.json'), 'utf8')); } catch (e) {}
+    check('secrets end up in the keychain format', /^enc:/.test(saved.ballchasingApiKey || ''), String(saved.ballchasingApiKey || '').slice(0, 6));
+    check('a clean stop ends the process', host.pid === 0);
+    // A fresh start reads the keychain secret back (main decrypts it before the server loads).
+    host = require(path.join(ROOT, 'backend', 'server-host')).startServerProcess(ROOT);
+    await wait(4500);
+    state = {};
+    try { await connect(); } catch (e) {}
+    check('the secret survives a restart', await until(() => state.ballchasing && state.ballchasing.hasKey));
+    try { sock.close(); } catch (e) {}
+    await host.shutdown();
+  }
 
   console.log(`\n${pass} passed, ${fail} failed`);
   try { sock.close(); } catch (e) {}

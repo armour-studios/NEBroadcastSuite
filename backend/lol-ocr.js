@@ -154,9 +154,15 @@ async function readOnceLegacy(regions) {
 async function readOnce(regions, displayId) {
   if (!engine.available()) throw new Error('tesseract.js not installed');
   if (!engine.captureAvailable()) return readOnceLegacy(regions);
-  const frame = await engine.captureDisplay(displayId);
-  const rb = await engine.readRegion(frame, regions.blue, { whitelist: WHITELIST, psm: 7 });
-  const rr = await engine.readRegion(frame, regions.red,  { whitelist: WHITELIST, psm: 7 });
+  // Only the strip holding both regions is captured (a whole display is megabytes per read).
+  const n = (v) => Number(v) || 0;
+  const B = regions.blue, R = regions.red;
+  const bx = Math.min(n(B.x), n(R.x)), by = Math.min(n(B.y), n(R.y));
+  const crop = { x: bx, y: by, w: Math.max(n(B.x) + n(B.w), n(R.x) + n(R.w)) - bx, h: Math.max(n(B.y) + n(B.h), n(R.y) + n(R.h)) - by };
+  const frame = await engine.captureDisplay(displayId, crop);
+  const shift = (r) => ({ ...r, x: n(r.x) - (frame.offsetX || 0), y: n(r.y) - (frame.offsetY || 0) });
+  const rb = await engine.readRegion(frame, shift(regions.blue), { whitelist: WHITELIST, psm: 7 });
+  const rr = await engine.readRegion(frame, shift(regions.red),  { whitelist: WHITELIST, psm: 7 });
   return {
     blue: parseGold(rb.text), blueRaw: rb.text.replace(/\s+/g, ''), blueConf: Math.round(rb.confidence),
     red:  parseGold(rr.text), redRaw:  rr.text.replace(/\s+/g, ''), redConf:  Math.round(rr.confidence),
@@ -215,7 +221,7 @@ async function snapshot(opts) {
   const o = opts || {};
   if (!engine.captureAvailable()) return { ok: false, message: 'Snapshot needs the app\'s screen capture (not available here).' };
   const frame = await engine.captureDisplay(o.displayId);
-  const out = { ok: true, displayId: frame.displayId, width: frame.width, height: frame.height, image: engine.frameToJpegDataUrl(frame, 1280, 72) };
+  const out = { ok: true, displayId: frame.displayId, width: frame.width, height: frame.height, image: await engine.frameToJpegDataUrl(frame, 1280, 72) };
   if (o.regions && engine.available()) {
     for (const side of ['blue', 'red']) {
       if (!o.regions[side]) continue;

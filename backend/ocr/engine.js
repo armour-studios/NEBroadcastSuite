@@ -25,11 +25,9 @@ const path = require('path');
 const os = require('os');
 const zlib = require('zlib');
 
-let _electron = null;
-try {
-  const e = require('electron');
-  if (e && e.nativeImage && e.desktopCapturer) _electron = e;
-} catch (e) { _electron = null; }
+// Capture runs in the main process (backend/host-services.js); this module may live in the server's
+// own process, so it asks through backend/electron-api.js.
+const host = require('../electron-api');
 
 let _tess = null;
 function available() {
@@ -105,46 +103,16 @@ async function terminate() {
 }
 
 // ── Capture ───────────────────────────────────────────────────────────────────
-function captureAvailable() { return !!_electron; }
+function captureAvailable() { return host.screenCapture.available(); }
 
 // [{ id, label, x, y, width, height, scaleFactor, primary }] — width/height in PHYSICAL pixels,
 // which is the coordinate space every region uses (what the producer sees in a screenshot).
-function listDisplays() {
-  if (!_electron || !_electron.screen) return [];
-  const primary = _electron.screen.getPrimaryDisplay();
-  return _electron.screen.getAllDisplays().map((d, i) => {
-    const sf = d.scaleFactor || 1;
-    return {
-      id: String(d.id), label: 'Display ' + (i + 1) + ' (' + Math.round(d.size.width * sf) + '×' + Math.round(d.size.height * sf) + ')' + (d.id === primary.id ? ' · primary' : ''),
-      x: d.bounds.x, y: d.bounds.y, width: Math.round(d.size.width * sf), height: Math.round(d.size.height * sf),
-      scaleFactor: sf, primary: d.id === primary.id
-    };
-  });
-}
+function listDisplays() { return host.screenCapture.listDisplays(); }
 
-// captureDisplay(displayId) → { data: Buffer(BGRA), width, height, displayId }
-// Physical-pixel frame of one display. displayId '' = primary.
-async function captureDisplay(displayId) {
-  if (!_electron) throw new Error('screen capture needs the app (not available in plain node)');
-  const { desktopCapturer, screen } = _electron;
-  const displays = screen.getAllDisplays();
-  const primary = screen.getPrimaryDisplay();
-  const want = displays.find((d) => String(d.id) === String(displayId || '')) || primary;
-  const sf = want.scaleFactor || 1;
-  const size = { width: Math.round(want.size.width * sf), height: Math.round(want.size.height * sf) };
-  const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: size, fetchWindowIcons: false });
-  if (!sources.length) throw new Error('no screen sources (capture blocked?)');
-  let src = sources.find((s) => String(s.display_id) === String(want.id));
-  if (!src) {
-    // Some drivers report no display_id; fall back to the source whose index matches.
-    const idx = displays.indexOf(want);
-    src = sources[idx] || sources[0];
-  }
-  const img = src.thumbnail;
-  if (!img || img.isEmpty()) throw new Error('empty frame from ' + src.name);
-  const sz = img.getSize();
-  return { data: img.toBitmap(), width: sz.width, height: sz.height, displayId: String(want.id) };
-}
+// captureDisplay(displayId, crop?) → { data: Buffer(BGRA), width, height, displayId, offsetX, offsetY }
+// Physical-pixel frame of one display. displayId '' = primary. With crop { x, y, w, h } only that
+// part comes back; offsetX/offsetY say where it sits on the display.
+function captureDisplay(displayId, crop) { return host.screenCapture.captureDisplay(displayId, crop); }
 
 // ── Pixel ops (pure JS, BGRA in / 8-bit gray out) ─────────────────────────────
 function clampRegion(frame, r) {
@@ -332,13 +300,10 @@ async function locateWords(frame, region, opts) {
   return { words, confidence: r.confidence };
 }
 
-// Downscaled JPEG data URL of a whole frame (calibration preview). Electron only.
-function frameToJpegDataUrl(frame, maxWidth, quality) {
-  if (!_electron) return '';
-  const img = _electron.nativeImage.createFromBitmap(frame.data, { width: frame.width, height: frame.height });
-  const w = Math.min(frame.width, maxWidth || 960);
-  const small = w < frame.width ? img.resize({ width: w }) : img;
-  return 'data:image/jpeg;base64,' + small.toJPEG(quality || 70).toString('base64');
+// Downscaled JPEG data URL of a whole frame (calibration preview). Needs the app.
+async function frameToJpegDataUrl(frame, maxWidth, quality) {
+  if (!host.screenCapture.available()) return '';
+  return host.screenCapture.frameToJpegDataUrl(frame, maxWidth, quality);
 }
 function grayToDataUrl(g) { return 'data:image/png;base64,' + grayToPng(g).toString('base64'); }
 

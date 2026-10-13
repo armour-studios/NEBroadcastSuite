@@ -583,7 +583,7 @@ function setupPopoutHandler() {
 // Main setup - only run when app is available
 // ── Auto-update (electron-updater + GitHub Releases) ────────────────────────
 // main.js owns the updater; the control panel drives it and shows status through the
-// WS bridge (server runs in this same process). Only functional in a packaged build.
+// WS bridge (server.broadcastUpdateStatus). Only functional in a packaged build.
 function setupAutoUpdate() {
   const push = (status) => {
     if (status && status.state !== 'checking') clearTimeout(checkWatchdog);
@@ -690,8 +690,14 @@ function setupApp() {
 
     try {
       // Load server AFTER the window exists so startup I/O doesn't block the launcher paint.
-      server = require('./server');
-      server.start(__dirname);
+      // It runs in its own process (backend/server-host.js) so a slow handler or a big save can't
+      // freeze the windows; NE_SERVER_IN_MAIN=1 runs it in this process as before.
+      if (process.env.NE_SERVER_IN_MAIN === '1') {
+        server = require('./server');
+        server.start(__dirname);
+      } else {
+        server = require('./backend/server-host').startServerProcess(__dirname);
+      }
       // The panel can finish painting before `server` is assigned above — replay it if so.
       if (panelDidLoad && typeof server.markPanelReady === 'function') server.markPanelReady();
       // The launcher POSTs /api/launcher/launch when it's time to swap to the studio.
@@ -742,11 +748,22 @@ function setupApp() {
     setupAutoUpdate();
   });
 
-  app.on('will-quit', () => {
+  let serverStopped = false;
+  app.on('will-quit', (e) => {
     if (rlUiHotkeyRegistered) {
-      try { globalShortcut.unregister(rlUiHotkeyRegistered); } catch (e) { }
+      try { globalShortcut.unregister(rlUiHotkeyRegistered); } catch (err) { }
+      rlUiHotkeyRegistered = null;
     }
-    if (typeof server?.shutdown === 'function') server.shutdown();
+    if (serverStopped || typeof server?.shutdown !== 'function') return;
+    if (server.isProcess) {
+      // Hold the quit until the server process has flushed its saves and exited.
+      e.preventDefault();
+      serverStopped = true;
+      server.shutdown().finally(() => app.quit());
+      return;
+    }
+    serverStopped = true;
+    server.shutdown();
   });
 
   app.on('window-all-closed', () => {

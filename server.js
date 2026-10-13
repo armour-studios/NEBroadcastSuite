@@ -17,7 +17,9 @@ const FormData = require('form-data');
 const fsp = require('fs/promises');
 const os = require('os');
 const AdmZip = require('adm-zip');
-const { dialog, app: _electronApp, safeStorage, powerMonitor } = require('electron');
+// Electron, wherever the server runs: in the main process or its own utility process (backend/electron-api.js).
+const electronApi = require('./backend/electron-api');
+const { dialog, app: _electronApp, powerMonitor } = electronApi;
 const { EventEmitter } = require('events');
 const IS_DEV = () => _electronApp && !_electronApp.isPackaged;
 const { createStartGgClient } = require('./backend/integrations/startgg-client');
@@ -1958,25 +1960,10 @@ function safeReadJson(filePath, fallback) {
 // read as-is, then re-saved encrypted on the next write. Falls back to plaintext (with a
 // warning) only if the OS has no keychain available (e.g. a headless/no-keyring Linux box) —
 // better to keep working than to lose saved credentials.
-function encryptSecret(plain) {
-  if (!plain) return '';
-  try {
-    if (safeStorage && safeStorage.isEncryptionAvailable && safeStorage.isEncryptionAvailable()) {
-      return 'enc:' + safeStorage.encryptString(String(plain)).toString('base64');
-    }
-  } catch (e) { console.warn('[secrets] encryption unavailable, storing plaintext:', e.message); }
-  return plain;
-}
-function decryptSecret(stored) {
-  if (!stored || typeof stored !== 'string') return '';
-  if (!stored.startsWith('enc:')) return stored;   // legacy plaintext, or plaintext fallback above
-  try {
-    if (safeStorage && safeStorage.isEncryptionAvailable && safeStorage.isEncryptionAvailable()) {
-      return safeStorage.decryptString(Buffer.from(stored.slice(4), 'base64'));
-    }
-  } catch (e) { console.warn('[secrets] failed to decrypt a stored secret (OS keychain changed?):', e.message); }
-  return '';   // can't decrypt without the OS keychain that encrypted it — treat as unset, not garbage
-}
+// 'enc:' = OS keychain; 'enc2:' = AES with a keychain-protected key (written by the server's own
+// process while the keychain answer is on its way). See backend/host-services.js.
+function encryptSecret(plain) { return electronApi.secrets.encrypt(plain); }
+function decryptSecret(stored) { return electronApi.secrets.decrypt(stored); }
 
 // ── WS bridge auth token ─────────────────────────────────────────────────────
 // The :3001 bridge accepts a `?token=` query param on every connection (control panel,
@@ -17645,7 +17632,7 @@ function handleControlMessage(msg, ws) {
           await cs2Setup.closeCs2();
         }
         const r = await cs2Setup.launch(state.csgo.cinematic.port);
-        if (r.url) { try { require('electron').shell.openExternal(r.url); } catch (e) { console.warn('[CS2] launch:', e.message); } }
+        if (r.url) { try { electronApi.shell.openExternal(r.url); } catch (e) { console.warn('[CS2] launch:', e.message); } }
         console.log('[CS2] launch for observing:', r.how || 'not started', r.message);
         csCinematicApply();
         try { ws.send(JSON.stringify({ type: 'csgo-result', data: { ok: r.ok, message: r.message, running: !!r.running } })); } catch (_) {}
@@ -17690,7 +17677,7 @@ function handleControlMessage(msg, ws) {
       break;
     }
     case 'dota_launch': {
-      try { require('electron').shell.openExternal(dotaGsi.launchUrl()); } catch (e) { console.warn('[Dota] launch:', e.message); }
+      try { electronApi.shell.openExternal(dotaGsi.launchUrl()); } catch (e) { console.warn('[Dota] launch:', e.message); }
       break;
     }
     case 'dota_settings': {
@@ -18373,7 +18360,7 @@ function handleControlMessage(msg, ws) {
     case 'vod_reveal': {
       const e = state.matchTitles.vodLog.find((x) => x && x.id === (msg.data && msg.data.id));
       const target = e && (e.path || e.from);
-      if (target) try { require('electron').shell.showItemInFolder(target); } catch (err) { console.warn('[match-titles] reveal:', err.message); }
+      if (target) try { electronApi.shell.showItemInFolder(target); } catch (err) { console.warn('[match-titles] reveal:', err.message); }
       break;
     }
     case 'vod_clear_log':
@@ -23608,20 +23595,10 @@ function startHttpServer(baseDir) {
     } catch (e) { return false; }
   }
   async function captureThumb(file) {
-    let BrowserWindow, nativeImage;
-    try { ({ BrowserWindow, nativeImage } = require('electron')); } catch (e) {}
-    if (!BrowserWindow) throw new Error('no window host');
-    const win = new BrowserWindow({ show: false, width: 1920, height: 1080, useContentSize: true, frame: false, enableLargerThanScreen: true,
-      webPreferences: { offscreen: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
-    try {
-      win.webContents.setAudioMuted(true);
-      await win.loadURL(`http://localhost:${HTTP_PORT}/${file}?preview=1&thumb=1`);
-      await new Promise((r) => setTimeout(r, THUMB_WAIT_MS));   // fonts, state sync, intro animations
-      const img = await win.webContents.capturePage();
-      const small = img.resize({ width: THUMB_W, quality: 'good' });
-      await fsp.mkdir(thumbDir, { recursive: true });
-      await fsp.writeFile(thumbFileFor(file), small.toPNG());
-    } finally { try { win.destroy(); } catch (e) {} }
+    // Rendered offscreen by the main process (backend/host-services.js renderThumb).
+    const png = await electronApi.renderThumb({ url: `http://localhost:${HTTP_PORT}/${file}?preview=1&thumb=1`, width: THUMB_W, waitMs: THUMB_WAIT_MS });
+    await fsp.mkdir(thumbDir, { recursive: true });
+    await fsp.writeFile(thumbFileFor(file), png);
   }
   function pumpThumbs() {
     if (thumbRunning) return;
@@ -28801,6 +28778,11 @@ module.exports.setPerfPriorityCallback = function (cb) {
 // so its load animation ends when the studio is genuinely ready instead of after a fixed sleep.
 let _panelReady = false;
 module.exports.markPanelReady = function () { _panelReady = true; };
+// Rewrites every file that holds secrets (the server's own process calls this once new secrets have
+// their keychain form; see backend/electron-api.js).
+module.exports.resaveSecrets = function () {
+  saveAppState(); saveTwitchData(); saveDiscordUser(); saveMultichatData();
+};
 
 module.exports.setRlSpectatorUiHotkeyChangeCallback = function (cb) {
   onRlSpectatorUiHotkeyChange = cb;
