@@ -46,9 +46,9 @@ ok(/challengermode: \{ panel: 'integration-startgg', title: \/\^challengermode\/
 ok(/set\('challengermode', cm\.hasKey/.test(app), 'its card shows key status');
 
 // Every top-level state key rides a declared broadcast tier (the server warns on each untiered key).
-const tiers = server.slice(server.indexOf('const BROADCAST_TIERS = {'), server.indexOf('};', server.indexOf('const BROADCAST_TIERS = {')));
+const tiers = require('../backend/state-schema').broadcastTiers();
 ['streamdeck', 'pollFailures', 'obsStinger', 'multichat', 'marbleRace', 'lanHost', 'eventNameSlug', 'dateFormat', 'chatHighlight', 'challongePlacements']
-  .forEach((k) => ok(new RegExp('\\b' + k + ": '(live|library|local)'").test(tiers), k + ' has a broadcast tier'));
+  .forEach((k) => ok(['live', 'library', 'local'].includes(tiers[k]), k + ' has a broadcast tier'));
 
 // Error messages point at the page that exists: tokens and OBS live under Apps.
 ok(!/set it in Settings\)|connect in Integrations|Settings → OBS|in Integrations first/.test(server + app), 'no hints point at the old Settings / Integrations locations');

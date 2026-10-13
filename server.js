@@ -3977,6 +3977,7 @@ function loadState() {
     saved = safeReadJson(stateFile, null);
     if (saved) {
       restoreSecrets(saved);
+      stateSchema.restoreTyped(state, saved);   // plain typed settings (load: 'typed' in backend/state-schema.js)
       if (saved.activeGame && GAMES[saved.activeGame]) state.activeGame = saved.activeGame;
       if (saved.themesByGame && typeof saved.themesByGame === 'object') {
         Object.keys(GAMES).forEach((g) => {
@@ -3996,15 +3997,11 @@ function loadState() {
       state.useBrandColors = (state.colorMode === 'brand');
       // Use the saved value whenever it's a string (including '' — a deliberately cleared
       // title must NOT snap back to the factory default on reload).
-      if (typeof saved.eventName === 'string') state.eventName = saved.eventName;
       if (typeof saved.eventNameSlug === 'string') state.eventNameSlug = saved.eventNameSlug;
-      if (typeof saved.gameLabel === 'string') state.gameLabel = saved.gameLabel;
-      if (typeof saved.roundLabel === 'string') state.roundLabel = saved.roundLabel;
       if (saved.speedUnit === 'mph' || saved.speedUnit === 'kmh') state.speedUnit = saved.speedUnit;
       if (saved.dateFormat === 'us' || saved.dateFormat === 'intl') state.dateFormat = saved.dateFormat;
       if (saved.teamRecord && typeof saved.teamRecord === 'object') state.teamRecord = { ...state.teamRecord, ...saved.teamRecord };
       // (Legacy manual-record migration runs AFTER state.teams is restored below — see migrateTeamRecordManual.)
-      if (typeof saved.autoTeamsFromGame === 'boolean') state.autoTeamsFromGame = saved.autoTeamsFromGame;
       // Spread onto the live object rather than replacing it: only the two settings are persisted,
       // and count/ver are runtime fields the control panel uses to know when to re-fetch.
       if (saved.teamVault && typeof saved.teamVault === 'object') {
@@ -4019,14 +4016,8 @@ function loadState() {
       if (saved.fontFamily) state.fontFamily = saved.fontFamily;
       // One-time migration: if saved font is still the old generic default, promote to brand font.
       if (state.fontFamily === 'Bourgeois') state.fontFamily = 'Industry';
-      if (typeof saved.clock24h === 'boolean') state.clock24h = saved.clock24h;
       if (typeof saved.followSetGame === 'boolean') state.followSetGame = saved.followSetGame;
-      if (typeof saved.showSeries === 'boolean') state.showSeries = saved.showSeries;
-      if (typeof saved.rlReplayTransitions === 'boolean') state.rlReplayTransitions = saved.rlReplayTransitions;
-      if (typeof saved.rlSponsorRoll === 'boolean') state.rlSponsorRoll = saved.rlSponsorRoll;
       if (saved.worldsSidebar && typeof saved.worldsSidebar === 'object') state.worldsSidebar = sanitizeWorldsSidebar(saved.worldsSidebar);
-      if (typeof saved.worldsTicker === 'boolean') state.worldsTicker = saved.worldsTicker;
-      if (typeof saved.rlScoreboardSeparate === 'boolean') state.rlScoreboardSeparate = saved.rlScoreboardSeparate;
       // Merged field-by-field, not assigned wholesale: a state.json written before this feature
       // existed has no seriesStats at all, and one written by a newer build must not be able to
       // drop `games` into a non-array and break the overlay's reduce.
@@ -4038,7 +4029,6 @@ function loadState() {
         if (Array.isArray(sv.games)) ss.games = sv.games.filter((g) => g && Array.isArray(g.players)).slice(-9);
         if (typeof sv.liveBanked === 'boolean') ss.liveBanked = sv.liveBanked;
       }
-      if (typeof saved.defaultBestOf === 'number') state.defaultBestOf = saved.defaultBestOf;
       if (saved.facecamsEnabled !== undefined) state.facecamsEnabled = saved.facecamsEnabled;
       if (saved.lanSeats && typeof saved.lanSeats === 'object') state.lanSeats = lanSeats.normalize(saved.lanSeats);
       if (saved.replayCams !== undefined) state.replayCams = saved.replayCams;
@@ -4902,46 +4892,18 @@ function loadState() {
 // round trip can be tested (test/persist-roundtrip.test.js).
 function buildSaveSnapshot() {
   return {
-    activeGame: state.activeGame,
-    themesByGame: state.themesByGame,
-    activeBrandKitId: state.activeBrandKitId,
-    useBrandColors: state.useBrandColors,
-    colorMode: state.colorMode,
-    clock24h: state.clock24h,
+    // Keys saved as-is (save: 'plain' in backend/state-schema.js); the serializers below cover the rest.
+    ...stateSchema.plainSnapshot(state),
     followSetGame: !!state.followSetGame,
-    showSeries: state.showSeries,
-    rlReplayTransitions: state.rlReplayTransitions,
-    rlSponsorRoll: state.rlSponsorRoll,
-    worldsSidebar: state.worldsSidebar,
-    worldsTicker: state.worldsTicker,
-    rlScoreboardSeparate: state.rlScoreboardSeparate,
-    seriesStats: state.seriesStats,
-    defaultBestOf: state.defaultBestOf,
-    eventName: state.eventName,
     eventNameSlug: state.eventNameSlug || '',
-    gameLabel: state.gameLabel,
-    roundLabel: state.roundLabel,
-    speedUnit: state.speedUnit,
-    teamRecord: state.teamRecord,
     perfMode: (function () { const pm = state.perfMode || {}; return {
       enabled: pm.enabled !== false, always: !!pm.always,
       reduceAnimations: !!pm.reduceAnimations, pausePreviews: !!pm.pausePreviews,
       broadcastRate: pm.broadcastRate || 'smooth' }; })(),
     orgLibrary: (function () { const o = state.orgLibrary || {}; return { autoSync: o.autoSync !== false, profileId: o.profileId || null }; })(),
-    autoTeamsFromGame: state.autoTeamsFromGame,
     // Settings only — the vault's records live in team-db.json (see backend/team-db.js).
     teamVault: (function () { const v = state.teamVault || {}; return { enabled: v.enabled !== false, autoLink: v.autoLink !== false, autoEnrich: v.autoEnrich !== false }; })(),
-    startggLeagueStandings: state.startggLeagueStandings,
-    fontFamily: state.fontFamily,
-    facecamsEnabled: state.facecamsEnabled,
     lanSeats: (() => { const { seats, seen, agentError, ...keep } = state.lanSeats || {}; return keep; })(),
-    replayCams: state.replayCams,
-    deskFooter: state.deskFooter,
-    preshow: state.preshow,
-    banner: state.banner,
-    casters: state.casters,
-    credits: state.credits,
-    ticker: state.ticker,
     draftAuto: { enabled: !!(state.draft && state.draft.auto && state.draft.auto.enabled), lockfilePath: (state.draft && state.draft.auto && state.draft.auto.lockfilePath) || '' },
     draftLook: draftLookPrefs(state.draft),
     dota: { cfgPath: state.dota.cfgPath || '', autoDraft: state.dota.autoDraft !== false, radiantSide: state.dota.radiantSide === 'b' ? 'b' : 'a' },
@@ -4968,14 +4930,9 @@ function buildSaveSnapshot() {
     bedwarsToken: encryptSecret(bedwarsToken),
     adProofSessions: state.adProofSessions || [],
     playerProfiles: state.playerProfiles || {},
-    overtime: state.overtime,
     replay: (({ program, preview, ...look }) => look)(state.replay || {}),   // buses are runtime-only
-    scoreboardAd: state.scoreboardAd,
     // Post-game board style (Default/Glass/Block/Radar/Compare) + show-stats. loadState() already
     // restored this, but it was never written, so the pick reset to Default on every restart.
-    rlStatsScreen: state.rlStatsScreen,
-    watchlist: state.watchlist,
-    teamSpotlight: state.teamSpotlight,
     breakScreen: {
       visible: state.breakScreen.visible,
       title: state.breakScreen.title,
@@ -4992,23 +4949,8 @@ function buildSaveSnapshot() {
     gameConfigs: state.gameConfigs || {},
     gameConfigVersions: state.gameConfigVersions || {},
     gameConfigFrom: state.gameConfigFrom || {},
-    bestOf: state.bestOf,
-    teams: state.teams,
-    series: state.series,
-    activePlayer: state.activePlayer,
-    observedPlayer: state.observedPlayer,
-    smash: state.smash,
-    brawlhalla: state.brawlhalla,
-    tokon: state.tokon,
-    chatCommands: state.chatCommands,
-    pulse: state.pulse,
     matchTitles: { twitch: state.matchTitles.twitch, vod: state.matchTitles.vod, stripSponsors: state.matchTitles.stripSponsors, vodLog: state.matchTitles.vodLog },
-    match: state.match,
-    leagues: state.leagues,
-    myEvents: state.myEvents,
-    eventOps: state.eventOps,
     game: { number: state.game.number },
-    startgg: state.startgg,
     startggApiToken: encryptSecret(startggApiToken),
     challonge: { enabled: state.challonge.enabled, tournamentSlug: state.challonge.tournamentSlug, selectedTournament: state.challonge.selectedTournament, logoMap: state.challonge.logoMap, autoFollow: state.challonge.autoFollow, gameId: state.challonge.gameId, pollSec: state.challonge.pollSec, budget: state.challonge.budget },
     challengermode: { enabled: state.challengermode.enabled, tournamentId: state.challengermode.tournamentId,
@@ -5028,16 +4970,12 @@ function buildSaveSnapshot() {
     liquipediaCache: _lpCache.toJSON(),
     faceit: { enabled: state.faceit.enabled, competitionId: state.faceit.competitionId, competitionType: state.faceit.competitionType, organizerId: state.faceit.organizerId, organizerName: state.faceit.organizerName, selectedEvent: state.faceit.selectedEvent, logoMap: state.faceit.logoMap, autoFollow: state.faceit.autoFollow },
     faceitApiKey: encryptSecret(faceitApiKey),
-    ballchasing: state.ballchasing,
     ballchasingApiKey: encryptSecret(ballchasingApiKey),
     sheets: { enabled: state.sheets.enabled, sheetUrl: state.sheets.sheetUrl, sheetId: state.sheets.sheetId,
       title: state.sheets.title, saEmail: state.sheets.saEmail, autoSyncSec: state.sheets.autoSyncSec, maps: state.sheets.maps },
     sheetsServiceAccount: encryptSecret(sheetsServiceAccount),
     competitionApiKey: encryptSecret(competitionApiKey),
     competitionFeedTokens: Object.keys(competitionFeedTokens).length ? encryptSecret(JSON.stringify(competitionFeedTokens)) : '',
-    competition: state.competition,
-    siteEvent: state.siteEvent,
-    activeEvent: state.activeEvent,
     obs: {
       enabled: state.obs.enabled,
       app: state.obs.app,
@@ -5052,15 +4990,11 @@ function buildSaveSnapshot() {
       commercialAutoReturn: state.obs.commercialAutoReturn,
       scenes: state.obs.scenes
     },
-    obsStinger: state.obsStinger,
     obsPassword: encryptSecret(obsPassword),
     slobsToken: encryptSecret(slobsToken),
     vmix: { enabled: state.vmix.enabled, host: state.vmix.host, port: state.vmix.port },
     switcher: { target: state.switcher.target },
     // Persist the full bracket so it renders instantly on restart (then refreshes)
-    bracket: state.bracket,
-    upcoming: state.upcoming,
-    standings: state.standings,
     brand: state.brand || null,                 // global accent fallback (Settings ▸ Appearance) when no kit is active
     preshowPresets: state.preshowPresets || [], // Desk Show named topic rundowns
     csgoCfgPath: state.csgo.cfgPath,
@@ -5097,7 +5031,6 @@ function buildSaveSnapshot() {
     // Persist the measured goal-replay length so the FIRST goal of a session is timed off the real
     // value instead of the overlay's 6000ms fallback (that's why goal 1 was off and the rest fine).
     rlReplayLenMs: state.rlReplayLenMs || 0,
-    vdo: state.vdo,
     flows: state.flows || [],
     sceneBg: state.sceneBg || {},
     scenePresets: state.scenePresets || {},
@@ -5106,7 +5039,6 @@ function buildSaveSnapshot() {
     dateFormat: state.dateFormat === 'intl' ? 'intl' : 'us',
     liquipedia: { enabled: !!state.liquipedia.enabled, wiki: state.liquipedia.wiki || '', contact: state.liquipedia.contact || '' },
     liquipediaBudget: _lpBudget ? _lpBudget.toJSON() : undefined,   // keeps the rate limit across restarts
-    background: state.background
   };
 }
 function _saveAppStateNow(sync = false) {
@@ -5369,71 +5301,10 @@ function buildSceneConfig() {
   return out;
 }
 
-// ── Broadcast tier schema ────────────────────────────────────────────────────
-// Every top-level key of the broadcast payload must be declared here:
-//   'live'    — rides EVERY broadcast. Keep it small: no base64, no libraries.
-//   'library' — heavy / rarely-changing; travels via libraryData() (on connect + on
-//               change, gated by librarySig — a new library key MUST also be signed).
-//   'local'   — server-only; never broadcast.
-// An undeclared key still broadcasts (so nothing breaks) but warns loudly once per key.
-// That warning is the tripwire: payload bloat used to creep in silently because the old
-// spread-then-denylist defaulted every new state key straight onto the wire (~600KB/broadcast
-// at its worst — leagues alone carried 368KB of base64 logos into every goal update).
-const BROADCAST_TIERS = {
-  // heavy libraries → libraryData()
-  bracket: 'library', replay: 'library', playerProfiles: 'library',
-  leagues: 'library', clips: 'library', brand: 'library', eventOps: 'library',
-  // Q&A queue: panel-only and it churns while chat is busy — keep it off every live broadcast.
-  questions: 'library',
-  cloudCompetitions: 'library',   // website competition picker list — panel only
-  cloudEventsMeta: 'library',
-  customOverlays: 'library',   // Overlays ▸ Builder: the list (names only; layouts load on request)
-  customOverlayRevs: 'live',
-  // server-only (overlays get the derived sceneConfig instead)
-  scenePresets: 'local',
-  // live production/scoreboard state (from the state literal)
-  version: 'live', view: 'live', rlHudHidden: 'live', perfMode: 'live', orgLibrary: 'live', cloudRole: 'live', activeGame: 'live', themesByGame: 'live',
-  eventName: 'live', gameLabel: 'live', roundLabel: 'live', speedUnit: 'live', fontFamily: 'live',
-  clock24h: 'live', followSetGame: 'live', showSeries: 'live', rlReplayTransitions: 'live', rlSponsorRoll: 'live', worldsSidebar: 'live', worldsTicker: 'live', rlScoreboardSeparate: 'live', defaultBestOf: 'live', facecamsEnabled: 'live', lanSeats: 'live',
-  replayCams: 'live', activeBrandKitId: 'live', useBrandColors: 'live', colorMode: 'live',
-  sceneBg: 'live', banner: 'live', casters: 'live', vdo: 'live', listenIn: 'live', credits: 'live',
-  competition: 'live', compFeed: 'live', compSync: 'live',
-  breakScreen: 'live', ticker: 'live', adProofSessions: 'library', spotlight: 'live', winner: 'live',
-  veto: 'live', owMatch: 'live', mrMatch: 'live', r6: 'live', bedwars: 'live', pointMatrices: 'live', customOverlayLayouts: 'live', gameConfigs: 'live', gameConfigFrom: 'live', gameConfigVersions: 'library', draft: 'live',
-  intro: 'live', overtime: 'live', scoreboardAd: 'live', rlStatsScreen: 'live', seriesStats: 'live', background: 'live', deskFooter: 'live',
-  preshow: 'live', csgo: 'live', valorant: 'live', lol: 'live', apex: 'live', br: 'live', bestOf: 'live', teams: 'live',
-  // Settings + a change counter only — the vault RECORDS are fetched over /api/teamdb, never
-  // broadcast (they carry base64 logos and full roster history).
-  teamVault: 'live',
-  teamPlayers: 'live', series: 'live', activePlayer: 'live', observedPlayer: 'live', smash: 'live', brawlhalla: 'live', tokon: 'live', match: 'live', myEvents: 'library', game: 'live',
-  chatCommands: 'live', pulse: 'live', matchTitles: 'live',
-  gameTeams: 'live', players: 'live', playerCache: 'live', currentGoal: 'live',
-  spectatedPlayer: 'live', rlConnected: 'live', rlStale: 'live', rlSpectatorUi: 'live', startgg: 'live',
-  challonge: 'live', challengermode: 'live', challengermodePlacements: 'live', nxgen: 'live', liquipedia: 'live', riot: 'live', faceit: 'live', sheets: 'live', activeEvent: 'live', obs: 'live', vmix: 'live',
-  switcher: 'live', commercial: 'live', upcoming: 'live', standings: 'live', leagueStats: 'live', leagueLeaderboard: 'live', leagueCapture: 'live', siteEvent: 'live', ballchasing: 'live', teamRecord: 'live',
-  autoTeamsFromGame: 'live', startggLeagueStandings: 'live', gfxActive: 'live', watchlist: 'live',
-  startggPlacements: 'live', startggCharacters: 'live',
-  teamSpotlight: 'live', director: 'live', ai: 'live', encode: 'live', twitch: 'live',
-  discord: 'live', flows: 'live', flowVars: 'live',
-  cloudHealth: 'live', cloudLoops: 'live',   // breaker + background-poll status for the cloud readouts
-  // runtime-added state keys (mirrored in libraryData where noted)
-  crew: 'live',            // also in libraryData — overlays read it live, panel backfills it
-  awaitingKickoff: 'live', inReplay: 'live', otTriggered: 'live', rlBall: 'live', rlReplayLenMs: 'live',
-  rlLastTouch: 'live', rlPaused: 'live',
-  scoreboard: 'live', showRoster: 'live', sponsorBanner: 'live', preshowPresets: 'live',
-  playerProfilesVer: 'live',
-  // derived keys buildLiveState() adds on top of state
-  games: 'live', vetoPools: 'live', vetoMeta: 'live', draftGames: 'live', theme: 'live', brMeta: 'live',
-  activeOverlay: 'live', overlayLayout: 'live', presets: 'live', facecams: 'live',
-  formattedTime: 'live', teamRecords: 'live', leagueStandings: 'live', flowFireLog: 'live', autoLog: 'live',
-  overlays: 'live', sceneConfig: 'live',
-  streamdeck: 'live',     // { connected } for the Apps page Stream Deck card
-  dota: 'live',           // Dota 2 GSI: settings + the latest parsed frame (10 players, ~6KB)
-  // Small and read live by the panel or an overlay (marble-race.html, chat-highlight.html).
-  pollFailures: 'live', obsStinger: 'live', multichat: 'live', marbleRace: 'live', lanHost: 'live',
-  eventNameSlug: 'live', dateFormat: 'live', chatHighlight: 'live', challongePlacements: 'live',
-  rundownStatus: 'live'   // tiny current/next labels the Stream Deck rundown keys show
-};
+// ── Broadcast tiers ──────────────────────────────────────────────────────────
+// Declared per key in backend/state-schema.js (one table with saving and loading).
+const stateSchema = require('./backend/state-schema');
+const BROADCAST_TIERS = stateSchema.broadcastTiers();
 const _untieredWarned = new Set();
 function stripByTier(payload) {
   for (const k of Object.keys(payload)) {

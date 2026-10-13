@@ -287,7 +287,7 @@ const M2 = { id: 'm2', teamA: 'y', teamB: 'z', scheduledAt: '2099-01-08T19:00:00
     const loop = fn('startCompetitionSyncLoop');
     assert.ok(/s\.type !== 'sheet' && s\.type !== 'feed'/.test(loop), 'per-league timer still skips cloud leagues (pullOrgCompetitions owns them)');
     assert.ok(/cloudLoop\('org-competitions'/.test(src), 'list poll runs under cloudLoop, not setInterval');
-    assert.ok(/cloudCompetitions: 'library'/.test(src), 'picker list is library tier');
+    assert.strictEqual(require('../backend/state-schema').broadcastTiers().cloudCompetitions, 'library', 'picker list is library tier');
     console.log('PASS  cloud league skipped by the push path; loop + tier wiring present');
   }
 

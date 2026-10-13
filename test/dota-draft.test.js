@@ -64,7 +64,7 @@ ok(gsi.draftOps(seq, dr, { a: 'dire', b: 'radiant' })[0].hero === 'mars', 'Radia
 
 // ── Server wiring ──
 ok(/app\.post\('\/api\/dota-gsi'/.test(server) && /token !== DOTA_GSI_TOKEN/.test(server), 'GSI receiver checks its token');
-ok(/\bdota: 'live'/.test(server), 'state.dota has a broadcast tier');
+ok(require('../backend/state-schema').broadcastTiers().dota === 'live', 'state.dota has a broadcast tier');
 ok(/dota: \{ cfgPath: state\.dota\.cfgPath/.test(server) && /saved\.dota && typeof saved\.dota === 'object'/.test(server), 'Dota settings saved and restored (never the live frame)');
 ok(/draftLook: draftLookPrefs\(state\.draft\)/.test(server) && /saved\.draftLook/.test(server), 'draft look prefs saved and restored');
 ok(/function draftLookPrefs\(prev\) \{\n  const p = prev \|\| \{\};\n  const DRAFT_LAYOUTS/.test(server), 'layout list is local to the function (no TDZ at boot)');
