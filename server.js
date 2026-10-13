@@ -4620,12 +4620,20 @@ function loadState() {
           },
           commercialAutoReturn: saved.obs.commercialAutoReturn !== false,
           scenes: { ...state.obs.scenes, ...(saved.obs.scenes || {}) },
+          // (the old "after post-game, cut to Casters in N s" setting is folded into postGame below)
           // runtime fields are not restored
           connected: false,
           lastError: null,
           availableScenes: [],
           availableTransitions: []
         };
+        // The streaming software screen used to have its own "after post-game, cut to Casters in N s"
+        // (postGameToCastersSec). It duplicated Rocket League Scene Automation stage 3 and is gone from
+        // that screen: an existing choice becomes stage 3 (same scene, same delay) unless stage 3 is set.
+        if (state.obs.postGameToCastersSec > 0 && !state.obs.postGame.enabled && state.obs.scenes && state.obs.scenes.casters) {
+          state.obs.postGame = { enabled: true, scene: state.obs.scenes.casters, delaySec: state.obs.postGameToCastersSec, transition: '' };
+          state.obs.postGameToCastersSec = 0;
+        }
       }
       // The OBS stinger the REPLAYS page uses between clips — restored so its video is servable
       // (and its transition point known) from the moment the app starts, without OBS being asked.

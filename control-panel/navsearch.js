@@ -222,7 +222,7 @@
     { n: 'Crew / Talent Profiles', w: 'Talent', k: 'crew casters host observer profiles staff country social gamertag', to: { talent: 'crew' } },
     { n: 'Camera Feeds', w: 'Production', k: 'cameras vdo ninja feeds rooms invite links talent rooms observers stations', to: { prod: 'cameras' } },
     // Video editor
-    { n: 'Replays', w: 'Replays', k: 'replays capture clips trim video editor highlights playlists montage buffer instant replay', to: { replays: 'editor' } },
+    { n: 'Replay Studio', w: 'Replays', k: 'replays replay studio player capture clips trim video editor highlights playlists montage buffer instant replay', to: { replays: 'editor' } },
     { n: 'Exports', w: 'Replays', k: 'export render encode mp4', to: { replays: 'exports' } },
     // Assets
     { n: 'Media Library', w: 'Assets', k: 'media images assets uploads library stingers', to: { assets: 'media' } },

@@ -49,7 +49,7 @@ function fakeObs(opts = {}) {
           return {};
         }
         case 'SetSceneItemEnabled': items(d.sceneName).find((x) => x.id === d.sceneItemId).enabled = d.sceneItemEnabled; return {};
-        case 'GetVideoSettings': return { baseWidth: opts.cw || 1920, baseHeight: opts.ch || 1080 };
+        case 'GetVideoSettings': return { baseWidth: opts.cw == null ? 1920 : opts.cw, baseHeight: opts.ch == null ? 1080 : opts.ch };
         case 'SetSceneItemTransform': items(d.sceneName).find((x) => x.id === d.sceneItemId).transform = d.sceneItemTransform; return {};
         default: throw new Error('unexpected ' + type);
       }
@@ -92,6 +92,11 @@ const order = (obs, s) => obs.scenes.get(s).map((x) => x.source);
   obs = fakeObs({ scenes: ['S'] });
   await placeOverlay(obs, 'S', 'NE V', 'http://x/v', 1080, 1920);
   assert.strictEqual(obs.scenes.get('S')[0].transform.boundsType, 'OBS_BOUNDS_SCALE_INNER');
+  // Streamlabs reports no canvas size (0x0): the source is fitted anyway (its translator turns this
+  // into Streamlabs' fit-to-screen). It used to be left at 1920x1080 and overflow a smaller canvas.
+  obs = fakeObs({ scenes: ['S'], cw: 0, ch: 0 });
+  await placeOverlay(obs, 'S', 'NE A', 'http://x/a', 1920, 1080);
+  assert.strictEqual(obs.scenes.get('S')[0].transform.boundsType, 'OBS_BOUNDS_SCALE_INNER', 'unknown canvas: fitted');
 
   // Build show scenes: creates five scenes with shared inputs, graphics on top, maps empty moments.
   obs = fakeObs({ scenes: ['My Scene'] });
@@ -114,7 +119,7 @@ const order = (obs, s) => obs.scenes.get(s).map((x) => x.source);
 
   // Second run: nothing duplicated, nothing remapped; a user layer added on top is pushed under ours.
   obs.scenes.get('NE In Game').push({ id: 999, source: 'Game Capture', enabled: true });
-  r = await buildShowScenes(obs, 'http://localhost:3000', { inGame: 'My Scene', casters: 'NE Casters', break: 'NE Starting Soon', replay: 'NE Replay' });
+  r = await buildShowScenes(obs, 'http://localhost:3000', { inGame: 'My Scene', casters: 'NE Casters', break: 'NE Starting Soon', replay: 'NE Replay', postGame: 'NE Post-Game', bracket: 'NE Bracket', commercial: 'NE Commercial' });
   assert.strictEqual(r.created.length, 0);
   assert.strictEqual(r.updated.length, SHOW_SCENES.length);
   assert.deepStrictEqual(r.mapping, {});

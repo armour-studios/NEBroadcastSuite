@@ -208,7 +208,7 @@
     home:     '<path d="M3 11l9-8 9 8"/><path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10"/>',
     live:     '<circle cx="12" cy="12" r="2.5"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M4.9 4.9a10 10 0 0 0 0 14.2M19.1 4.9a10 10 0 0 1 0 14.2"/>',
     graphics: '<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M3 13h18M9 21h6M12 17v4"/>',
-    replays:  '<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>',
+    replays:  '<rect x="2" y="4" width="20" height="16" rx="3"/><polygon points="10 8.5 16 12 10 15.5 10 8.5" fill="currentColor"/>',   // a player: Replay Studio plays moments back and edits them
     match:    '<path d="M4 4l7 7M20 4l-7 7M4 20l4-4M20 20l-4-4M9.5 14.5l-3 3M14.5 14.5l3 3"/><circle cx="12" cy="12" r="2"/>',
     event:    '<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6M18 9h1.5a2.5 2.5 0 0 0 0-5H18M4 22h16M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22M18 2H6v7a6 6 0 0 0 12 0V2Z"/>',
     sponsors: '<path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/>',
@@ -250,7 +250,7 @@
       desc: 'Edit every graphic, preview it and put it on air.' },
     { id: 'overlays', rail: 'Overlays', label: 'Overlays', icon: 'overlays', go: { tab: 'principal', view: 'overlays' },
       desc: 'Design your own overlays for any scene, or use the ones built into the app. Everything goes straight into OBS.' },
-    { id: 'replays', rail: 'Replays', label: 'Replays', icon: 'replays', go: { tab: 'replays' },
+    { id: 'replays', rail: 'Replay Studio', label: 'Replay Studio', icon: 'replays', go: { tab: 'replays' },
       subs: [],
       desc: 'Capture moments during the game, play them back on air, and build highlight reels for the breaks.' },
     { group: 'Set up' },

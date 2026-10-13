@@ -41,10 +41,12 @@ async function placeOverlay(obs, sceneName, name, url, nw, nh, inputNames) {
   try {
     const vs = await obs.call('GetVideoSettings');
     const cw = vs.baseWidth, ch = vs.baseHeight;
-    if (cw && ch && (cw !== nw || ch !== nh)) {
+    // Fit when the canvas differs from the overlay's size, and also when it is unknown: Streamlabs'
+    // API reports no canvas size (0x0), and there SCALE_INNER becomes its own fit-to-screen.
+    if (!cw || !ch || cw !== nw || ch !== nh) {
       await obs.call('SetSceneItemTransform', { sceneName, sceneItemId: itemId, sceneItemTransform: {
         positionX: 0, positionY: 0, alignment: 5, rotation: 0,
-        boundsType: 'OBS_BOUNDS_SCALE_INNER', boundsAlignment: 0, boundsWidth: cw, boundsHeight: ch
+        boundsType: 'OBS_BOUNDS_SCALE_INNER', boundsAlignment: 0, boundsWidth: cw || nw, boundsHeight: ch || nh
       } });
     }
   } catch (e) {}
@@ -68,6 +70,10 @@ const SHOW_SCENES = [
   { scene: 'NE Starting Soon', key: 'break',   layers: [CORE.graphics] },
   { scene: 'NE Casters',       key: 'casters', layers: [['NE Casters', '/duorow.html'], CORE.graphics] },
   { scene: 'NE Replay',        key: 'replay',  layers: [['NE Replay Player', '/replay-player.html'], CORE.graphics] },
+  // The other moments the app cuts to: the HUD's post-game board, the bracket, an ad break.
+  { scene: 'NE Post-Game',     key: 'postGame',   layers: [CORE.scoreboard, CORE.graphics] },
+  { scene: 'NE Bracket',       key: 'bracket',    layers: [CORE.graphics] },   // the bracket is a gfx.html graphic: push it from Graphics
+  { scene: 'NE Commercial',    key: 'commercial', layers: [CORE.graphics] },
 ];
 
 // Returns { created, updated, mapping } where `mapping` is the broadcast moments to point at the

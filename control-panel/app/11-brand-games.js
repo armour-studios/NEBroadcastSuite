@@ -1531,6 +1531,19 @@ function renderCsgoCinematic(cs) {
 const OBS_SCENE_KEYS = ['inGame', 'replay', 'postGame', 'break', 'commercial', 'casters', 'bracket'];
 let _lastObsSceneSig = '';
 
+// Apps > Streaming software: the scenes the connected app has, as chips (so a producer can see the
+// app is reading their collection, and that Build show scenes added its NE scenes).
+function renderSwScenes(obs) {
+  const box = el('sw-scenes'), list = el('sw-scene-list');
+  if (!box || !list) return;
+  const scenes = obs.connected ? (obs.availableScenes || []).filter((n) => !/^═/.test(n)) : [];
+  const sig = scenes.join('|') + '#' + (obs.currentScene || '');
+  if (list.dataset.sig === sig) return;
+  list.dataset.sig = sig;
+  box.hidden = !scenes.length;
+  const c = el('sw-scene-count'); if (c) c.textContent = scenes.length ? String(scenes.length) : '';
+  list.innerHTML = scenes.map((n) => '<span class="sw-chip' + (n === obs.currentScene ? ' is-live' : '') + (/^NE /.test(n) ? ' is-ne' : '') + '" title="' + esc(n) + '">' + esc(n) + '</span>').join('');
+}
 function getObsPayload() {
   const scenes = {};
   OBS_SCENE_KEYS.forEach(k => {
@@ -2599,6 +2612,7 @@ el('btn-obs-toggle-buffer')?.addEventListener('click', () => send('obs_toggle_re
 function applyObsState(data) {
   const obs = data.obs || {};
   applySceneControl(obs);
+  renderSwScenes(obs);
 
   const cbEnabled = el('check-obs-enabled');
   if (cbEnabled) cbEnabled.checked = !!obs.enabled;
@@ -2726,6 +2740,8 @@ function syncObsAppFields() {
   const sf = el('slobs-fields'); if (sf) sf.style.display = slobs ? 'flex' : 'none';
   const og = el('obs-fields-grid'); if (og) og.style.display = slobs ? 'none' : 'grid';
   const oh = el('obs-fields-help'); if (oh) oh.style.display = slobs ? 'none' : '';
+  // A scene collection file is imported by OBS only.
+  const cc = el('sw-collection-card'); if (cc) cc.hidden = slobs;
 }
 el('select-obs-app')?.addEventListener('change', syncObsAppFields);
 el('btn-slobs-clear-token')?.addEventListener('click', () => {
@@ -2738,6 +2754,8 @@ el('btn-slobs-clear-token')?.addEventListener('click', () => {
   const ind = el('slobs-token-indicator'); if (ind) ind.style.display = 'none';
 });
 el('input-obs-postgame-casters')?.addEventListener('change', () => send('set_obs_settings', getObsPayload()));
+// Rocket League > Automation > Replays (moved there from the streaming software screen): saves at once.
+el('check-obs-autoreplay')?.addEventListener('change', () => send('set_obs_settings', getObsPayload()));
 el('check-obs-kickoff')?.addEventListener('change', () => send('set_obs_settings', getObsPayload()));
 el('select-obs-kickoff-scene')?.addEventListener('change', () => send('set_obs_settings', getObsPayload()));
 el('check-commercial-auto-return')?.addEventListener('change', function () { send('set_commercial_auto_return', { enabled: this.checked }); });

@@ -11867,3 +11867,37 @@ body.gfx-board-open { overflow: hidden; }
 @media (max-width: 700px) { .dg-row { grid-template-columns: 56px minmax(0, 1fr); } .dg-row span { grid-column: 2; } }
 
 .sev-otherbtn.is-static { cursor: default; border-style: solid; }
+
+/* ── Apps > Streaming software (OBS / Streamlabs): connection first, buttons under the fields, ──
+   scenes as chips, setup as two short cards. No scrolling to reach Test connection. */
+.sw-card .sw-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.sw-card .sw-head .section-title { margin: 0; }
+.sw-connect { display: inline-flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; color: var(--text); cursor: pointer; }
+.sw-connect input { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
+.sw-fields-wrap { display: flex; flex-direction: column; gap: 8px; }
+.sw-fields { display: grid; grid-template-columns: minmax(0, 1.4fr) 110px minmax(0, 2fr); gap: 10px; }
+.sw-fields .field-row { margin-bottom: 0; min-width: 0; }
+.sw-secret { display: flex; gap: 8px; align-items: center; }
+.sw-secret .input-text { flex: 1 1 auto; min-width: 0; }
+.sw-saved { padding: 6px 10px; background: rgba(74,222,128,.15); border: 1px solid rgba(74,222,128,.5); border-radius: 6px; font-size: 12px; color: #86efac; white-space: nowrap; }
+.sw-clear { padding: 6px 10px; background: rgba(245,101,101,.12); border: 1px solid rgba(245,101,101,.6); border-radius: 6px; color: #f56565; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.sw-limit { margin: 8px 0 0; color: #f6c177; }
+.sw-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.sw-result { font-size: 12.5px; color: var(--muted); }
+.sw-actions .sw-result { flex: 1 1 220px; min-width: 0; }
+.sw-scenes { margin-top: 14px; }
+.sw-sub { font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+.sw-sub em { font-style: normal; margin-left: 6px; padding: 1px 7px; border-radius: 999px; background: var(--surface3, rgba(255,255,255,.08)); color: var(--text); letter-spacing: 0; }
+.sw-chips { display: flex; flex-wrap: wrap; gap: 6px; max-height: 96px; overflow-y: auto; }
+.sw-chip { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); }
+.sw-chip.is-ne { border-color: rgba(124,58,237,.55); }
+.sw-chip.is-live { border-color: rgba(239,68,68,.7); background: rgba(239,68,68,.12); }
+.sw-setup { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 16px; }
+.sw-setup-card { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface2); }
+.sw-setup-card[hidden] { display: none; }
+.sw-setup-card > b { font-size: 13px; color: var(--text); }
+.sw-setup-card > p { margin: 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.sw-setup-card .int-keyhelp { margin-top: 0; }
+.sw-setup-card .btn { align-self: flex-start; }
+.sw-tag { margin-left: 6px; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--surface3, rgba(255,255,255,.08)); color: var(--muted); }
+@media (max-width: 720px) { .sw-fields { grid-template-columns: 1fr; } }
