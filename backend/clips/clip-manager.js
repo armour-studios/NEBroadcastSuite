@@ -113,6 +113,8 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
       game: meta.game || '',
       player: meta.player || '',
       reason: meta.reason || '',
+      match: meta.match || '',                     // "FRT vs EMB" at capture time (Replays page grouping)
+      gameNumber: meta.gameNumber || null,
       folder: 'replays',                           // new captures land in the raw pool; promote → highlights
       createdAt: Date.now(),
       duration: meta.duration || null,
@@ -242,6 +244,8 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
       game: meta.game,
       player: meta.player || '',
       reason: meta.reason || '',
+      match: meta.match || '',
+      gameNumber: meta.gameNumber || null,
       folder: 'replays',
       createdAt: Date.now(),
       pendingFile: true,
@@ -317,7 +321,8 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
   function copyClip(id, folder) {
     const clip = library.find((c) => c.id === id);
     if (!clip) return null;
-    const copy = { ...clip, id: `clip_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, folder: normFolder(folder), createdAt: Date.now() };
+    // copiedFrom: the moment a Highlights copy was starred from, so its star shows and toggles off.
+    const copy = { ...clip, id: `clip_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, folder: normFolder(folder), createdAt: Date.now(), copiedFrom: clip.copiedFrom || clip.id };
     library.unshift(copy);
     if (library.length > 500) library.length = 500;
     save().catch((e) => console.warn('[clips: library save failed]', (e && e.message) || e));

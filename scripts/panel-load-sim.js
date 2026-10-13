@@ -48,6 +48,7 @@ g.console = console;
 g.document = {
   getElementById: () => M, querySelector: () => M, querySelectorAll: () => [],
   createElement: () => M, createTextNode: () => M, addEventListener: () => {},
+  createTreeWalker: () => ({ nextNode: () => null }),
   removeEventListener: () => {}, body: M, head: M, documentElement: M,
   activeElement: null, visibilityState: 'visible', title: '', fonts: { ready: Promise.resolve() },
 };
@@ -63,6 +64,7 @@ g.FileReader = class { readAsDataURL() {} readAsText() {} };
 g.MutationObserver = class { observe() {} disconnect() {} };
 g.ResizeObserver = class { observe() {} disconnect() {} };
 g.IntersectionObserver = class { observe() {} disconnect() {} };
+g.NodeFilter = { SHOW_ELEMENT: 1, SHOW_TEXT: 4 };
 g.requestAnimationFrame = () => 0;
 g.cancelAnimationFrame = () => {};
 g.setTimeout = () => 0;       // don't run deferred work — we only care about load-time

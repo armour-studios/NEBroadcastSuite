@@ -1,4 +1,6 @@
-const axios = require('axios');
+// Every Twitch call has a 12s deadline: a hung request blocked the prediction poll (pollLoop never
+// overlaps runs) and froze the prediction overlay for the rest of the show.
+const axios = require('axios').create({ timeout: 12000 });
 
 const TWITCH_API_BASE = 'https://api.twitch.tv/helix';
 

@@ -21,6 +21,7 @@ function createObsClient({
   onSourceVisibilityChanged,
   onVolumeMeters,
   onSettingsSnapshot,
+  callTimeoutMs,          // tests only: shorter request deadline
 } = {}) {
   const obs = new OBSWebSocket();
 
@@ -40,6 +41,18 @@ function createObsClient({
   // Audit trail: every WRITE we send to OBS is printed, so "the app changed my
   // OBS" is answerable from the log instead of from argument. Reads (Get*) stay
   // silent — they run continuously and would drown the log.
+  // Every request gets a deadline. obs-websocket-js waits on a one-shot response listener that it
+  // REMOVES (without rejecting) when the socket closes, and a busy OBS (loading a collection or a
+  // heavy browser source) can simply not answer: either way the promise never settled, and anything
+  // awaiting it (connect, a scene cut, the connect queue in server.js) was stuck until a restart.
+  const CALL_TIMEOUT_MS = callTimeoutMs || 8000, BATCH_TIMEOUT_MS = 15000, CONNECT_TIMEOUT_MS = callTimeoutMs ? callTimeoutMs * 2 : 10000;
+  function withTimeout(p, ms, what) {
+    let t;
+    return Promise.race([
+      p,
+      new Promise((_, rej) => { t = setTimeout(() => rej(new Error('OBS did not answer ' + what + ' within ' + Math.round(ms / 1000) + 's')), ms); }),
+    ]).finally(() => clearTimeout(t));
+  }
   const rawCall = obs.call.bind(obs);
   obs.call = function guardedCall(request, params) {
     if (FORBIDDEN.has(request)) {
@@ -47,7 +60,7 @@ function createObsClient({
       return Promise.reject(new Error('Blocked: ' + request + ' would modify OBS settings'));
     }
     if (!/^Get/.test(String(request || ''))) console.log('[OBS→]', request);
-    return rawCall(request, params);
+    return withTimeout(rawCall(request, params), CALL_TIMEOUT_MS, request);
   };
   if (typeof obs.callBatch === 'function') {
     const rawBatch = obs.callBatch.bind(obs);
@@ -58,7 +71,7 @@ function createObsClient({
         return Promise.reject(new Error('Blocked: ' + bad.requestType + ' would modify OBS settings'));
       }
       console.log('[OBS→] batch:', (requests || []).map((r) => r && r.requestType).join(','));
-      return rawBatch(requests, options);
+      return withTimeout(rawBatch(requests, options), BATCH_TIMEOUT_MS, 'a batch');
     };
   }
 
@@ -103,7 +116,8 @@ function createObsClient({
     if (onStreamStateChanged) onStreamStateChanged({ active: !!d.outputActive, state: d.outputState || '' });
   });
   obs.on('RecordStateChanged', (d) => {
-    if (onRecordStateChanged) onRecordStateChanged({ active: !!d.outputActive, state: d.outputState || '' });
+    // outputPath arrives on STOPPED (obs-websocket 5): the finished file, for VOD naming.
+    if (onRecordStateChanged) onRecordStateChanged({ active: !!d.outputActive, state: d.outputState || '', outputPath: d.outputPath || '' });
   });
   obs.on('ReplayBufferSaved', (d) => {
     if (onReplayBufferSaved) onReplayBufferSaved({ path: (d && d.savedReplayPath) || '' });
@@ -183,6 +197,8 @@ function createObsClient({
   }
 
   obs.on('ConnectionClosed', () => {
+    // A restore can't happen without a socket; forget it rather than apply it after a reconnect.
+    if (pendingRestore) { clearTimeout(pendingRestore.timer); pendingRestore = null; }
     if (connected) {
       connected = false;
       emit();
@@ -198,7 +214,9 @@ function createObsClient({
     emit();
   });
 
+  let connectGen = 0;   // a superseded connect() attempt must not touch the state of a newer one
   async function connect({ url, password } = {}) {
+    const gen = ++connectGen;
     desired = true;
     connecting = true;
     // Cancel any pending reconnect — we are connecting right now
@@ -209,15 +227,21 @@ function createObsClient({
 
     // Ensure a clean socket before reconnecting; ConnectionClosed will fire here
     // but the `connecting` flag prevents it from scheduling a spurious reconnect.
-    try { await obs.disconnect(); } catch (e) { /* ignore */ }
+    try { await withTimeout(obs.disconnect(), 3000, 'disconnect'); } catch (e) { /* ignore */ }
 
     try {
       const auth = cfg.password ? cfg.password : undefined;
       // EventSubscription.All doesn't include the high-volume InputVolumeMeters category —
       // OR it in explicitly or audio-level flow conditions silently never see any data.
-      await obs.connect(normalizeUrl(cfg.url), auth, {
+      // Deadline: OBS can accept the TCP connection and never send Hello (still loading). Without it
+      // `connecting` stayed true forever and scheduleReconnect() never ran again.
+      await withTimeout(obs.connect(normalizeUrl(cfg.url), auth, {
         eventSubscriptions: EventSubscription.All | EventSubscription.InputVolumeMeters
+      }), CONNECT_TIMEOUT_MS, 'the connection handshake').catch(async (e) => {
+        try { await withTimeout(obs.disconnect(), 3000, 'disconnect'); } catch (_) {}
+        throw e;
       });
+      if (gen !== connectGen) return connected;   // a newer connect() owns the link now
       connecting = false;
       connected = true;
       lastError = null;
@@ -236,9 +260,11 @@ function createObsClient({
       startSettingsWatch();
       return true;
     } catch (e) {
+      if (gen !== connectGen) throw e;   // superseded: the newer attempt decides reconnects
       connecting = false;
       connected = false;
       lastError = e && e.message ? e.message : String(e);
+      console.warn('[OBS] connect failed: ' + lastError);
       emit();
       scheduleReconnect();
       throw e;
@@ -273,23 +299,80 @@ function createObsClient({
       return true;
     } catch (e) {
       lastError = e && e.message ? e.message : String(e);
+      console.warn('[OBS] cut to "' + sceneName + '" failed: ' + lastError);
       return false;
     }
   }
 
-  async function switchSceneWithTransition(sceneName, transitionName) {
-    if (!connected || !sceneName) return false;
-    try {
-      if (transitionName) {
-        await obs.call('SetCurrentSceneTransition', { transitionName });
-      }
-      await obs.call('SetCurrentProgramScene', { sceneName });
-      emitScene(sceneName);
-      return true;
-    } catch (e) {
-      lastError = e && e.message ? e.message : String(e);
-      return false;
+  // ── Borrowing a transition for one cut ─────────────────────────────────────────────────────
+  // A cut "with a stinger" has to make that stinger OBS's CURRENT transition first. It used to stay
+  // that way, so the producer's next ordinary cut in OBS played the stinger (or the borrowed
+  // duration). Now the producer's own transition + duration are put back once OBS reports the
+  // transition finished (SceneTransitionEnded), with a time cap in case that event never comes.
+  // Restoring mid-transition would cut the stinger short, hence the wait. Cuts in quick succession
+  // share ONE pending restore, so the original is never lost to an intermediate borrowed one. If the
+  // producer picks a different transition in OBS meanwhile, theirs is left alone.
+  let pendingRestore = null;   // { original: {name, duration}, borrowed, timer, onEnd }
+  function finishRestore() {
+    const r = pendingRestore; if (!r) return;
+    pendingRestore = null;
+    clearTimeout(r.timer);
+    try { obs.off('SceneTransitionEnded', r.onEnd); } catch (e) {}
+    if (!connected) return;
+    (async () => {
+      try {
+        const cur = await obs.call('GetCurrentSceneTransition');
+        if (cur && cur.transitionName !== r.borrowed) return;   // the producer changed it: theirs stands
+        if (r.original.name && r.original.name !== r.borrowed) await obs.call('SetCurrentSceneTransition', { transitionName: r.original.name });
+        if (r.original.duration && r.durationChanged) await obs.call('SetCurrentSceneTransitionDuration', { transitionDuration: r.original.duration });
+        console.log('[OBS] transition restored to "' + r.original.name + '"');
+      } catch (e) { console.warn('[OBS] could not restore the transition: ' + ((e && e.message) || e)); }
+    })();
+  }
+  // Make `transitionName` (and optionally `durationMs`) current, run doCut(), restore afterwards.
+  async function withBorrowedTransition(transitionName, durationMs, doCut) {
+    let original = pendingRestore ? pendingRestore.original : null;
+    if (!original) {
+      try { const cur = await obs.call('GetCurrentSceneTransition'); original = { name: (cur && cur.transitionName) || '', duration: Number(cur && cur.transitionDuration) || 0 }; }
+      catch (e) { original = null; }
     }
+    if (pendingRestore) { clearTimeout(pendingRestore.timer); try { obs.off('SceneTransitionEnded', pendingRestore.onEnd); } catch (e) {} }
+    let borrowed = original ? original.name : '';
+    let changed = false, durationChanged = !!(pendingRestore && pendingRestore.durationChanged);
+    pendingRestore = null;
+    if (transitionName && transitionName !== borrowed) {
+      // A transition that was renamed or deleted in OBS used to cancel the whole cut silently (kickoff,
+      // scoreboard and post-game cuts just stopped). The cut matters more than its style: warn and cut
+      // with OBS's current transition.
+      try { await obs.call('SetCurrentSceneTransition', { transitionName }); borrowed = transitionName; changed = true; }
+      catch (e) { console.warn('[OBS] transition "' + transitionName + '" unavailable (' + ((e && e.message) || e) + '); cutting with the current one'); }
+    }
+    if (durationMs > 0) {
+      // Stingers carry their own timing and reject a duration; best-effort.
+      try { await obs.call('SetCurrentSceneTransitionDuration', { transitionDuration: Math.round(durationMs) }); durationChanged = true; } catch (e) {}
+    }
+    let result;
+    try { result = await doCut(); }
+    finally {
+      // Armed whatever doCut did: a cut that threw (or timed out) must not leave the stinger set.
+      armRestore(original, borrowed, changed, durationChanged, durationMs);
+    }
+    return result;
+  }
+  function armRestore(original, borrowed, changed, durationChanged, durationMs) {
+    if (original && (changed || durationChanged || (borrowed && borrowed !== original.name))) {
+      const r = { original, borrowed, durationChanged, timer: null, onEnd: null };
+      r.onEnd = () => { if (pendingRestore === r) finishRestore(); };
+      obs.on('SceneTransitionEnded', r.onEnd);
+      r.timer = setTimeout(() => { if (pendingRestore === r) finishRestore(); }, Math.min(15000, (durationMs || original.duration || 1000) + 6000));
+      pendingRestore = r;
+    }
+  }
+
+  async function switchSceneWithTransition(sceneName, transitionName, durationMs) {
+    if (!connected || !sceneName) return false;
+    if (!transitionName && !durationMs) return switchScene(sceneName);
+    return withBorrowedTransition(transitionName, durationMs, () => switchScene(sceneName));
   }
 
   async function getTransitions() {
@@ -522,6 +605,7 @@ function createObsClient({
     isReplayBufferActive,
     getTransitions,
     switchSceneWithTransition,
+    withBorrowedTransition,   // studio-mode Take etc.: borrow a transition for one action, then restore
     readSettings,
     diffSettings,
     isConnected: () => connected,

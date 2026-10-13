@@ -19,7 +19,9 @@ export class SelectTeam extends SuiteKeyAction<Settings> {
       name: saved.name,
       logo: saved.logo || null,
       color: saved.color || undefined,
-      players: (saved.players || []).map((p: any) => ({ name: p.name, role: p.role }))
+      // The saved roster as-is: stripping it to {name, role} dropped every player's id, photo,
+      // camera stream id and platform links, so a team put on air from the deck lost its facecams.
+      players: Array.isArray(saved.players) ? saved.players : []
     });
     if (ok) await ev.action.showOk();
   }

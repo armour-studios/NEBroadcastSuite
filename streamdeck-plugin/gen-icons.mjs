@@ -29,11 +29,12 @@ const GLYPHS = {
   "twitch-marker":  `<g fill="none" stroke="{c}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V4a1 1 0 0 1 1-1h11l-3.5 5L18 13H7"/></g>`,
   "desk-topic":     `<g fill="none" stroke="{c}" stroke-width="2" stroke-linecap="round"><path d="M4 6h10M4 12h10M4 18h10"/><path d="M17 9l4 3-4 3"/></g>`,
   "run-of-show":    `<g fill="none" stroke="{c}" stroke-width="2" stroke-linecap="round"><path d="M4 5h16M4 11h9M4 17h9"/><path d="M16 14l5 3-5 3z" fill="{c}"/></g>`,
-  "countdown-controls": `<g fill="none" stroke="{c}" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2"/><path d="M9 2h6"/><path d="M19 4l2 2"/></g>`
+  "countdown-controls": `<g fill="none" stroke="{c}" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2"/><path d="M9 2h6"/><path d="M19 4l2 2"/></g>`,
+  "output-control": `<g fill="none" stroke="{c}" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="2.5" fill="{c}"/><path d="M8.2 7.8a6 6 0 0 0 0 8.4M15.8 7.8a6 6 0 0 1 0 8.4M5.2 4.8a10 10 0 0 0 0 14.4M18.8 4.8a10 10 0 0 1 0 14.4"/></g>`
 };
 
 // Actions whose lit state means "warning" (muted mic) light red instead of green.
-const RED_ON = new Set(["audio-mute"]);
+const RED_ON = new Set(["audio-mute", "output-control"]);
 
 const svg = (size, inner) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24">${inner}</svg>`;

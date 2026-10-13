@@ -364,7 +364,7 @@
   // ── WS bridge (brand/event/sponsors + optional ticker headline). Mirrors the other overlays. ──
   let _wsToken = null;
   async function connect(){
-    if (_wsToken === null){
+    if (!_wsToken){   // a failed fetch caches '': try again next time
       try { _wsToken = (await (await fetch("http://" + (location.hostname||"localhost") + ":3000/api/ws-token")).json()).token || ""; }
       catch(e){ _wsToken = ""; }
     }

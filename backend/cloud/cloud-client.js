@@ -26,11 +26,38 @@ function init({ baseUrl, dataDir, appVersion } = {}) {
 
 function configured() { return !!BASE; }
 function authed() { return configured() && !!session.token && (!session.expiresAt || session.expiresAt > Date.now()); }
-function getSession() { return { user: session.user, workspaceId: session.workspaceId, role: session.role, orgName: session.orgName, authed: authed(), configured: configured() }; }
+function getSession() { return { user: session.user, workspaceId: session.workspaceId, role: session.role, orgName: session.orgName, plan: _plan, authed: authed(), configured: configured() }; }
+
+// ── Studio plan (website GET /api/broadcast/me -> me.entitlements) ──────────────
+// Display only for now: the plan name and a "Founding producer" badge. NOTHING in the app is
+// locked on it (the site sends enforced:false while access enforcement is off). An older website
+// sends no entitlements at all, so _plan stays null and the app looks exactly as it did before.
+let _plan = null;
+function _cleanPlan(e) {
+  if (!e || typeof e !== 'object') return null;
+  const s = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
+  return {
+    tier: s(e.tier, 20),
+    tierName: s(e.tierName, 40),
+    status: s(e.status, 20),
+    source: s(e.source, 20),
+    founding: e.founding === true,
+    seats: Number.isFinite(Number(e.seats)) ? Number(e.seats) : 0,
+    features: Array.isArray(e.features) ? e.features.filter((f) => typeof f === 'string').slice(0, 50) : [],
+    currentPeriodEnd: s(e.currentPeriodEnd, 40),
+    enforced: e.enforced === true,
+  };
+}
+function _notePlan(data) {
+  const me = data && data.me;
+  // Only replace what we know when the site actually answered with the field.
+  if (me && typeof me === 'object' && 'entitlements' in me) _plan = _cleanPlan(me.entitlements);
+}
+function getPlan() { return _plan; }
 
 function _load() { try { if (sessionFile && fs.existsSync(sessionFile)) session = { ...session, ...JSON.parse(fs.readFileSync(sessionFile, 'utf8')) }; } catch (e) { /* ignore */ } }
 function _save() { try { if (sessionFile) fs.writeFileSync(sessionFile, JSON.stringify(session)); } catch (e) { /* ignore */ } }
-function clearSession() { session = { token: '', refreshToken: '', user: null, workspaceId: null, role: null, orgName: null, expiresAt: 0 }; _save(); }
+function clearSession() { session = { token: '', refreshToken: '', user: null, workspaceId: null, role: null, orgName: null, expiresAt: 0 }; _plan = null; _save(); }
 
 function _require() { if (!configured()) throw new Error('Cloud backend not configured (set BROADCAST_REMOTE_URL).'); }
 
@@ -251,6 +278,39 @@ async function pushLeague(orgId, league) { _require(); try { const { data } = aw
 async function listCloudLeagues(orgId) { _require(); try { const { data } = await _client().get(`/api/orgs/${encodeURIComponent(orgId)}/leagues`); return data.leagues || []; } catch (e) { throw _err(e); } }
 async function pullLeague(orgId, leagueId) { _require(); try { const { data } = await _client().get(`/api/orgs/${encodeURIComponent(orgId)}/leagues/${encodeURIComponent(leagueId)}`); return data.league || data; } catch (e) { throw _err(e); } }
 
+// ── Website-hosted competitions (the site's OWN tournaments + leagues) ────────
+// Contract: docs/website-competitions-contract.md. The website is the source of truth and the
+// app only ever READS these (a league with source.type === 'cloud' is never pushed back).
+//   listOrgCompetitions — the cheap 60s poll: ids, names, rev + live flag, no fixtures.
+//   getOrgCompetition   — one full ne-competition v1 document; sends If-None-Match and reports
+//                         a 304 as { notModified } so an unchanged competition costs nothing.
+// orgId defaults to the session's workspace — the same scope the org-library pull uses.
+function _orgScope(orgId) { const id = orgId != null && orgId !== '' ? orgId : session.workspaceId; return id ? String(id) : ''; }
+async function listOrgCompetitions(orgId) {
+  _require();
+  const org = _orgScope(orgId);
+  if (!org) throw new Error('No organization workspace.');
+  try {
+    const { data } = await _client().get(`/api/orgs/${encodeURIComponent(org)}/competitions`);
+    return Array.isArray(data && data.competitions) ? data.competitions : [];
+  } catch (e) { throw _err(e); }
+}
+async function getOrgCompetition(id, { etag = '', orgId } = {}) {
+  _require();
+  const org = _orgScope(orgId);
+  if (!org) throw new Error('No organization workspace.');
+  try {
+    const res = await _client().get(`/api/orgs/${encodeURIComponent(org)}/competitions/${encodeURIComponent(id)}`, {
+      headers: etag ? { 'If-None-Match': etag } : {},
+      // 304 is an answer, not an error — it must not reach _err() or trip the breaker.
+      validateStatus: (s) => s === 304 || (s >= 200 && s < 300),
+    });
+    if (res.status === 304) return { notModified: true, etag };
+    const h = res.headers || {};
+    return { doc: res.data, etag: h.etag || h.ETag || '' };
+  } catch (e) { throw _err(e); }
+}
+
 // ── Invite-link minting (so producers never have to open the website) ─────────
 // Every create route below authenticates via the website's resolveApiActor() Bearer path — the
 // SAME token this client already sends — gated by canManageBroadcastTooling / checkStudioAccess.
@@ -348,17 +408,61 @@ async function getPromos() {
   try { const { data } = await _client(false).get('/api/broadcast/promos'); return data; } catch (e) { throw _err(e); }
 }
 
+// Website events (docs/website-competitions-contract.md v2). Scoped to the signed-in person, not a
+// workspace: every competition they own or staff, and the ones run by communities and orgs they
+// help run. Same shapes as the org routes above; the org routes stay for older website builds.
+async function listMyCompetitions() {
+  _require();
+  try {
+    const { data } = await _client().get('/api/broadcast/competitions');
+    return { competitions: Array.isArray(data && data.competitions) ? data.competitions : [], createUrl: (data && data.createUrl) || '' };
+  } catch (e) { throw _err(e); }
+}
+async function getMyCompetition(id, { etag = '' } = {}) {
+  _require();
+  try {
+    const res = await _client().get(`/api/broadcast/competitions/${encodeURIComponent(id)}`, {
+      headers: etag ? { 'If-None-Match': etag } : {},
+      validateStatus: (s) => s === 304 || (s >= 200 && s < 300),
+    });
+    if (res.status === 304) return { notModified: true, etag };
+    const h = res.headers || {};
+    return { doc: res.data, etag: h.etag || h.ETag || '' };
+  } catch (e) { throw _err(e); }
+}
+// Report a match the desk produced: per-game scores, the series score and whether it is final.
+// The website decides whether this person may report (owner/admin/staff of the competition).
+async function reportCompetitionMatch(id, matchId, body) {
+  _require();
+  try {
+    const { data } = await _client().post(`/api/broadcast/competitions/${encodeURIComponent(id)}/matches/${encodeURIComponent(matchId)}/report`, body);
+    return data;
+  } catch (e) { throw _err(e); }
+}
+
+// Home page content (backend/site-home.js). getSiteHome is public and edge-cached; getSiteMe is the
+// signed-in producer's own communities and events (Bearer session, never cached by the site).
+async function getSiteHome() {
+  _require();
+  try { const { data } = await _client(false).get('/api/broadcast/home'); return data; } catch (e) { throw _err(e); }
+}
+async function getSiteMe() {
+  _require();
+  try { const { data } = await _client().get('/api/broadcast/me'); _notePlan(data); return data; } catch (e) { throw _err(e); }
+}
+
 async function uploadTelemetryBatch(records) {
   _require();
   try { const { data } = await _client().post('/api/telemetry/batch', { records }); return data; } catch (e) { throw _err(e); }
 }
 
 module.exports = {
-  init, configured, authed, getSession, clearSession,
+  init, configured, authed, getSession, clearSession, getPlan,
   health, retryInMs,
   submitBugReport,
   uploadTelemetryBatch,
   getPromos,
+  getSiteHome, getSiteMe,
   loginWithDiscord,
   loginWithEmail, acceptContract, refreshSession, linkTwitch, refreshTwitch, me,
   listProfiles, getProfile, saveProfile, deleteProfile, shareProfile,
@@ -371,6 +475,8 @@ module.exports = {
   pushCrewRoster,
   pushShowState,
   pushLeague, listCloudLeagues, pullLeague,
+  listOrgCompetitions, getOrgCompetition,
+  listMyCompetitions, getMyCompetition, reportCompetitionMatch,
   publicUrl,
   createStation, ensureStation, createStationRoom, createCameraSession, createMatch, createTalentInvite,
   listStationsFull, patchStation, deleteStation, patchRoom, deleteRoom, addRoomSlot, patchRoomSlot, deleteRoomSlot

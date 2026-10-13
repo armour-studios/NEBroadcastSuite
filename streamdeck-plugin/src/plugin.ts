@@ -22,6 +22,7 @@ import { AdBreak } from "./actions/ad-break";
 import { OverlayToggle } from "./actions/overlay-toggle";
 import { TwitchClip } from "./actions/twitch-clip";
 import { TwitchMarker } from "./actions/twitch-marker";
+import { OutputControl } from "./actions/output-control";
 
 streamDeck.logger.setLevel("info");
 
@@ -47,11 +48,13 @@ streamDeck.actions.registerAction(new AdBreak());
 streamDeck.actions.registerAction(new OverlayToggle());
 streamDeck.actions.registerAction(new TwitchClip());
 streamDeck.actions.registerAction(new TwitchMarker());
+streamDeck.actions.registerAction(new OutputControl());
 
 // Retry the bridge immediately when the suite launches or the machine wakes —
 // the backoff loop covers everything else.
 streamDeck.system.onApplicationDidLaunch(() => suite.kick());
-streamDeck.system.onSystemDidWakeUp(() => suite.kick());
+// After sleep the old socket usually LOOKS open but is dead — force a fresh one.
+streamDeck.system.onSystemDidWakeUp(() => suite.kick(true));
 
 await streamDeck.connect();
 suite.start();

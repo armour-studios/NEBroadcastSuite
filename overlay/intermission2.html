@@ -194,7 +194,10 @@
       width: 0.44ch; text-align: center;
     }
 
-  </style>
+    .brand-wrap.no-title .brand-panel { display: none; }
+  .brand-wrap.no-title { padding-top: 0; margin-bottom: 22px; }
+  .brand-wrap.no-title .brand-logo { position: static; transform: none; margin: 0 auto; width: 128px; height: 128px; }
+</style>
 </head>
 <body>
   <div id="card">
@@ -316,6 +319,8 @@
       else { titleText = (data.eventName || '').toString().trim(); }
       el('event-title').textContent = titleText.toUpperCase();
       el('event-title').classList.toggle('hidden', !titleText);
+      // No event name: drop the empty name panel and let the logo stand on its own.
+      el('logo').parentElement.classList.toggle('no-title', !titleText);
       fitTitle();
       if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => fitTitle(true));
 
@@ -323,7 +328,10 @@
 
       const hasEndsAt = !!b.endsAt, hasFrozen = b.frozenSeconds != null;
       const hasTimer  = SHOW_TIMER && (hasEndsAt || hasFrozen);
-      el('countdown-wrap').classList.toggle('hidden', !hasTimer);
+      // Without a countdown the label (STARTING SOON / the break title) still shows, so the card is
+      // never a bare logo on air; only the digits go.
+      el('countdown-wrap').classList.toggle('hidden', !hasTimer && !el('label').textContent.trim());
+      el('time').parentElement.style.display = hasTimer ? '' : 'none';
 
       if (hasTimer) {
         _frozen = hasFrozen ? Math.max(0, Math.round(b.frozenSeconds)) : null;

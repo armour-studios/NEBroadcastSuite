@@ -61,9 +61,9 @@ async function evLoadTournaments(opts) {
     const toolbar = el('ev-toolbar'); if (toolbar) toolbar.style.display = '';
     if (typeof evSetMode === 'function') evSetMode('My tournaments');
     applyEventsView();
-    evStatus(_evTournaments.length ? '' : 'No tournaments found for this token — confirm you admin/staff events and your token is set in Settings → start.gg.');
+    evStatus(_evTournaments.length ? '' : 'No tournaments found for this token — confirm you admin/staff events and your token is set under Apps > start.gg.');
   } catch (e) {
-    if (!opts.silent) evStatus(e.message || 'Failed to load. Check your start.gg token in Settings.', 'err');
+    if (!opts.silent) evStatus(e.message || 'Failed to load. Check your start.gg token under Apps > start.gg.', 'err');
   } finally { if (btn) btn.disabled = false; }
 }
 // Challonge and NXGEN tournaments are one bracket each (no nested "events" the way a start.gg
@@ -1160,7 +1160,7 @@ function renderChalLinkDropdown(tournaments, filterQuery) {
 
   searchInput.addEventListener('focus', () => {
     if (!currentState.challonge?.hasKey) {
-      resultsDiv.innerHTML = '<div class="ev-dropdown-msg" style="color:#f59e0b;">Add a Challonge API key in Integrations first.</div>';
+      resultsDiv.innerHTML = '<div class="ev-dropdown-msg" style="color:#f59e0b;">Add a Challonge API key under Apps > Challonge first.</div>';
       resultsDiv.style.display = 'block';
       return;
     }
@@ -1367,7 +1367,7 @@ function renderEvSyncChalDropdown(tournaments, filterQuery) {
 
     searchInput.addEventListener('focus', () => {
       if (!currentState.challonge?.hasKey) {
-        resultsDiv.innerHTML = '<div class="ev-dropdown-msg" style="color:#f59e0b;">Add a Challonge API key in Integrations first.</div>';
+        resultsDiv.innerHTML = '<div class="ev-dropdown-msg" style="color:#f59e0b;">Add a Challonge API key under Apps > Challonge first.</div>';
         resultsDiv.style.display = 'block';
         return;
       }

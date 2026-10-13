@@ -437,7 +437,7 @@ function createServer({ port = 7777, host = '127.0.0.1', onFrame, onStatus, onRa
   // The Apex client connects with no Origin header; a browser page always sends one, so refuse
   // foreign pages (they could otherwise feed fake match data into the overlay).
   const { isAllowedOrigin } = require('./origin-guard');
-  const wss = new WebSocket.Server({ host, port, verifyClient: (info) => isAllowedOrigin(info.req.headers.origin, info.req.headers.host) });
+  const wss = new WebSocket.Server({ host, port, verifyClient: (info) => isAllowedOrigin(info.req.headers.origin, info.req.headers.host, info.req.headers['user-agent'] || '') });
   let rawLogged = 0;
   wss.on('connection', (ws) => {
     if (onStatus) onStatus('connected');

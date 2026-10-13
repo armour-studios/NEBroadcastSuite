@@ -121,11 +121,19 @@
       timerEl.classList.toggle('warning-state', seconds > CRITICAL_AT && seconds <= WARNING_AT);
     }
     function showFinalMessage() {
+      // The 250ms tick calls this every time at 0. Rebuilding it restarted its 1s fade-in each tick,
+      // so the message never got past ~25% opacity. Leave an identical message alone.
+      const shown = timerEl.querySelector('.final-message');
+      if (shown && shown.textContent === finalMessage && !timerEl.classList.contains('hidden')) return;
       if (fadeOutTimer) { clearTimeout(fadeOutTimer); fadeOutTimer = null; }
       resetTimerClasses();
       timerEl.classList.remove('hidden', 'fade-out');
       previousSeconds = null;
-      timerEl.innerHTML = `<div class="final-message">${finalMessage}</div>`;
+      const fm = document.createElement('div');
+      fm.className = 'final-message';
+      fm.textContent = finalMessage;   // text, not HTML
+      timerEl.innerHTML = '';
+      timerEl.appendChild(fm);
     }
     function updateTimer(seconds) {
       if (timerEl.classList.contains('hidden')) timerEl.classList.remove('hidden');

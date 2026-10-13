@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-ne-bridge="1">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=1920">
@@ -26,6 +26,7 @@
       background: transparent;
     }
   </style>
+  <script src="bridge-host.js"></script>
 </head>
 <body>
 
@@ -139,35 +140,18 @@
 
     // The bridge requires a token when LAN-exposed (WS_HOST != loopback) — fetched once from the
     // HTTP API this page was loaded from and cached for reconnects; a no-op on the default loopback bridge.
-    let _wsToken = null;
-    async function connect() {
-      const host = location.hostname || 'localhost';
-      if (!_wsToken) {
-        try { _wsToken = (await (await fetch('http://' + host + ':3000/api/ws-token')).json()).token || ''; }
-        catch (e) { _wsToken = ''; }
-      }
-      const ws = new WebSocket('ws://' + host + ':3001' + (_wsToken ? ('?token=' + encodeURIComponent(_wsToken)) : ''));
-
-      ws.onopen = () => ws.send(JSON.stringify({ type: 'request_state', role: 'overlay' }));
-
-      ws.onmessage = (e) => {
-        try {
-          const msg = JSON.parse(e.data);
-          const data = msg && msg.data;
-          // Only react when the payload actually carries gfxActive. Partial `state_update`
-          // messages (game/players/facecams during live play) omit it — treating a missing
-          // key as "clear" made the active layer strobe on/off. full_state always includes it.
-          if ((msg.type === 'full_state' || msg.type === 'state_update') && data && 'gfxActive' in data) {
-            applyScene(data.gfxActive || null);
-          }
-        } catch (_) {}
-      };
-
-      ws.onclose = () => setTimeout(connect, 3000);
-      ws.onerror = () => ws.close();
-    }
-
-    connect();
+    // One socket for this source and every graphic embedded below (bridge-host.js): the layer
+    // switch listens on it too. Only react when the payload actually carries gfxActive. Partial
+    // `state_update` messages (game/players/facecams during live play) omit it — treating a missing
+    // key as "clear" made the active layer strobe on/off. full_state always includes it.
+    window.__neBridge.subscribe((kind, raw) => {
+      if (kind !== 'message' || typeof raw !== 'string' || raw.indexOf('gfxActive') < 0) return;
+      try {
+        const msg = JSON.parse(raw);
+        const data = msg && msg.data;
+        if ((msg.type === 'full_state' || msg.type === 'state_update') && data && 'gfxActive' in data) applyScene(data.gfxActive || null);
+      } catch (_) {}
+    });
   </script>
 </body>
 </html>

@@ -13,6 +13,7 @@ export interface GfxDef {
   msg?: string;              // per-graphic show/hide message, when one exists
   side?: boolean;            // show() takes a blue/orange side param (winner, intro)
   standaloneScene?: string;  // OBS scene name — live = program is on this scene
+  aliases?: string[];        // other gfxActive values that mean this same layer
 }
 
 export const GFX: GfxDef[] = [
@@ -22,11 +23,18 @@ export const GFX: GfxDef[] = [
   { key: "intro",     label: "Line-up",    stateKey: "intro",     msg: "set_intro",  side: true },
   { key: "veto",      label: "Map Veto",   stateKey: "veto",      msg: "set_veto" },
   { key: "spotlight", label: "Spotlight",  stateKey: "watchlist", msg: "set_watchlist" },
-  { key: "schedule",  label: "Schedule",   stateKey: "upcoming",  msg: "set_upcoming" },
+  // set_upcoming makes the server set gfxActive='upcoming' (the panel's key); gfx.html maps both.
+  { key: "schedule",  label: "Schedule",   stateKey: "upcoming",  msg: "set_upcoming", aliases: ["upcoming"] },
   { key: "standings", label: "Standings",  stateKey: "standings", msg: "set_standings" },
   { key: "bracket",   label: "Bracket",    stateKey: "bracket" },
   { key: "credits",   label: "Credits",    stateKey: "credits" },
   { key: "draft",     label: "Draft",      stateKey: "draft" },
+  { key: "series",    label: "Series Score" },
+  { key: "seriesstats", label: "Series Stats", stateKey: "seriesStats", msg: "set_series_stats" },
+  // Battle-royale layers (Match — Lobby fills them); gfx-layer pushes only, like the panel's rail.
+  { key: "brdrop",    label: "BR Drop Map" },
+  { key: "brcompare", label: "BR Compare" },
+  { key: "brvictory", label: "BR Victory" },
   { key: "preshow",   label: "Desk Show",  standaloneScene: "Desk Show" }
 ];
 
@@ -36,7 +44,11 @@ export function gfxByKey(key: string | undefined): GfxDef | undefined {
 
 export function gfxIsLive(state: Record<string, any>, g: GfxDef): boolean {
   if (g.standaloneScene) return state.obs?.currentScene === g.standaloneScene;
-  if (state.gfxActive === g.key) return true;
-  if (g.stateKey && state[g.stateKey] && state[g.stateKey].visible) return true;
-  return false;
+  // gfx.html renders exactly ONE layer — state.gfxActive. While something is active, that is
+  // the whole truth: a stale .visible flag (watchlist/spotlight are outside the server's
+  // exclusive mirroring) used to light a second key as ON AIR, and pressing it "hid" it by
+  // clearing gfxActive — taking the graphic that was really on air off instead.
+  const active = state.gfxActive;
+  if (active) return active === g.key || !!g.aliases?.includes(active);
+  return !!(g.stateKey && state[g.stateKey] && state[g.stateKey].visible);
 }

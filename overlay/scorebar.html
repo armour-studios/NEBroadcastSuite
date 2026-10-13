@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<!--
+  scorebar.html — the in-game scorebar for any team game without its own live HUD (Call of Duty,
+  EA FC, Rainbow Six, Mobile Legends, Honor of Kings…). Everything else on screen stays transparent,
+  so the game's own HUD keeps showing. It knows only what the app knows: team names, logos and
+  colours, the series score, best-of and the game number.
+    ?pos=top     slim bar, top centre (default)
+    ?pos=bottom  the same bar on the bottom edge
+    ?pos=split   two team plates in the top corners, for games whose top centre is the game's own
+                 score and clock (MOBAs)
+  Driven by full_state via SceneBase.connect().
+-->
+<head>
+  <meta charset="UTF-8">
+  <title>NE Broadcast Suite — Scorebar</title>
+  <link rel="stylesheet" href="scene.css" />
+  <style>
+    body { background:transparent; }
+    #sb { position:absolute; left:0; right:0; font-family:'Rajdhani', var(--main-font); opacity:0; transition:opacity .35s ease;
+      --ta:#2f8dff; --tb:#f0444e; }
+    #sb.show { opacity:1; }
+    /* bar (top / bottom) */
+    .bar { position:absolute; left:50%; transform:translateX(-50%); display:flex; align-items:stretch; height:58px;
+      background:linear-gradient(180deg, rgba(14,18,28,.94), rgba(7,9,15,.96)); box-shadow:0 10px 30px rgba(0,0,0,.5); }
+    #sb.pos-top .bar { top:0; border-radius:0 0 12px 12px; }
+    #sb.pos-bottom .bar { bottom:18px; border-radius:12px; }
+    .side { display:flex; align-items:center; gap:12px; width:400px; padding:0 16px; position:relative; }
+    .side.b { flex-direction:row-reverse; }
+    .side::before { content:''; position:absolute; top:0; bottom:0; width:5px; background:var(--tc); }
+    .side.a::before { left:0; } .side.b::before { right:0; }
+    .logo { width:40px; height:40px; object-fit:contain; flex-shrink:0; }
+    .name { flex:1; min-width:0; font-size:27px; font-weight:700; color:var(--tink, #fff); text-transform:uppercase; letter-spacing:.02em;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1; }
+    .side.b .name { text-align:right; }
+    .score { font-size:38px; font-weight:700; color:#fff; min-width:34px; text-align:center; font-variant-numeric:tabular-nums; line-height:1; }
+    .mid { display:flex; flex-direction:column; align-items:center; justify-content:center; min-width:150px; padding:0 14px;
+      background:rgba(255,255,255,.05); }
+    .mid-top { font-size:14px; font-weight:700; letter-spacing:.24em; color:var(--accent, #f5c451); text-transform:uppercase; white-space:nowrap; }
+    .pips { display:flex; gap:5px; margin-top:6px; }
+    .pip { width:16px; height:5px; border-radius:2px; background:rgba(255,255,255,.16); }
+    .pip.a { background:var(--ta); } .pip.b { background:var(--tb); }
+    .mid-ev { font-size:12px; font-weight:700; letter-spacing:.2em; color:rgba(255,255,255,.55); text-transform:uppercase; margin-top:4px;
+      max-width:240px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    /* split: corner plates */
+    .plate { position:absolute; top:0; display:flex; align-items:center; gap:12px; height:56px; width:470px; padding:0 18px;
+      background:linear-gradient(180deg, rgba(14,18,28,.94), rgba(7,9,15,.96)); box-shadow:0 10px 30px rgba(0,0,0,.5); }
+    .plate.a { left:0; border-radius:0 0 14px 0; border-bottom:3px solid var(--ta); }
+    .plate.b { right:0; border-radius:0 0 0 14px; border-bottom:3px solid var(--tb); flex-direction:row-reverse; }
+    .plate .name { font-size:25px; }
+    .plate.b .name { text-align:right; }
+    .plate .pips { margin:0; }
+  </style>
+</head>
+<body>
+  <div id="sb"></div>
+  <script src="scene-base.js"></script>
+  <script>
+  (function () {
+    const root = document.getElementById('sb');
+    const POS = ['top', 'bottom', 'split'].includes(SceneBase.qp('pos')) ? SceneBase.qp('pos') : 'top';
+    let _sig = '';
+    function mk(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+    function logo(t) {
+      if (!t.logo) return null;
+      const im = mk('img', 'logo'); im.src = t.logo; im.alt = ''; im.onerror = () => im.remove(); return im;
+    }
+    // Maps won so far: one pip per game needed to win, filled per side.
+    function pips(data, side) {
+      const bo = Math.max(1, Number(data.bestOf) || Number(data.series && data.series.bestOf) || 3);
+      const need = Math.ceil(bo / 2);
+      const won = Number((data.series || {})[side === 'a' ? 'blue' : 'orange']) || 0;
+      const row = mk('div', 'pips');
+      for (let i = 0; i < need; i++) row.appendChild(mk('span', 'pip' + (i < won ? ' ' + side : '')));
+      return row;
+    }
+    function render(data) {
+      const A = SceneBase.teamSide(data, 'blue'), B = SceneBase.teamSide(data, 'orange');
+      const ser = data.series || {};
+      const bo = Math.max(1, Number(data.bestOf) || 3);
+      const gameNo = Math.max(1, (data.game && data.game.number) || ((Number(ser.blue) || 0) + (Number(ser.orange) || 0) + 1));
+      // Hidden only by the producer's own "hide HUD" switch; otherwise always on (it is the HUD).
+      const visible = !(data.rlHudHidden && data.activeGame === 'rocket-league');
+      const sig = JSON.stringify([A.name, A.logo, A.color, B.name, B.logo, B.color, ser.blue, ser.orange, bo, gameNo, data.eventName, visible, SceneBase.brandAccent(data)]);
+      if (sig === _sig) return;
+      _sig = sig;
+      root.className = 'pos-' + POS + (visible ? ' show' : '');
+      root.style.setProperty('--ta', A.color || '#2f8dff');
+      root.style.setProperty('--tb', B.color || '#f0444e');
+      document.documentElement.style.setProperty('--accent', SceneBase.brandAccent(data) || '#f5c451');
+      const side = (t, s) => {
+        const box = mk('div', (POS === 'split' ? 'plate ' : 'side ') + s);
+        box.style.setProperty('--tc', t.color || (s === 'a' ? '#2f8dff' : '#f0444e'));
+        box.style.setProperty('--tink', SceneBase.liftForDark(t.color || '#ffffff', 0.12));
+        const lg = logo(t); if (lg) box.appendChild(lg);
+        const nm = mk('div', 'name', t.name || (s === 'a' ? 'Blue' : 'Red'));
+        nm.style.color = 'var(--tink)';
+        box.appendChild(nm);
+        if (POS === 'split') box.appendChild(pips(data, s));
+        box.appendChild(mk('div', 'score', String(Number(ser[s === 'a' ? 'blue' : 'orange']) || 0)));
+        return box;
+      };
+      if (POS === 'split') { root.replaceChildren(side(A, 'a'), side(B, 'b')); return; }
+      const bar = mk('div', 'bar');
+      const mid = mk('div', 'mid');
+      mid.appendChild(mk('div', 'mid-top', 'Game ' + gameNo + '  ·  Bo' + bo));
+      // Both sides' maps won: left team's pips, a gap, the right team's (mirrored).
+      const pr = mk('div', 'pips');
+      [...pips(data, 'a').childNodes].forEach((p) => pr.appendChild(p));
+      pr.appendChild(mk('span', '', '')).style.width = '10px';
+      [...pips(data, 'b').childNodes].reverse().forEach((p) => pr.appendChild(p));
+      mid.appendChild(pr);
+      if (data.eventName) mid.appendChild(mk('div', 'mid-ev', data.eventName));
+      bar.appendChild(side(A, 'a')); bar.appendChild(mid); bar.appendChild(side(B, 'b'));
+      root.replaceChildren(bar);
+    }
+    SceneBase.connect((data) => render(data));
+  })();
+  </script>
+</body>
+</html>

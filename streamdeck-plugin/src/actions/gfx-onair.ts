@@ -50,6 +50,11 @@ export class GfxOnAir extends SuiteKeyAction<Settings> {
       this.#prevScene.delete(ev.action.id);
       if (s.returnPrev && prev) await this.fire(ev.action, "obs_switch_scene", { sceneName: prev });
     } else {
+      // The server's set_gfx_active mirroring deliberately skips the watchlist/spotlight flag, so
+      // replacing a live Spotlight would leave watchlist.visible stuck on (watchlist.html stays up
+      // and the key stays lit). Hide it first — exactly what the panel's rail does via its Clear.
+      const prev = gfxByKey(suite.state.gfxActive);
+      if (prev && prev !== g && prev.key === "spotlight" && prev.msg) await this.fire(ev.action, prev.msg, { visible: false });
       if (g.msg) {
         const payload: Record<string, unknown> = { visible: true };
         if (g.side) {

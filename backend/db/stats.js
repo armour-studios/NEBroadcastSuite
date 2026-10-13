@@ -739,6 +739,12 @@ function getMapStats() {
   return Object.values(byKey).sort((x, y) => y.played - x.played);
 }
 
+// A set left open (or a start.gg import whose start time is the bracket start) spans hours or
+// days; those aren't match lengths and would make "Longest match" read 1286 minutes.
+const MAX_MATCH_SEC = 6 * 3600, MAX_GAME_SEC = 3 * 3600;
+function plausibleMatchSec(s) { return s > 0 && s <= MAX_MATCH_SEC; }
+function plausibleGameSec(s) { return s > 0 && s <= MAX_GAME_SEC; }
+
 // Match + game duration distribution — for schedule planning / "match pacing".
 function getPacing(limit = 200) {
   const DB = _source();
@@ -747,8 +753,8 @@ function getPacing(limit = 200) {
   const gameDur = (g) => g.duration_sec > 0 ? g.duration_sec : (g.ended_at && g.started_at ? Math.round((g.ended_at - g.started_at) / 1000) : 0);
   const games = DB.games.filter((g) => g.ended_at && gameDur(g) > 0);
   const matches = DB.matches.filter((m) => m.ended_at && m.started_at);
-  const gDur = games.map(gameDur);
-  const mDur = matches.map((m) => Math.round((m.ended_at - m.started_at) / 1000)).filter((s) => s > 0);
+  const gDur = games.map(gameDur).filter(plausibleGameSec);
+  const mDur = matches.map((m) => Math.round((m.ended_at - m.started_at) / 1000)).filter(plausibleMatchSec);
   const stat = (arr) => {
     if (!arr.length) return { count: 0, avg: 0, min: 0, max: 0, median: 0 };
     const s = arr.slice().sort((a, b) => a - b);
@@ -757,7 +763,7 @@ function getPacing(limit = 200) {
   };
   const byGame = {};
   ['rl', 'cs2', 'valorant'].forEach((gt) => {
-    const d = games.filter((g) => g.game_type === gt).map(gameDur);
+    const d = games.filter((g) => g.game_type === gt).map(gameDur).filter(plausibleGameSec);
     if (d.length) byGame[gt] = stat(d);
   });
   return { games: stat(gDur), matches: stat(mDur), byGame, recentGameDurations: gDur.slice(-limit) };
@@ -786,14 +792,20 @@ function _stat(arr) {
   const s = arr.slice().sort((a, b) => a - b); const total = s.reduce((a, b) => a + b, 0);
   return { count: s.length, avg: Math.round(total / s.length), min: s[0], max: s[s.length - 1], median: s[Math.floor(s.length / 2)], total };
 }
-function _histogram(values, bins) {
+// Match lengths in FIXED 5-minute buckets from 0 up to where 95% of matches have finished, then one
+// "longer" bucket. Equal-width bins between min and max let one marathon match stretch every bin to
+// 34 minutes, which put 1,854 of 1,905 matches in the first bar.
+function _histogram(values) {
   if (!values.length) return [];
-  const min = Math.min(...values), max = Math.max(...values);
-  if (max === min) return [{ label: Math.round(min / 60) + 'm', count: values.length }];
-  const w = (max - min) / bins;
-  const b = Array.from({ length: bins }, (_, i) => ({ lo: min + i * w, hi: min + (i + 1) * w, count: 0 }));
-  values.forEach((v) => { let i = Math.floor((v - min) / w); if (i >= bins) i = bins - 1; if (i < 0) i = 0; b[i].count++; });
-  return b.map((x) => ({ label: Math.round(x.lo / 60) + '–' + Math.round(x.hi / 60) + 'm', count: x.count }));
+  const STEP = 300;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const p95 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))];
+  const top = Math.max(STEP * 3, Math.min(STEP * 24, Math.ceil(p95 / STEP) * STEP));
+  const n = top / STEP;
+  const b = Array.from({ length: n + 1 }, (_, i) => ({ lo: i * STEP, count: 0 }));
+  values.forEach((v) => { b[v >= top ? n : Math.floor(v / STEP)].count++; });
+  if (!b[n].count) b.pop();
+  return b.map((x, i) => ({ label: i === n ? Math.round(top / 60) + 'm+' : Math.round(x.lo / 60) + '–' + Math.round((x.lo + STEP) / 60) + 'm', count: x.count }));
 }
 
 // One filtered pass → every aggregate the dashboard needs. filters: { from, to, game, tournament }.
@@ -851,9 +863,9 @@ function getDashboard({ from, to, game, tournament } = {}) {
   const mapStats = Object.values(maps).sort((a, b) => b.played - a.played);
 
   // Pacing.
-  const mDur = matches.map((m) => Math.round((m.ended_at - m.started_at) / 1000)).filter((s) => s > 0);
-  const gDur = games.map(gameDur).filter((s) => s > 0);
-  const pacing = { matches: _stat(mDur), games: _stat(gDur), histogram: _histogram(mDur, 8) };
+  const mDur = matches.map((m) => Math.round((m.ended_at - m.started_at) / 1000)).filter(plausibleMatchSec);
+  const gDur = games.map(gameDur).filter(plausibleGameSec);
+  const pacing = { matches: _stat(mDur), games: _stat(gDur), histogram: _histogram(mDur) };
 
   // Per-tournament breakdown.
   const tour = {};

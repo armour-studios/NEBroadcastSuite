@@ -57,7 +57,8 @@
       } else {
         frame.style.display = 'none';
         frame.removeAttribute('src');
-        idle.style.display = 'flex';
+        // The hint is for app previews only; in OBS this source stays transparent (never text on air).
+        idle.style.display = /[?&]preview=1/.test(location.search) ? 'flex' : 'none';
       }
     }
 

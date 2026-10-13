@@ -1765,11 +1765,18 @@ function sync(cid, list, side, spec){
 }
 
 /* ── facecams: persistent iframes; spectated one mirrored into the card ────── */
+// Names are compared ignoring case and extra spaces: a cam saved as "zen" must still find "Zen ".
+function _fcKey(s){ return String(s||'').toLowerCase().replace(/\s+/g,' ').trim(); }
+// RL sends "Unknown|0|0" when it hides a player's account (bots, some private matches); that "0"
+// is shared by every such player, so it must never be used to pick a cam.
+function _fcId(primaryid){ const raw=primaryid ? String(primaryid).split('|')[1] : ''; return (raw && !/^0*$/.test(raw) && !/^unknown$/i.test(raw)) ? raw : ''; }
 function findFacecam(player, facecams){
   if(!facecams || !facecams.length || !player) return null;
-  const rawId = player.primaryid ? String(player.primaryid).split('|')[1] : null;
-  if(rawId){ const byId=facecams.find(fc=>fc.platformId && fc.platformId===rawId); if(byId) return byId; }
-  return facecams.find(fc=>fc.name===player.name) || null;
+  const rawId=_fcId(player.primaryid);
+  if(rawId){ const byId=facecams.find(fc=>fc.platformId && String(fc.platformId)===rawId); if(byId) return byId; }
+  const exact=facecams.find(fc=>fc.name===player.name); if(exact) return exact;
+  const k=_fcKey(player.name);
+  return k ? (facecams.find(fc=>_fcKey(fc.name)===k) || null) : null;
 }
 function syncFacecams(players, facecams){
   const cam=el('cam');
@@ -2848,10 +2855,13 @@ function playWinnerIntro(){
 }
 
 /* ── view switching ───────────────────────────────────────────────────────── */
-let activeView=null, sbLocked=false, sbHoldTimer=null, sbSafetyTimer=null;
+let activeView=null, sbLocked=false, sbHoldTimer=null, sbSafetyTimer=null, sbSafetyFired=false;
 const SB_SAFETY_MS   = 30*60*1000;  // backstop only: never sit on the board forever if no new-game signal ever comes
 function unlockScoreboard(){ sbLocked=false; clearTimeout(sbHoldTimer); clearTimeout(sbSafetyTimer); }
-function showView(name){
+// noIntro: show the board as it stands, without the WINNER announcement. Used when the page LOADS
+// (or an OBS refresh) into a post-game board that is already up: the game ended earlier, so replaying
+// the winner then transitioning into the board is wrong.
+function showView(name, noIntro){
   // the post-match scoreboard holds until the server moves on — a new game's kickoff / game_reset —
   // NOT on a short fixed timer, so it can stay up through a long "who plays next" decision. The brief
   // lock below only protects the WINNER intro from a stray early update.
@@ -2866,17 +2876,19 @@ function showView(name){
       clearTimeout(introTimer); fireIntroSwipe();   // make sure TRANSITION 1 has shown by the time the replay starts
       resumeIntroReveal();                          // the REAL cut is now → peel a held intro cover to reveal the replay
       replayStartAt=Date.now();                     // start the clock for the synthesized outro cue
-      clearTimeout(goalCycleTimer); goalCycleTimer=setTimeout(endGoalCycle, REPLAY_MAX_MS+2000);   // safety measured from replay START, beyond the longest replay
+      clearTimeout(goalCycleTimer); goalCycleTimer=setTimeout(()=>{ endGoalCycle(); el('replay-tag').classList.add('hidden'); }, REPLAY_MAX_MS+2000);   // safety measured from replay START, beyond the longest replay; the REPLAY tag must not stay on air
       if(!brazilGoal) scheduleReplayOutro();         // fire the outro at a consistent point before the kickoff
     }
   } else if(name==='scoreboard'){
     if(activeView!=='scoreboard'){                    // first entry only → don't re-lock on repeat updates
-      playWinnerIntro();                              // WINNER announcement, then the board
+      // WINNER announcement, then the board (not on a reload into it, and not again when the 30-min
+      // safety dropped us to the HUD and the server still says 'scoreboard').
+      if(!noIntro && !sbSafetyFired) playWinnerIntro();
       // Hold the board until the next game_reset (the authoritative "new game" signal) so it survives the
       // WHOLE between-matches lobby — even if the server sends a live 'hud' view meanwhile. game_reset
       // (or the safety backstop) is the only way off, so it can't get stuck here forever.
       sbLocked=true; clearTimeout(sbHoldTimer);
-      clearTimeout(sbSafetyTimer); sbSafetyTimer=setTimeout(()=>{ sbLocked=false; showView('hud'); }, SB_SAFETY_MS);
+      clearTimeout(sbSafetyTimer); sbSafetyTimer=setTimeout(()=>{ sbLocked=false; sbSafetyFired=true; showView('hud'); }, SB_SAFETY_MS);
     }
     hideGoal(); hideReplay(); el('replay-tag').classList.add('hidden');
   } else {
@@ -2889,6 +2901,10 @@ function showView(name){
 
 /* ── apply state ──────────────────────────────────────────────────────────── */
 let _sbTickSig='';   // last LIVE ?only=scoreboard paint (see applyStateUpdate)
+let _firstFullState=true;   // true until the first full_state after this page loaded
+// Each section of a full_state renders on its own: one section throwing on odd data (a brand or
+// ticker shape) used to stop every section after it, every update, for the rest of the show.
+function safe(name, fn){ try{ fn(); }catch(e){ console.error('[rl-hud] '+name+' failed:', e); } }
 function applyFullState(data){
   _sbTickSig='';
   // Run FIRST and unconditionally so the signature is primed during play — otherwise the first
@@ -2923,35 +2939,35 @@ function applyFullState(data){
     if(data.brand.accent) document.documentElement.style.setProperty('--accent-2', data.brand.accent);
     if(data.brand.font)   document.documentElement.style.setProperty('--main-font', `'${data.brand.font}', 'Bourgeois', 'Segoe UI', sans-serif`);
   }
-  renderSponsorRail(data.brand);
-  renderTicker(data);   // live-scores / sponsor ticker (matches overlay/ticker.html)
+  safe('renderSponsorRail',()=>{ renderSponsorRail(data.brand); });
+  safe('renderTicker',()=>{ renderTicker(data); });   // live-scores / sponsor ticker (matches overlay/ticker.html)
 
-  fitEventName(data.eventName); scheduleEventFit();   // shrink-to-fit so long event titles aren't clipped
+  safe('fitEventName',()=>{ fitEventName(data.eventName); scheduleEventFit(); });   // shrink-to-fit so long event titles aren't clipped
   const teams=data.teams||{};
-  applyTeamColors(teams);
-  setTeamName('name-blue', 0, teamDisplay(teams.blue?.name));
-  setTeamName('name-orange', 1, teamDisplay(teams.orange?.name));
-  renderTeamRecords(data.teamRecords);
-  setImg('logo-blue', teams.blue?.logo, '/assets/rl.png');
-  setImg('logo-orange', teams.orange?.logo, '/assets/rl.png');
+  safe('applyTeamColors',()=>{ applyTeamColors(teams); });
+  safe('setTeamName',()=>{ setTeamName('name-blue', 0, teamDisplay(teams.blue?.name)); });
+  safe('setTeamName',()=>{ setTeamName('name-orange', 1, teamDisplay(teams.orange?.name)); });
+  safe('renderTeamRecords',()=>{ renderTeamRecords(data.teamRecords); });
+  safe('setImg',()=>{ setImg('logo-blue', teams.blue?.logo, '/assets/rl.png'); });
+  safe('setImg',()=>{ setImg('logo-orange', teams.orange?.logo, '/assets/rl.png'); });
 
-  renderOvertimeSlot(data.overtime);
-  renderReplaySlot(data.replay);
-  applyGame(data.game, data.bestOf, data.formattedTime);
+  safe('renderOvertimeSlot',()=>{ renderOvertimeSlot(data.overtime); });
+  safe('renderReplaySlot',()=>{ renderReplaySlot(data.replay); });
+  safe('applyGame',()=>{ applyGame(data.game, data.bestOf, data.formattedTime); });
   const series=data.series||{blue:0,orange:0};
-  renderPips('pips-blue', series.blue, data.bestOf||5, 'blue');
-  renderPips('pips-orange', series.orange, data.bestOf||5, 'orange');
+  safe('renderPips',()=>{ renderPips('pips-blue', series.blue, data.bestOf||5, 'blue'); });
+  safe('renderPips',()=>{ renderPips('pips-orange', series.orange, data.bestOf||5, 'orange'); });
 
   const players=data.players||[], spec=data.spectatedPlayer, cams=data.facecams||data.savedFacecams||[];
-  syncFacecams(players, cams);
-  renderPlayers(players, spec);
-  renderStatcard(players, spec, cams);
+  safe('syncFacecams',()=>{ syncFacecams(players, cams); });
+  safe('renderPlayers',()=>{ renderPlayers(players, spec); });
+  safe('renderStatcard',()=>{ renderStatcard(players, spec, cams); });
 
   // broadcast lower-thirds / scenes (driven by control-panel state)
-  renderSpotlight(data.spotlight, players);
+  safe('renderSpotlight',()=>{ renderSpotlight(data.spotlight, players); });
   // Countdown/"starting soon" lives on its own page (countdown.html), not in the HUD.
-  renderWinner(data.winner, teams);
-  renderIntro(data.intro, teams, players);
+  safe('renderWinner',()=>{ renderWinner(data.winner, teams); });
+  safe('renderIntro',()=>{ renderIntro(data.intro, teams, players); });
 
   // reload/reconnect into a post-game scoreboard: a full_state only toggles the view, it never calls
   // renderScoreboard — so without this the board shows the blank "TEAM A / TEAM B" default. Re-render
@@ -2985,7 +3001,9 @@ function applyFullState(data){
     }
   }
 
-  showView(data.view||'hud');
+  // The first full_state after the page loads describes a board that is ALREADY up: no winner intro.
+  showView(data.view||'hud', _firstFullState);
+  _firstFullState=false;
   scheduleHeaderOutline();   // team/event-name widths may have changed → re-trace the silhouette
   scheduleSpecOutline();     // roster/spectated may have changed → re-trace the spectated outline
 }
@@ -3239,7 +3257,8 @@ function dispatch(msg){
       el('players-blue').innerHTML=''; el('players-orange').innerHTML='';
       { const cp=el('cam-pool'); if(cp) cp.innerHTML=''; const cm=el('cam'); if(cm){ [...cm.querySelectorAll('iframe')].forEach(f=>f.remove()); } }
       el('br').classList.remove('show'); el('cam').classList.remove('on'); syncSponsorToStatcard();
-      prevBlue=prevOrange=null; colCache={}; activeView=null; otShown=false; pcPrev={};
+      prevBlue=prevOrange=null; colCache={}; activeView=null; otShown=false; pcPrev={}; sbSafetyFired=false;
+      currentState._goal=null;   // the previous game's scorer must not ride into this one
       goalCycleActive=false; outroPlayed=false; replayStarted=false; brazilGoal=false; introPlayed=false; lastSwipeAt=0; clearTimeout(goalCycleTimer); clearTimeout(replayOutroTimer); clearTimeout(introTimer); clearTimeout(introHoldTimer); clearTimeout(introHoldSafety); el('replay-wipe').classList.remove('logo-only','rp-hold');
       endBrazil();   // a fresh game can't inherit a stuck BRAZIL theme (e.g. previous game ended 7-1)
       hideReplayLowerThird(); hideReplayCams();   // hide the replay LT + cam grid
@@ -3264,7 +3283,9 @@ async function connect(){
     catch(e){ _wsToken=''; }
   }
   const ws=new WebSocket(WS_URL + (_wsToken ? ('?token=' + encodeURIComponent(_wsToken)) : ''));
-  ws.onopen=()=>{ try{ ws.send(JSON.stringify({type:'register',role:'overlay',page:location.pathname})); }catch(e){} ws.send(JSON.stringify({type:'request_state'})); };
+  // A reconnect re-baselines the score silently: goals scored while the socket was down must not
+  // replay as a late goal swipe when the first snapshot arrives.
+  ws.onopen=()=>{ prevBlue=prevOrange=null; try{ ws.send(JSON.stringify({type:'register',role:'overlay',page:location.pathname})); }catch(e){} ws.send(JSON.stringify({type:'request_state'})); };
   // A throw inside dispatch used to escape here and leave the HUD frozen on its last frame for the
   // rest of the show, with nothing logged. Contain it, exactly as SceneBase does for its scenes.
   ws.onmessage=({data})=>{ let msg; try{ msg=JSON.parse(data); }catch{ return; }

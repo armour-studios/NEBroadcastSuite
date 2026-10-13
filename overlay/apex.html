@@ -152,6 +152,8 @@
   @keyframes srFade { from { opacity: 0; } to { opacity: 1; } }
 
   /* offline / demo chrome */
+  /* On air (OBS, live.html, ?live=1) the "waiting" box never shows: an empty overlay is the clean state. */
+  body.live #offline { display: none !important; }
   #offline { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
     color: var(--dim); font-size: 15px; font-weight: 700; letter-spacing: 1px;
     background: var(--panel); padding: 12px 22px; border-radius: 8px; border: 1px solid var(--line); }
@@ -409,7 +411,7 @@ function render(a){
 // ── WebSocket bridge (same pattern as the LoL HUD) ────────────────────────────
 let _wsToken = null;
 async function connect(){
-  if (_wsToken === null){
+  if (!_wsToken){   // a failed fetch caches '': try again next time
     try { _wsToken = (await (await fetch('http://' + (location.hostname || 'localhost') + ':3000/api/ws-token')).json()).token || ''; }
     catch(e){ _wsToken = ''; }
   }

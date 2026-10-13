@@ -375,6 +375,22 @@
           "Image": "imgs/actions/twitch-marker/key"
         }
       ]
+    },
+    {
+      "Name": "Go Live / Record",
+      "UUID": "com.armour-studios.ne-broadcast.output-control",
+      "Icon": "imgs/actions/output-control/icon",
+      "Tooltip": "Start or stop the stream or the recording (OBS or vMix). Hold to confirm. The key shows LIVE/REC with uptime.",
+      "PropertyInspectorPath": "ui/output-control.html",
+      "UserTitleEnabled": false,
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/output-control/key"
+        }
+      ]
     }
   ]
 }

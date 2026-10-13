@@ -35,8 +35,10 @@ export class CountdownControls extends SuiteKeyAction<Settings> {
         return;
       }
       case "stop": {
+        // set_break {visible:false} already clears gfxActive when the break is the live layer.
+        // An unconditional set_gfx_active('') here also took down whatever OTHER graphic was on
+        // air (a Winner pushed after the break) whenever the producer stopped the countdown.
         await this.fire(ev.action, "set_break", { visible: false });
-        await this.fire(ev.action, "set_gfx_active", { scene: "" });
         return;
       }
       case "reset": {

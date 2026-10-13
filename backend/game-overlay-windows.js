@@ -117,9 +117,9 @@ function setLocked(e, locked) {
   e.locked = !!locked;
   // Click-through in BOTH modes. Edit mode only forwards mouse moves so the preload can take the
   // mouse while the pointer is over its toolbar (game-overlay:interactive); the rest of the screen
-  // always belongs to the game.
-  if (e.locked) e.win.setIgnoreMouseEvents(true);
-  else e.win.setIgnoreMouseEvents(true, { forward: true });
+  // always belongs to the game. Locked windows forward mouse MOVES too (never clicks), so the
+  // preload can fade whichever HUD piece the cursor is over and the producer can see past it.
+  e.win.setIgnoreMouseEvents(true, { forward: true });
   e.win.webContents.send('game-overlay:edit', {
     on: !e.locked, name: e.name,
     scale: Math.round((e.win.getBounds().width / e.nativeW) * 100),
@@ -263,7 +263,9 @@ function open(app, opts) {
   const e = {
     key, win, name: String(opts.name || key), nativeW, nativeH,
     opacity: saved && saved.opacity ? Math.min(1, Math.max(0.1, saved.opacity)) : 1,
-    locked: !!(saved && saved.width),   // first time: open in edit mode so the toolbar shows how to lock it
+    // Always opens in edit mode: the toolbar is how the producer locks it in place, and a window
+    // that came up locked (as remembered placements used to) showed no way to do that.
+    locked: false,
   };
   _wins.set(key, e);
   // NEVER win.setOpacity() here: on Windows it turns the window into an alpha-layered window, which
@@ -320,9 +322,11 @@ function setup(app, { notify } = {}) {
     const b = e.win.getBounds();
     e.win.setBounds({ x: b.x + Math.round(dx), y: b.y + Math.round(dy), width: b.width, height: b.height });
   });
+  // Edit mode asks for the mouse over its toolbar; a locked window asks only over its small
+  // Edit / Hide pill (shown while the cursor is on a HUD piece). Everywhere else stays the game's.
   ipcMain.on('game-overlay:interactive', (ev, on) => {
     const e = entryForSender(ev.sender);
-    if (!e || e.locked || e.win.isDestroyed()) return;
+    if (!e || e.win.isDestroyed()) return;
     if (on) e.win.setIgnoreMouseEvents(false);
     else e.win.setIgnoreMouseEvents(true, { forward: true });
   });

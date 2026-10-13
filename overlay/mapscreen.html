@@ -148,6 +148,7 @@
     .map-card .shade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.6) 0%, rgba(0,0,0,.08) 26%, rgba(0,0,0,.12) 55%, rgba(0,0,0,.82) 100%); }
     .map-card .mode { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); padding: 6px 14px; border-radius: 999px;
       background: rgba(8,10,14,.72); border: 1px solid rgba(255,255,255,.12); white-space: nowrap; text-align: center; font-family: 'Rajdhani', var(--main-font); font-weight: 600; font-size: 1.05em; color: #c6cbd4; letter-spacing: 0.16em; }
+    .map-card .mode:empty { display: none; }   /* games with no map modes (CS2) get no blank pill */
     .map-card .mode.mode-icon { display: flex; align-items: center; justify-content: center; gap: 7px; }
     .map-card .mode.mode-icon img { height: 20px; width: 20px; object-fit: contain; filter: drop-shadow(0 2px 6px rgba(0,0,0,.6)); }
     .map-card .mode.mode-icon span { font-size: .8em; }
@@ -169,6 +170,9 @@
     .card-decider { position: absolute; top: 44%; left: 50%; transform: translate(-50%, -50%); z-index: 1;
       padding: 7px 18px; border-radius: 8px; background: var(--accent); color: var(--on-accent, #fff);
       font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: 1.05em; letter-spacing: 0.16em; }
+    /* A drawn map: no team won, so a neutral plate where the winner's logo would be, score below. */
+    .card-draw { padding: 8px 22px; margin-bottom: 8px; border-radius: 8px; background: rgba(255,255,255,.92); color: #0b0d12;
+      font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: 1.3em; letter-spacing: 0.18em; }
 
     /* Completed map: image desaturates (result now reads from the hex badge + score, not a
        separate overlay block). */
@@ -502,7 +506,8 @@
       rowEl.innerHTML = '';
       maps.forEach((m, i) => {
         const t = teamFor(m.by, data);
-        const completed = (m.winner === 'a' || m.winner === 'b') || (m.score && (m.score.a || m.score.b));
+        const isDraw = m.winner === 'draw';
+        const completed = isDraw || (m.winner === 'a' || m.winner === 'b') || (m.score && (m.score.a || m.score.b));
 
         const card = document.createElement('div');
         card.className = 'map-card' + (m.action ? ' ' + m.action : '') + (completed ? ' completed' : '');
@@ -544,6 +549,14 @@
             const sc = document.createElement('div'); sc.className = 'card-score'; sc.textContent = `${a}–${b}`;
             wrap.appendChild(sc);
           }
+          card.appendChild(wrap);
+        } else if (isDraw) {
+          const wrap = document.createElement('div'); wrap.className = 'card-hex';
+          const tag = document.createElement('div'); tag.className = 'card-draw'; tag.textContent = 'DRAW';
+          const a = (m.score && m.score.a) || 0, b = (m.score && m.score.b) || 0;
+          const sc = document.createElement('div'); sc.className = 'card-score'; sc.textContent = `${a}–${b}`;
+          sc.style.setProperty('--tc', 'rgba(255,255,255,.7)');
+          wrap.appendChild(tag); wrap.appendChild(sc);
           card.appendChild(wrap);
         } else if (m.action === 'decider' && !completed) {
           const dec = document.createElement('div'); dec.className = 'card-decider'; dec.textContent = 'DECIDER';

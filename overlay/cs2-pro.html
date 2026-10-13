@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en">
+<!--
+  CS2 Pro HUD — a second, standalone CS2 broadcast layout (the original lives in csgo.html and is
+  untouched). Same data feed: full_state.csgo + csgo_update over the bridge WS, CT panel = BLUE
+  team, T panel = ORANGE team (server keeps that true across halftime when auto team names are on).
+
+  Layout (1920x1080):
+    top-left   series chip (Bo-N · map · pick/decider) + radar
+    top-centre scorebar: logo · team plate · score | score · team plate · logo, round tab above,
+               clock below (turns into the bomb / defuse countdown). A team's plate becomes its
+               "Timeout · N remaining" banner while that team is on a tactical timeout.
+    centre     K / D / A / K-D scoreboard — shown automatically in freezetime, timeouts and halftime
+    top-right  event chip + killfeed
+    bottom     team utility bars over five player cards per side (photo, HP, slot | name, gun,
+               armour, money, money spent this round, kills, deaths, grenades)
+    bottom-mid observed player card + sponsor plate (title sponsor first, then the kit's sponsors)
+-->
+<head>
+<meta charset="UTF-8">
+<title>NE Broadcast Suite — CS2 Pro HUD</title>
+<link rel="stylesheet" href="fonts.css">
+<style>
+  :root {
+    --a: #4a5cf0;            /* CT / blue team colour  (set from teams.blue.color)   */
+    --b: #e8333f;            /* T  / orange team colour (set from teams.orange.color) */
+    --panel: rgba(18, 19, 24, .92);
+    --panel-2: rgba(30, 32, 40, .94);
+    --line: rgba(255, 255, 255, .08);
+    --muted: #9aa0ab;
+    --money: #3fd06f;
+    --spent: #ff5a5a;
+    --font: 'Rajdhani', 'Inter', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: transparent; }
+  body { font-family: var(--font); color: #fff; -webkit-font-smoothing: antialiased; position: relative; }
+  html.cs-hidden #hud { display: none; }
+  .hidden { display: none !important; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* ── top chips ─────────────────────────────────────────── */
+  .chip { position: absolute; top: 0; height: 26px; display: flex; align-items: center; gap: 8px;
+    padding: 0 12px; background: var(--panel); font-weight: 600; font-size: 14px; letter-spacing: .02em; white-space: nowrap; }
+  .chip .sep { color: var(--muted); }
+  .chip .dim { color: var(--muted); }
+  #info { left: 18px; }
+  #event { right: 18px; }
+
+  /* ── radar ─────────────────────────────────────────────── */
+  #radar { position: absolute; left: 18px; top: 34px; width: 380px; height: 380px; overflow: hidden; }
+  #radar img.map { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .92; }
+  .rdot { position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%;
+    display: grid; place-items: center; font-weight: 700; font-size: 13px; color: #fff;
+    border: 2px solid rgba(255,255,255,.9); box-shadow: 0 1px 4px rgba(0,0,0,.7); transition: left .2s linear, top .2s linear; }
+  .rdot.ct { background: var(--a); }
+  .rdot.t { background: var(--b); }
+  .rdot.obs { width: 26px; height: 26px; margin: -13px 0 0 -13px; border-color: #ffd34d; }
+  .rdot.dead { background: #333 !important; border-color: #555; opacity: .6; }
+  .rdot .fx { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
+  .rdot .fx::after { content: ''; position: absolute; left: -4px; top: -20px; border: 4px solid transparent; border-bottom: 7px solid #fff; }
+  .rbomb { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; }
+  .rbomb img { width: 100%; height: 100%; filter: drop-shadow(0 0 4px #f33); }
+
+  /* ── scorebar ──────────────────────────────────────────── */
+  #bar { position: absolute; top: 0; left: 50%; transform: translateX(-50%); display: flex; align-items: flex-start; }
+  .tlogo { width: 50px; height: 72px; display: grid; place-items: center; background: var(--panel); }
+  .tlogo img { max-width: 38px; max-height: 38px; object-fit: contain; }
+  .tplate { position: relative; width: 255px; height: 72px; display: flex; align-items: center; justify-content: center;
+    background: var(--panel-2); overflow: hidden; }
+  .tplate .tname { position: relative; z-index: 1; font-weight: 700; font-size: 22px; letter-spacing: .02em; max-width: 220px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tplate .accent { position: absolute; top: 0; bottom: 0; width: 6px; }
+  #plate-a .accent { right: 0; background: var(--a); }
+  #plate-b .accent { left: 0; background: var(--b); }
+  .tplate .tbar { position: absolute; top: 8px; height: 4px; width: 46px; }
+  #plate-a .tbar { right: 10px; background: var(--a); }
+  #plate-b .tbar { left: 10px; background: var(--b); }
+  /* Tactical timeout: the calling team's plate fills with its colour and reads "Timeout / N remaining". */
+  .tplate .tout { position: absolute; inset: 0; z-index: 2; display: none; align-items: center; justify-content: center; gap: 6px;
+    font-weight: 700; font-size: 17px; }
+  .tplate .tout span { font-weight: 500; font-size: 14px; opacity: .85; }
+  #plate-a.timeout .tout { display: flex; background: var(--a); }
+  #plate-b.timeout .tout { display: flex; background: var(--b); }
+  .mid { display: flex; flex-direction: column; align-items: center; }
+  .rtab { height: 22px; min-width: 140px; display: grid; place-items: center; background: var(--panel); font-weight: 600; font-size: 14px; color: #d8dce4; }
+  .scores { display: flex; }
+  .score { width: 70px; height: 50px; display: grid; place-items: center; background: var(--panel-2); font-weight: 700; font-size: 38px; line-height: 1; }
+  .score + .score { border-left: 1px solid var(--line); }
+  .score.bump { animation: bump .5s ease; }
+  @keyframes bump { 0% { transform: scale(1.25); color: #ffd34d; } 100% { transform: scale(1); } }
+  .clock { margin-top: 2px; width: 140px; height: 36px; display: grid; place-items: center; background: var(--panel);
+    font-weight: 700; font-size: 24px; }
+  .clock.red { color: #ff5a5a; }
+  .clock.bomb { background: #b3202a; color: #fff; }
+  .clock.defuse { background: var(--a); color: #fff; }
+  .clock .lbl { font-size: 12px; letter-spacing: .14em; font-weight: 700; margin-right: 8px; opacity: .85; }
+
+  /* ── centre scoreboard (freezetime / timeout / halftime) ── */
+  #board { position: absolute; top: 116px; left: 50%; transform: translateX(-50%); width: 770px; padding: 10px 12px 12px;
+    background: rgba(14, 15, 19, .9); display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+    opacity: 0; transition: opacity .35s ease; }
+  #board.show { opacity: 1; }
+  .bhead, .brow { display: grid; align-items: center; }
+  .side-a .bhead, .side-a .brow { grid-template-columns: 46px 1fr 44px 44px 44px 50px; }
+  .side-b .bhead, .side-b .brow { grid-template-columns: 50px 44px 44px 44px 1fr 46px; }
+  .bhead { height: 22px; font-size: 12px; font-weight: 600; color: var(--muted); text-align: center; }
+  .brow { height: 50px; margin-top: 2px; background: rgba(32, 34, 42, .9); text-align: center; font-weight: 700; font-size: 18px; }
+  .brow .bname { text-align: left; padding-left: 8px; font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .side-b .brow .bname { text-align: right; padding: 0 8px 0 0; }
+  .brow .bph { width: 40px; height: 40px; margin: 0 auto; overflow: hidden; }
+  .brow .bph img, .brow .bph svg { width: 100%; height: 100%; object-fit: cover; }
+  .brow.top { outline: 2px solid #e6c88a; outline-offset: -2px; }
+  /* No player photos at all: drop the photo column instead of ten grey silhouettes. */
+  #board.nophoto .side-a .bhead, #board.nophoto .side-a .brow { grid-template-columns: 0 1fr 44px 44px 44px 50px; }
+  #board.nophoto .side-b .bhead, #board.nophoto .side-b .brow { grid-template-columns: 50px 44px 44px 44px 1fr 0; }
+  #board.nophoto .bph { visibility: hidden; width: 0; }
+  #board.nophoto .side-a .brow .bname { padding-left: 16px; }
+  #board.nophoto .side-b .brow .bname { padding-right: 16px; }
+  .brow.dead { opacity: .55; }
+
+  /* ── killfeed ──────────────────────────────────────────── */
+  #kf { position: absolute; top: 34px; right: 18px; width: 420px; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .kf { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; background: var(--panel); font-weight: 700; font-size: 16px;
+    animation: kfin .25s ease; }
+  @keyframes kfin { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: none; } }
+  .kf .ct { color: #8fa0ff; } .kf .t { color: #ff8b8b; }
+  .kf img { height: 16px; filter: brightness(0) invert(1); }
+  .kf .hs { height: 14px; }
+
+  /* ── team columns ──────────────────────────────────────── */
+  .col { position: absolute; bottom: 8px; width: 400px; display: flex; flex-direction: column; gap: 5px; }
+  #col-a { left: 8px; }
+  #col-b { right: 8px; }
+  .util { height: 38px; display: flex; align-items: center; gap: 18px; padding: 0 12px; background: var(--panel); font-weight: 700; font-size: 18px; margin-bottom: 4px; }
+  #col-b .util { justify-content: flex-end; }
+  .util .u { display: flex; align-items: center; gap: 6px; }
+  .util img { height: 18px; filter: brightness(0) invert(1); }
+  .util .cash { color: var(--money); }
+
+  .pcard { position: relative; display: flex; height: 70px; }
+  #col-b .pcard { flex-direction: row-reverse; }
+  .pph { width: 68px; height: 70px; flex: 0 0 auto; background: #1b1d24; overflow: hidden; }
+  .pph img, .pph svg { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .pbody { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .pl1 { position: relative; height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 10px; overflow: hidden; background: rgba(40, 42, 52, .95); }
+  #col-b .pl1 { flex-direction: row-reverse; }
+  .pl1 .hpfill { position: absolute; top: 0; bottom: 0; left: 0; z-index: 0; transition: width .3s ease; }
+  #col-a .hpfill { background: var(--a); }
+  #col-b .hpfill { background: var(--b); left: auto; right: 0; }
+  .pl1 > *:not(.hpfill) { position: relative; z-index: 1; }
+  .hp { font-weight: 700; font-size: 24px; min-width: 40px; }
+  .pname { flex: 1; min-width: 0; font-weight: 700; font-size: 19px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #col-b .pname { text-align: right; }
+  .pname .slot { opacity: .85; }
+  .gun { height: 20px; display: flex; align-items: center; }
+  .gun img { height: 20px; max-width: 74px; object-fit: contain; filter: brightness(0) invert(1); }
+  #col-a .gun img { transform: scaleX(-1); }
+  .pl2 { height: 34px; display: flex; align-items: center; gap: 12px; padding: 0 10px; background: rgba(18, 19, 24, .94); font-weight: 700; font-size: 16px; }
+  #col-b .pl2 { flex-direction: row-reverse; }
+  .pl2 img { height: 16px; filter: brightness(0) invert(1); }
+  .pl2 .arm { width: 18px; display: grid; place-items: center; }
+  .pl2 .money { color: var(--money); }
+  .pl2 .spent { color: var(--spent); font-size: 13px; margin-left: -6px; }
+  #col-b .pl2 .spent { margin: 0 -6px 0 0; }
+  .pl2 .stat { display: flex; align-items: center; gap: 4px; color: #d7dbe3; }
+  .pl2 .stat svg { width: 13px; height: 13px; }
+  .pl2 .nades { display: flex; gap: 4px; margin-left: auto; }
+  #col-b .pl2 .nades { margin: 0 auto 0 0; }
+  .pl2 .nades img { height: 17px; }
+  .pcard.dead .pl1 { background: rgba(40, 42, 52, .7); }
+  .pcard.dead .pph { filter: grayscale(1) brightness(.5); }
+  .pcard.dead .hp { color: var(--muted); }
+  .pcard.obs .pl1 { box-shadow: inset 0 0 0 2px #ffd34d; }
+  .pcard .dmg { font-size: 13px; color: var(--muted); }
+  .pcard .bombi { height: 18px; }
+
+  /* ── observed player ───────────────────────────────────── */
+  #obs { position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); width: 370px; height: 92px; display: flex;
+    background: var(--panel); border-left: 4px solid var(--a); }
+  #obs.t { border-left-color: var(--b); }
+  #obs .oph { width: 92px; height: 92px; overflow: hidden; background: #1b1d24; }
+  #obs .oph img, #obs .oph svg { width: 100%; height: 100%; object-fit: cover; }
+  #obs .ob { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: space-between; padding: 8px 12px; }
+  #obs .on { display: flex; align-items: center; gap: 10px; }
+  #obs .on b { flex: 1; min-width: 0; font-size: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #obs .on img { height: 22px; max-width: 110px; object-fit: contain; filter: brightness(0) invert(1); }
+  #obs .ok { display: flex; gap: 14px; font-size: 15px; font-weight: 600; color: #cfd3db; }
+  #obs .ohp { display: flex; align-items: center; gap: 14px; font-weight: 700; font-size: 20px; }
+  #obs .ohp img { height: 16px; filter: brightness(0) invert(1); margin-right: 4px; }
+  #obs .ammo { margin-left: auto; font-size: 18px; color: #cfd3db; }
+
+  /* ── sponsor plate ─────────────────────────────────────── */
+  #spon { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); width: 370px; height: 80px; display: flex; align-items: center;
+    justify-content: center; gap: 16px; background: var(--panel); }
+  #spon .lbl { font-weight: 700; font-size: 12px; letter-spacing: .24em; color: var(--muted); text-transform: uppercase; }
+  #spon img { max-height: 50px; max-width: 220px; object-fit: contain; transition: opacity .4s ease; }
+
+  /* ── Stacked layout (Settings > Games > CS2 > Overlay): both teams down the left, same reading
+     direction; radar + killfeed move to the right. Wide is the default above. ── */
+  html.stacked #col-a { bottom: auto; top: 292px; }
+  html.stacked #col-b { left: 8px; right: auto; }
+  html.stacked #col-b .pcard, html.stacked #col-b .pl1, html.stacked #col-b .pl2 { flex-direction: row; }
+  html.stacked #col-b .pname { text-align: left; }
+  html.stacked #col-b .util { justify-content: flex-start; }
+  html.stacked #col-b .hpfill { left: 0; right: auto; }
+  html.stacked #col-b .pl2 .spent { margin: 0 0 0 -6px; }
+  html.stacked #col-b .pl2 .nades { margin: 0 0 0 auto; }
+  html.stacked #col-b .gun img { transform: scaleX(-1); }
+  html.stacked .util { height: 34px; margin-bottom: 2px; }
+  html.stacked .pcard { height: 64px; }
+  html.stacked .pph { width: 62px; height: 64px; }
+  html.stacked .pl1 { height: 34px; }
+  html.stacked .pl2 { height: 30px; }
+  html.stacked #radar { left: auto; right: 18px; top: 34px; }
+  html.stacked #kf { top: 424px; }
+
+  #preview { position: absolute; left: 50%; top: 480px; transform: translateX(-50%); padding: 4px 12px; background: #b3202a; font-weight: 700;
+    font-size: 13px; letter-spacing: .14em; }
+</style>
+</head>
+<body>
+<div id="hud">
+  <div class="chip" id="info"></div>
+  <div class="chip hidden" id="event"></div>
+  <div id="radar"><img class="map" id="radar-map" alt=""></div>
+
+  <div id="bar">
+    <div class="tlogo"><img id="logo-a" alt=""></div>
+    <div class="tplate" id="plate-a"><span class="accent"></span><span class="tname" id="name-a"></span><div class="tout" id="tout-a"></div></div>
+    <div class="mid">
+      <div class="rtab num" id="rtab"></div>
+      <div class="scores"><div class="score num" id="score-a">0</div><div class="score num" id="score-b">0</div></div>
+      <div class="clock num" id="clock"></div>
+    </div>
+    <div class="tplate" id="plate-b"><span class="accent"></span><span class="tname" id="name-b"></span><div class="tout" id="tout-b"></div></div>
+    <div class="tlogo"><img id="logo-b" alt=""></div>
+  </div>
+
+  <div id="board"><div class="side-a" id="board-a"></div><div class="side-b" id="board-b"></div></div>
+  <div id="kf"></div>
+
+  <div class="col" id="col-a"><div class="util" id="util-a"></div></div>
+  <div class="col" id="col-b"><div class="util" id="util-b"></div></div>
+
+  <div id="obs" class="hidden">
+    <div class="oph" id="obs-ph"></div>
+    <div class="ob">
+      <div class="on"><b id="obs-name"></b><span id="obs-gun"></span></div>
+      <div class="ok num" id="obs-kad"></div>
+      <div class="ohp num" id="obs-hp"></div>
+    </div>
+  </div>
+  <div id="spon" class="hidden"><span class="lbl" id="spon-lbl"></span><img id="spon-img" alt=""></div>
+  <div id="preview" class="hidden">PREVIEW — WAITING FOR CS2 GSI</div>
+</div>
+
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// ── App-side state (from full_state) ──
+let layout = 'wide', layoutPinned = false;   // ?layout=wide|stacked pins it (testing / a fixed OBS source)
+let teams = { blue: {}, orange: {} }, eventName = '', bestOf = 3, vetoMaps = [], brand = null;
+const _lib = { brand: null };
+
+// ── Radar calibration — same CS2 overview data the original HUD uses (csgo.html CS_MAPS). ──
+const CS_MAPS = {
+  de_ancient: { x: -2953, y: 2164, scale: 5 },     de_anubis: { x: -2796, y: 3328, scale: 5.22 },
+  de_dust2: { x: -2476, y: 3239, scale: 4.4 },     de_inferno: { x: -2087, y: 3870, scale: 4.9 },
+  de_mirage: { x: -3230, y: 1713, scale: 5 },      de_nuke: { x: -3453, y: 2887, scale: 7 },
+  de_overpass: { x: -4831, y: 1781, scale: 5.2 },  de_train: { x: -2308, y: 2078, scale: 4.08208 },
+  de_vertigo: { x: -3168, y: 1762, scale: 4 },     de_basalt: { x: -2345.6, y: 2391.8, scale: 4.37 },
+  de_edin: { x: -383.3, y: 4420.21, scale: 4.80372 }, de_palais: { x: -1353.24, y: 2044.81, scale: 2.80034 },
+  de_whistle: { x: -1825.6, y: 1104.82, scale: 2.8 }, de_cache: { x: -2000, y: 3250, scale: 5.5 },
+  cs_office: { x: -1838, y: 1858, scale: 4.1 },    cs_italy: { x: -2647, y: 2592, scale: 4.6 }
+};
+const MAP_NAMES = { de_dust2: 'Dust II', de_mirage: 'Mirage', de_inferno: 'Inferno', de_nuke: 'Nuke', de_overpass: 'Overpass',
+  de_vertigo: 'Vertigo', de_ancient: 'Ancient', de_anubis: 'Anubis', de_train: 'Train', de_cache: 'Cache', cs_office: 'Office',
+  cs_italy: 'Italy', de_basalt: 'Basalt', de_edin: 'Edin', de_palais: 'Palais', de_whistle: 'Whistle' };
+const mapLabel = (n) => MAP_NAMES[n] || String(n || '').replace(/^(de|cs)_/, '').replace(/^\w/, (c) => c.toUpperCase());
+
+// ── Weapon art (bundled SVGs in /assets/weapons) — unknown items draw nothing rather than 404. ──
+const WEAPON_SVGS = new Set(['ak47','aug','awp','bizon','c4','cz75a','deagle','decoy','elite','famas','fiveseven','flashbang','g3sg1',
+  'galilar','glock','healthshot','hegrenade','hkp2000','incgrenade','knife','knife_t','m249','m4a1','m4a1_silencer','mac10','mag7',
+  'molotov','mp5sd','mp7','mp9','negev','nova','p250','p90','revolver','sawedoff','scar20','sg556','smokegrenade','ssg08','taser',
+  'tec9','ump45','usp_silencer','xm1014']);
+const WEAPON_ALIAS = { m4a4: 'm4a1', sg553: 'sg556', galil: 'galilar', zeus: 'taser', usp: 'usp_silencer', p2000: 'hkp2000', cz75: 'cz75a',
+  mp5: 'mp5sd', inferno: 'molotov', firebomb: 'molotov', frag_grenade: 'hegrenade' };
+function weaponAsset(w, team) {
+  const n = String(w || '').toLowerCase().replace(/^weapon_/, '');
+  if (!n) return '';
+  if (/^(knife|bayonet|melee|fists)/.test(n)) return team === 'T' ? 'knife_t' : 'knife';
+  const a = WEAPON_ALIAS[n] || n;
+  return WEAPON_SVGS.has(a) ? a : '';
+}
+const weaponImg = (w, team) => { const a = weaponAsset(w, team); return a ? `<img src="/assets/weapons/${a}.svg" alt="">` : ''; };
+const NADE_ORDER = ['flashbang', 'smokegrenade', 'molotov', 'incgrenade', 'hegrenade', 'decoy'];
+
+// ── Small inline icons ──
+const ICON_KILL = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M12 1v6M12 17v6M1 12h6M17 12h6" stroke="currentColor" stroke-width="2.4"/></svg>';
+const ICON_DEATH = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a8 8 0 00-8 8c0 3 1.6 5.4 4 6.7V20h8v-3.3A8 8 0 0012 2zm-3 9a1.6 1.6 0 110-3.2A1.6 1.6 0 019 11zm6 0a1.6 1.6 0 110-3.2 1.6 1.6 0 010 3.2z"/></svg>';
+// No photo: a side character instead of a grey person. CT = operator with helmet and goggles,
+// T = balaclava. Drawn in the side's colour (--a CT / --b T) over a dark plate.
+const SILHOUETTE = '<svg viewBox="0 0 68 70"><rect width="68" height="70" fill="#1b1d24"/><circle cx="34" cy="26" r="13" fill="#3a3d48"/><path d="M8 70c2-16 13-24 26-24s24 8 26 24z" fill="#3a3d48"/></svg>';
+const AGENT_CT = '<svg viewBox="0 0 68 70">'
+  + '<rect width="68" height="70" fill="#1d2029"/>'
+  + '<path d="M6 70c1-14 10-22 20-24l8 6 8-6c10 2 19 10 20 24z" fill="var(--a, #5b8def)" opacity=".85"/>'
+  + '<path d="M22 46h24l-4 8H26z" fill="#0f1116" opacity=".6"/>'
+  + '<ellipse cx="34" cy="31" rx="12" ry="14" fill="#3d4250"/>'
+  + '<path d="M19 26c0-11 7-17 15-17s15 6 15 17v2H19z" fill="var(--a, #5b8def)"/>'
+  + '<path d="M19 26h30" stroke="#0f1116" stroke-width="1.5" opacity=".5"/>'
+  + '<rect x="21" y="27" width="26" height="7" rx="3.5" fill="#0f1116"/>'
+  + '<rect x="23" y="28.5" width="9" height="4" rx="2" fill="#9fc3ff" opacity=".55"/><rect x="36" y="28.5" width="9" height="4" rx="2" fill="#9fc3ff" opacity=".55"/>'
+  + '</svg>';
+const AGENT_T = '<svg viewBox="0 0 68 70">'
+  + '<rect width="68" height="70" fill="#221e17"/>'
+  + '<path d="M6 70c1-14 10-22 20-24l8 7 8-7c10 2 19 10 20 24z" fill="var(--b, #d6a44a)" opacity=".85"/>'
+  + '<path d="M27 47l7 7 7-7" fill="none" stroke="#0f1116" stroke-width="2" opacity=".5"/>'
+  + '<path d="M20 30c0-12 6-19 14-19s14 7 14 19c0 9-6 16-14 16s-14-7-14-16z" fill="#2b2b2e"/>'
+  + '<path d="M20 22c3-7 8-11 14-11s11 4 14 11c-4-2-9-3-14-3s-10 1-14 3z" fill="var(--b, #d6a44a)" opacity=".9"/>'
+  + '<rect x="22" y="27" width="24" height="6" rx="3" fill="#d9c7a6"/>'
+  + '<circle cx="28.5" cy="30" r="1.8" fill="#111"/><circle cx="39.5" cy="30" r="1.8" fill="#111"/>'
+  + '</svg>';
+const agentFor = (side) => (side === 'T' ? AGENT_T : side === 'CT' ? AGENT_CT : SILHOUETTE);
+
+// Player photo — matched by name against the roster of the team on that side (Match ▸ Teams).
+function photoFor(name, side) {
+  const roster = ((side === 'CT' ? teams.blue : teams.orange) || {}).players || [];
+  const key = String(name || '').trim().toLowerCase();
+  const p = roster.find((r) => r && String(r.name || r.gamertag || '').trim().toLowerCase() === key);
+  const src = p && (p.photo || p.image || p.avatar);
+  const sd = String(side || '').toUpperCase() === 'T' ? 'T' : 'CT';
+  return src ? `<img src="${esc(src)}" alt="" onerror="this.outerHTML=agentFor('${sd}')">` : agentFor(sd);
+}
+
+const fmtClock = (s) => { if (s == null || isNaN(s)) return ''; s = Math.max(0, Math.ceil(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+const fmtMoney = (n) => '$' + (n || 0);
+function setHTML(el, html) { if (el._h !== html) { el._h = html; el.innerHTML = html; } }
+function setText(el, t) { t = String(t == null ? '' : t); if (el.textContent !== t) el.textContent = t; }
+
+// ── Money spent this round: snapshot each player's cash when freezetime starts. ──
+let roundStartMoney = {}, lastPhase = '';
+function trackMoney(cs) {
+  const phase = cs.phase || (cs.round && cs.round.phase) || '';
+  if (phase === 'freezetime' && lastPhase !== 'freezetime') {
+    roundStartMoney = {};
+    (cs.players || []).forEach((p) => { roundStartMoney[p.steamid] = p.money || 0; });
+  }
+  lastPhase = phase;
+}
+const spentOf = (p) => { const s = roundStartMoney[p.steamid]; return s != null && s > (p.money || 0) ? s - p.money : 0; };
+
+// ── Top chips ──
+function renderChips(cs) {
+  const name = cs.map && cs.map.name;
+  const parts = [];
+  if (bestOf) parts.push('BO' + bestOf);
+  if (name) parts.push('Playing on ' + esc(mapLabel(name)));
+  const lbl = mapLabel(name).toLowerCase();
+  const v = vetoMaps.find((m) => m && String(m.name || '').toLowerCase() === lbl);
+  let tag = '';
+  if (v && v.action === 'decider') tag = 'Decider';
+  else if (v && v.action === 'pick') tag = ((v.by === 'a' ? teams.blue : teams.orange).name || '') + ' pick';
+  const html = parts.join(' <span class="sep">|</span> ') + (tag ? ' <span class="sep">|</span> <span class="dim">' + esc(tag) + '</span>' : '');
+  setHTML($('info'), html);
+  $('info').classList.toggle('hidden', !parts.length);
+  setText($('event'), eventName);
+  $('event').classList.toggle('hidden', !eventName);
+}
+
+// ── Scorebar ──
+const prevScore = {};
+// The loaded team (Match page) whenever a side has one; with no team on a side, CS2's own side
+// (Counter-Terrorists / Terrorists with their emblems). A team without a logo gets its side emblem.
+function sideTeam(k) {
+  const t = (k === 'a' ? teams.blue : teams.orange) || {};
+  const side = k === 'a' ? { name: 'Counter-Terrorists', logo: '/assets/csgo/ct.svg' } : { name: 'Terrorists', logo: '/assets/csgo/t.svg' };
+  if (!t.name || !String(t.name).trim()) return side;
+  return { name: t.name, logo: t.logo || side.logo };
+}
+function setTeam(k, team, score) {
+  team = sideTeam(k);
+  setText($('name-' + k), team.name || (k === 'a' ? 'TEAM A' : 'TEAM B'));
+  const logo = $('logo-' + k);
+  const src = team.logo || (k === 'a' ? '/assets/csgo/ct.svg' : '/assets/csgo/t.svg');
+  if (logo.getAttribute('src') !== src) logo.src = src;
+  const s = $('score-' + k);
+  if (prevScore[k] !== undefined && prevScore[k] !== score) { s.classList.remove('bump'); void s.offsetWidth; s.classList.add('bump'); }
+  prevScore[k] = score;
+  setText(s, score);
+}
+function renderBar(cs) {
+  setTeam('a', teams.blue, (cs.ct && cs.ct.score) || 0);
+  setTeam('b', teams.orange, (cs.t && cs.t.score) || 0);
+  const phase = cs.phase || '';
+  // Tactical timeout banner on the calling team's plate.
+  ['a', 'b'].forEach((k) => {
+    const side = k === 'a' ? 'ct' : 't';
+    const on = phase === 'timeout_' + side;
+    $('plate-' + k).classList.toggle('timeout', on);
+    if (on) setHTML($('tout-' + k), 'Timeout <span>/ ' + ((cs[side] && cs[side].timeouts) || 0) + ' remaining</span>');
+  });
+  const warmup = cs.map && cs.map.phase === 'warmup';
+  const half = cs.map && cs.map.phase === 'intermission';
+  const rn = (cs.round && cs.round.number) || 0;
+  setText($('rtab'), warmup ? 'Pre-match' : half ? 'Halftime' : rn ? 'Round ' + rn : '');
+  const clock = $('clock');
+  const bomb = (cs.bomb && cs.bomb.state) || '';
+  // CS2 sends a negative countdown while a phase has no end (an endless warmup in a practice or bot
+  // lobby). That is "no timer", not 0:00, which read as a frozen, broken clock.
+  const secs = cs.phaseEndsIn != null && cs.phaseEndsIn >= 0 ? cs.phaseEndsIn : null;
+  clock.classList.remove('bomb', 'defuse', 'red');
+  if (warmup) { setHTML(clock, secs != null ? '<span class="lbl">WARMUP</span>' + fmtClock(secs) : 'WARMUP'); return; }
+  if (bomb === 'planted' || bomb === 'defusing') {
+    const t = cs.bomb.countdown != null ? cs.bomb.countdown : secs;
+    clock.classList.add(bomb === 'defusing' ? 'defuse' : 'bomb');
+    setHTML(clock, '<span class="lbl">' + (bomb === 'defusing' ? 'DEFUSE' : 'BOMB') + '</span>' + fmtClock(t));
+  } else {
+    if (phase === 'live' && secs != null && secs <= 10) clock.classList.add('red');
+    setHTML(clock, phase === 'paused' ? 'PAUSED' : fmtClock(secs));
+  }
+}
+
+// ── Centre scoreboard ──
+function boardSide(players, side, topId) {
+  const head = side === 'a'
+    ? '<div class="bhead"><span></span><span></span><span>Kills</span><span>Deaths</span><span>Assists</span><span>K/D</span></div>'
+    : '<div class="bhead"><span>K/D</span><span>Kills</span><span>Deaths</span><span>Assists</span><span></span><span></span></div>';
+  const rows = players.map((p) => {
+    const kd = (p.kills / Math.max(1, p.deaths)).toFixed(2);
+    const ph = '<span class="bph">' + photoFor(p.name, p.team) + '</span>';
+    const nm = '<span class="bname">' + esc(p.name) + '</span>';
+    const cls = 'brow num' + (p.steamid === topId ? ' top' : '') + (p.alive ? '' : ' dead');
+    return side === 'a'
+      ? `<div class="${cls}">${ph}${nm}<span>${p.kills}</span><span>${p.deaths}</span><span>${p.assists}</span><span>${kd}</span></div>`
+      : `<div class="${cls}"><span>${kd}</span><span>${p.kills}</span><span>${p.deaths}</span><span>${p.assists}</span>${nm}${ph}</div>`;
+  }).join('');
+  return head + rows;
+}
+function renderBoard(cs, ct, t) {
+  const phase = cs.phase || '';
+  const show = phase === 'freezetime' || /^timeout_/.test(phase) || (cs.map && cs.map.phase === 'intermission');
+  $('board').classList.toggle('show', show && (ct.length + t.length) > 0);
+  if (!show) return;
+  const top = [...ct, ...t].sort((x, y) => (y.kills - x.kills) || (x.deaths - y.deaths))[0];
+  const topId = top && top.kills > 0 ? top.steamid : '';
+  $('board').classList.remove('nophoto');   // side characters stand in for missing photos
+  setHTML($('board-a'), boardSide(ct, 'a', topId));
+  setHTML($('board-b'), boardSide(t, 'b', topId));
+}
+
+// ── Team utility bar ──
+function renderUtil(k, players) {
+  const alive = players.filter((p) => p.alive);
+  const cash = players.reduce((s, p) => s + (p.money || 0), 0);
+  const counts = {};
+  alive.forEach((p) => (p.nades || []).forEach((n) => { const a = weaponAsset(n); if (a) counts[a] = (counts[a] || 0) + 1; }));
+  const nades = NADE_ORDER.filter((n) => counts[n]).map((n) => `<span class="u"><img src="/assets/weapons/${n}.svg" alt="">${counts[n]}</span>`);
+  const kits = k === 'a' ? alive.filter((p) => p.hasKit).length : 0;
+  const parts = [`<span class="u cash num">${fmtMoney(cash)}</span>`];
+  if (kits) parts.push(`<span class="u"><img src="/assets/csgo/shield.svg" alt="">${kits}</span>`);
+  const ltr = k === 'a' || document.documentElement.classList.contains('stacked');
+  setHTML($('util-' + k), (ltr ? parts.concat(nades) : nades.reverse().concat(parts.reverse())).join(''));
+}
+
+// ── Player cards ──
+function cardHTML(p, k, obsId) {
+  const dead = !p.alive;
+  const hp = Math.max(0, Math.min(100, p.health || 0));
+  const gun = p.primary || p.secondary || p.weapon;
+  const arm = p.armor > 0 ? `<span class="arm"><img src="/assets/csgo/${p.helmet ? 'armor_helmet' : 'armor'}.svg" alt=""></span>` : '<span class="arm"></span>';
+  const spent = spentOf(p);
+  const nades = (p.nades || []).map((n) => weaponAsset(n)).filter(Boolean).map((a) => `<img src="/assets/weapons/${a}.svg" alt="">`).join('');
+  const extras = (p.hasBomb ? '<img class="bombi" src="/assets/csgo/bomb_c4.svg" alt="">' : '') + (p.hasKit ? '<img src="/assets/csgo/shield.svg" alt="">' : '');
+  const slot = p.slot != null && p.slot < 99 ? ((p.slot + 1) % 10) + ' | ' : '';
+  return `<div class="pcard${dead ? ' dead' : ''}${p.steamid === obsId ? ' obs' : ''}">
+    <div class="pph">${photoFor(p.name, p.team)}</div>
+    <div class="pbody">
+      <div class="pl1"><span class="hpfill" style="width:${dead ? 0 : hp}%"></span>
+        <span class="hp num">${dead ? '' : hp}</span>
+        <span class="pname"><span class="slot">${slot}</span>${esc(p.name)}</span>
+        <span class="gun">${dead ? '' : weaponImg(gun, p.team)}</span></div>
+      <div class="pl2 num">${dead ? `<span class="dmg">DMG ${p.roundDmg || 0}</span>` : arm}
+        <span class="money">${fmtMoney(p.money)}</span>${spent ? `<span class="spent">-${spent}$</span>` : ''}
+        <span class="stat">${ICON_KILL}${p.kills}</span><span class="stat">${ICON_DEATH}${p.deaths}</span>
+        <span class="nades">${dead ? '' : nades + extras}</span></div>
+    </div></div>`;
+}
+function renderCol(k, players, obsId) {
+  const col = $('col-' + k);
+  const html = players.map((p) => cardHTML(p, k, obsId)).join('');
+  if (col._h === html) return;
+  col._h = html;
+  [...col.querySelectorAll('.pcard')].forEach((n) => n.remove());
+  col.insertAdjacentHTML('beforeend', html);
+}
+
+// ── Observed player ──
+function renderObs(o) {
+  const box = $('obs');
+  if (!o || !o.name) { box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  box.classList.toggle('t', o.team === 'T');
+  setHTML($('obs-ph'), photoFor(o.name, o.team));
+  setText($('obs-name'), o.name);
+  setHTML($('obs-gun'), weaponImg(o.weapon, o.team));
+  setHTML($('obs-kad'), `<span>K ${o.kills || 0}</span><span>A ${o.assists || 0}</span><span>D ${o.deaths || 0}</span>`);
+  const ammo = o.clip != null && o.clip >= 0 ? `<span class="ammo">${o.clip} / ${o.reserve != null ? o.reserve : 0}</span>` : '';
+  setHTML($('obs-hp'), `<span><img src="/assets/csgo/health.svg" alt="">${o.health || 0}</span>`
+    + `<span><img src="/assets/csgo/${o.helmet ? 'armor_helmet' : 'armor'}.svg" alt="">${o.armor || 0}</span>${ammo}`);
+}
+
+// ── Killfeed ──
+function renderKf(feed) {
+  const items = (feed || []).slice(-5);
+  setHTML($('kf'), items.map((k) => {
+    const kc = (k.killerTeam || '').toUpperCase() === 'T' ? 't' : 'ct';
+    const vc = (k.victimTeam || '').toUpperCase() === 'T' ? 't' : 'ct';
+    return `<div class="kf">${k.killer ? `<span class="${kc}">${esc(k.killer)}</span>` : ''}${weaponImg(k.weapon, k.killerTeam)}`
+      + `${k.hs ? '<img class="hs" src="/assets/csgo/elimination.svg" alt="">' : ''}<span class="${vc}">${esc(k.victim)}</span></div>`;
+  }).join(''));
+}
+
+// ── Radar ──
+// Producer's position + size (Game Settings > CS2 > Overlay > Radar), in 1920x1080 pixels.
+function placeRadar(r, lay) {
+  const key = lay ? [lay.x, lay.y, lay.size].join(',') : '';
+  if (r._lay === key) return;
+  r._lay = key;
+  if (!lay) { r.style.left = r.style.top = r.style.right = r.style.width = r.style.height = ''; return; }
+  r.style.right = 'auto';
+  r.style.left = lay.x + 'px'; r.style.top = lay.y + 'px';
+  r.style.width = r.style.height = lay.size + 'px';
+}
+function renderRadar(cs, obsId) {
+  const r = $('radar');
+  const name = cs.map && cs.map.name;
+  const cal = CS_MAPS[name];
+  placeRadar(r, cs.radarLayout);
+  const img = $('radar-map');
+  // The radar only shows once its map image has loaded: no empty frame for a map without an image,
+  // and no broken-image box while it loads or if it fails.
+  if (!img._wired) {
+    img._wired = true;
+    img.onload = () => { img._ok = img.getAttribute('src'); r.classList.remove('hidden'); };
+    img.onerror = () => { img._ok = ''; r.classList.add('hidden'); };
+  }
+  const src = cal ? '/assets/csgo/maps/' + name + '.png' : '';
+  if (img.getAttribute('src') !== src) { img._ok = ''; if (src) img.src = src; else img.removeAttribute('src'); }
+  r.classList.toggle('hidden', !cal || img._ok !== src);
+  if (!cal) return;
+  const size = r.clientWidth || 380;
+  const toPx = (pos) => ({ x: ((pos.x - cal.x) / cal.scale) / 1024 * size, y: ((cal.y - pos.y) / cal.scale) / 1024 * size });
+  const seen = new Set();
+  (cs.players || []).forEach((p) => {
+    if (!p.pos) return;
+    seen.add(p.steamid);
+    let d = r.querySelector(`[data-sid="${CSS.escape(p.steamid)}"]`);
+    if (!d) { d = document.createElement('div'); d.dataset.sid = p.steamid; d.innerHTML = '<span class="n"></span><span class="fx"></span>'; r.appendChild(d); }
+    d.className = 'rdot ' + (p.team === 'T' ? 't' : 'ct') + (p.alive ? '' : ' dead') + (p.steamid === obsId ? ' obs' : '');
+    const xy = toPx(p.pos);
+    d.style.left = xy.x + 'px'; d.style.top = xy.y + 'px';
+    d.querySelector('.n').textContent = p.slot != null && p.slot < 99 ? (p.slot + 1) % 10 : '';
+    const fx = d.querySelector('.fx');
+    fx.style.display = p.alive && p.fwd ? '' : 'none';
+    if (p.fwd) fx.style.transform = `rotate(${Math.atan2(p.fwd.x, p.fwd.y) * 180 / Math.PI}deg)`;
+  });
+  r.querySelectorAll('.rdot').forEach((d) => { if (!seen.has(d.dataset.sid)) d.remove(); });
+  let b = r.querySelector('.rbomb');
+  const bp = cs.bomb && cs.bomb.pos;
+  if (bp && cs.bomb.state !== 'carried') {
+    if (!b) { b = document.createElement('div'); b.className = 'rbomb'; b.innerHTML = '<img src="/assets/csgo/bomb_c4.svg" alt="">'; r.appendChild(b); }
+    const xy = toPx(bp); b.style.left = xy.x + 'px'; b.style.top = xy.y + 'px';
+  } else if (b) b.remove();
+}
+
+// ── Sponsor plate: title sponsor first, then every tagged sponsor (falls back to the whole kit). ──
+let sponList = [], sponIdx = 0, sponTimer = null, sponSig = '';
+function renderSponsors() {
+  const b = brand || {};
+  const seen = new Set();
+  const list = [].concat(b.spots && b.spots.title ? [{ logo: b.spots.title }] : [], b.railSponsors || [], b.deskSponsors || [], b.bannerSponsors || []);
+  if (!list.length) list.push(...(b.sponsors || []));
+  sponList = list.filter((s) => s && s.logo && !seen.has(s.logo) && seen.add(s.logo));
+  const sig = sponList.map((s) => s.logo.slice(0, 48)).join('|');
+  $('spon').classList.toggle('hidden', !sponList.length);
+  setText($('spon-lbl'), b.presentedLabel || 'Presented by');
+  if (sig === sponSig) return;
+  sponSig = sig; sponIdx = 0;
+  clearInterval(sponTimer);
+  const show = () => { const s = sponList[sponIdx % sponList.length]; if (s) $('spon-img').src = s.logo; };
+  show();
+  if (sponList.length > 1 && b.sponsorMode !== 'static') sponTimer = setInterval(() => { sponIdx++; show(); }, (b.sponsorInterval || 6) * 1000);
+}
+
+// ── Master render ──
+function render(cs) {
+  const live = !!(cs && cs.connected);
+  const inObs = !!window.obsstudio && !/[?&]preview=1\b/.test(location.search);
+  // On air with no GSI yet: show nothing rather than fake players.
+  document.documentElement.classList.toggle('cs-hidden', !live && inObs);
+  $('preview').classList.toggle('hidden', live || inObs);
+  // Layout follows the producer's saved choice even while the preview data is showing.
+  if (!layoutPinned && cs && cs.proLayout) layout = cs.proLayout === 'stacked' ? 'stacked' : 'wide';
+  document.documentElement.classList.toggle('stacked', layout === 'stacked');
+  if (!live) cs = DEMO;
+  trackMoney(cs);
+  const bySlot = (a, b) => (a.slot ?? 99) - (b.slot ?? 99);
+  const ct = (cs.players || []).filter((p) => p.team === 'CT').sort(bySlot);
+  const t = (cs.players || []).filter((p) => p.team === 'T').sort(bySlot);
+  const obsId = (cs.observed && cs.observed.steamid) || '';
+  renderChips(cs);
+  renderBar(cs);
+  renderBoard(cs, ct, t);
+  renderUtil('a', ct); renderUtil('b', t);
+  renderCol('a', ct, obsId); renderCol('b', t, obsId);
+  renderObs(cs.observed);
+  renderKf(cs.killfeed);
+  renderRadar(cs, obsId);
+}
+
+// ── Preview data (shown in a browser/preview until GSI is live) ──
+const DEMO = {
+  connected: false,
+  map: { name: 'de_dust2', phase: 'live' }, phase: 'freezetime', phaseEndsIn: 11,
+  ct: { score: 6, timeouts: 2 }, t: { score: 4, timeouts: 3 },
+  round: { number: 11, phase: 'freezetime' }, bomb: { state: '' },
+  observed: { steamid: 'p4', name: 'Brehze', team: 'CT', health: 100, armor: 100, helmet: true, kills: 6, assists: 1, deaths: 7, weapon: 'knife', clip: -1 },
+  players: [
+    { steamid: 'p1', slot: 0, name: 'Stewie2K', team: 'CT', health: 100, armor: 100, helmet: true, money: 2050, kills: 9, assists: 2, deaths: 8, alive: true, primary: 'm4a1_silencer', nades: ['flashbang', 'smokegrenade'], hasKit: true, pos: { x: -400, y: 1600 }, fwd: { x: 1, y: 0 } },
+    { steamid: 'p2', slot: 1, name: 'CeRq', team: 'CT', health: 100, armor: 0, money: 0, kills: 1, assists: 2, deaths: 8, alive: true, primary: 'awp', nades: ['smokegrenade'], pos: { x: -200, y: 2200 }, fwd: { x: 0, y: -1 } },
+    { steamid: 'p3', slot: 2, name: 'autimatic', team: 'CT', health: 100, armor: 100, money: 150, kills: 6, assists: 7, deaths: 9, alive: true, secondary: 'deagle', nades: ['smokegrenade', 'hegrenade'], pos: { x: 500, y: 2400 }, fwd: { x: -1, y: 0 } },
+    { steamid: 'p4', slot: 3, name: 'Brehze', team: 'CT', health: 100, armor: 100, helmet: true, money: 0, kills: 6, assists: 1, deaths: 7, alive: true, secondary: 'p250', nades: ['smokegrenade'], hasKit: true, pos: { x: 900, y: 2000 }, fwd: { x: 0, y: 1 } },
+    { steamid: 'p5', slot: 4, name: 'FaNg', team: 'CT', health: 100, armor: 100, money: 100, kills: 12, assists: 0, deaths: 6, alive: true, primary: 'mp9', nades: ['flashbang', 'hegrenade'], pos: { x: 300, y: 1200 }, fwd: { x: 0.7, y: 0.7 } },
+    { steamid: 'p6', slot: 5, name: 'Learsi', team: 'T', health: 100, armor: 100, money: 1950, kills: 3, assists: 4, deaths: 8, alive: true, primary: 'ak47', nades: ['flashbang', 'flashbang', 'molotov'], pos: { x: -1500, y: -300 }, fwd: { x: 1, y: 0 } },
+    { steamid: 'p7', slot: 6, name: 'intra', team: 'T', health: 100, armor: 100, money: 3400, kills: 15, assists: 1, deaths: 5, alive: true, primary: 'ak47', nades: ['smokegrenade', 'flashbang'], pos: { x: -1300, y: -500 }, fwd: { x: 1, y: 0.2 } },
+    { steamid: 'p8', slot: 7, name: 'corim', team: 'T', health: 100, armor: 100, money: 2550, kills: 5, assists: 0, deaths: 8, alive: true, primary: 'ak47', nades: ['smokegrenade', 'hegrenade'], hasBomb: true, pos: { x: -1400, y: -800 }, fwd: { x: 0.8, y: 0.6 } },
+    { steamid: 'p9', slot: 8, name: 'jason', team: 'T', health: 100, armor: 100, money: 2950, kills: 8, assists: 3, deaths: 7, alive: true, primary: 'ak47', nades: ['molotov', 'flashbang'], pos: { x: -1100, y: -900 }, fwd: { x: 0, y: 1 } },
+    { steamid: 'p10', slot: 9, name: 'Umar', team: 'T', health: 100, armor: 100, money: 100, kills: 7, assists: 0, deaths: 6, alive: true, primary: 'awp', nades: ['smokegrenade'], pos: { x: -1700, y: -100 }, fwd: { x: 1, y: -0.3 } }
+  ],
+  killfeed: [
+    { killer: 'intra', killerTeam: 'T', victim: 'CeRq', victimTeam: 'CT', weapon: 'ak47', hs: true },
+    { killer: 'FaNg', killerTeam: 'CT', victim: 'Learsi', victimTeam: 'T', weapon: 'mp9', hs: false }
+  ]
+};
+
+// ── Bridge connection (same contract as csgo.html: full_state + csgo_update) ──
+let lastCs = null, wsToken = null;
+function applyFull(d) {
+  if ('brand' in d) _lib.brand = d.brand; else d.brand = _lib.brand;
+  const tm = d.teams || {};
+  teams = { blue: tm.blue || {}, orange: tm.orange || {} };
+  if (tm.blue && tm.blue.color) document.documentElement.style.setProperty('--a', tm.blue.color);
+  if (tm.orange && tm.orange.color) document.documentElement.style.setProperty('--b', tm.orange.color);
+  eventName = (d.eventName || '').trim();
+  if (d.bestOf) bestOf = d.bestOf;
+  if ('veto' in d) vetoMaps = (d.veto && Array.isArray(d.veto.maps)) ? d.veto.maps : [];
+  brand = d.brand || null;
+  renderSponsors();
+}
+async function connect() {
+  const host = location.hostname || 'localhost';
+  if (!wsToken) {   // a failed fetch caches '': try again next time
+    try { wsToken = (await (await fetch('http://' + host + ':3000/api/ws-token')).json()).token || ''; } catch (e) { wsToken = ''; }
+  }
+  const sock = new WebSocket('ws://' + host + ':3001' + (wsToken ? '?token=' + encodeURIComponent(wsToken) : ''));
+  sock.onopen = () => {
+    try { sock.send(JSON.stringify({ type: 'register', role: 'overlay', page: location.pathname })); } catch (e) {}
+    sock.send(JSON.stringify({ type: 'request_state' }));
+  };
+  sock.onmessage = ({ data }) => {
+    let msg; try { msg = JSON.parse(data); } catch (e) { return; }
+    try {
+      if (msg.type === 'full_state') { applyFull(msg.data || {}); if ('csgo' in (msg.data || {})) lastCs = msg.data.csgo; render(lastCs); }
+      else if (msg.type === 'csgo_update') { lastCs = msg.data; render(lastCs); }
+      else if (msg.type === 'reload_overlays') {
+        const files = Array.isArray(msg.files) ? msg.files.map((f) => String(f).toLowerCase().split(/[\\/]/).pop()) : null;
+        if (!files || files.includes('cs2-pro.html')) location.reload();
+      }
+    } catch (e) { console.error('[cs2-pro] render error on ' + msg.type + ':', e); }
+  };
+  sock.onclose = () => setTimeout(connect, 800);
+  sock.onerror = () => { try { sock.close(); } catch (e) {} };
+}
+{ const q = /[?&]layout=(wide|stacked)\b/.exec(location.search); if (q) { layout = q[1]; layoutPinned = true; } }
+render(null);
+connect();
+</script>
+<script src="cs2-assist.js"></script>
+</body>
+</html>

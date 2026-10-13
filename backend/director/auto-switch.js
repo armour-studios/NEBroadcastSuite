@@ -22,18 +22,31 @@ function isEnabled() {
   return enabled;
 }
 
-function sendKey(key) {
+// SendKeys types into WHATEVER window has focus. So the key is only pressed when the foreground
+// window belongs to CS2 (cs2.exe): alt-tabbed into Discord, a browser or this app, nothing is typed.
+// The PowerShell exits 3 when CS2 is not in front; onSkipped then lets the switch retry later.
+const FG_GUARD = 'Add-Type -Namespace NE -Name Fg -MemberDefinition \'[DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow(); [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr h, out uint p);\'; '
+  + '$p = 0; [void][NE.Fg]::GetWindowThreadProcessId([NE.Fg]::GetForegroundWindow(), [ref]$p); '
+  + '$n = (Get-Process -Id $p -ErrorAction SilentlyContinue).ProcessName; '
+  + 'if ($n -ne "cs2") { exit 3 }; ';
+let warnedNotFocused = 0;
+function sendKey(key, { onSkipped } = {}) {
   if (process.platform !== 'win32') {
     console.warn('[AutoSwitch] Key simulation only supported on Windows (this PC)');
     return false;
   }
   const escaped = key.replace(/[+^%~(){}[\]]/g, '{$&}');
-  const ps = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${escaped}')`;
+  const ps = FG_GUARD + `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${escaped}')`;
   const child = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], {
     windowsHide: true,
     stdio: 'ignore'
   });
   child.on('error', () => { /* powershell unavailable — auto-switch keypress is best-effort, never crash */ });
+  child.on('exit', (code) => {
+    if (code !== 3) return;
+    if (Date.now() - warnedNotFocused > 60000) { warnedNotFocused = Date.now(); console.log('[AutoSwitch] CS2 is not the active window: observer key not pressed.'); }
+    if (onSkipped) onSkipped();
+  });
   return true;
 }
 
@@ -64,7 +77,9 @@ function trySwitch({ gameId, primary, gameState }) {
     return { ok: false, reason: 'no_feed_adapter' };
   }
 
-  const sent = sendKey(key);
+  // Not pressed because CS2 was not in front: forget this target so the switch happens once the
+  // producer is back in CS2.
+  const sent = sendKey(key, { onSkipped: () => { if (lastTargetKey === tKey) lastTargetKey = ''; } });
   if (sent) {
     lastSwitchAt = now;
     lastTargetKey = tKey;

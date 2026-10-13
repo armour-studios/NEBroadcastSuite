@@ -60,6 +60,19 @@ function createDirectorCore({ learning, onStateChange }) {
     if (feed.length > DEFAULTS.feedMax) feed.length = DEFAULTS.feedMax;
   }
 
+  // Backups: the next-best DIFFERENT targets (several events often point at the same player).
+  function altsOf(candidates, exclude, n) {
+    const seen = new Set([targetKey(exclude && exclude.event.target)]);
+    const out = [];
+    for (const c of candidates) {
+      const k = targetKey(c.event.target);
+      if (seen.has(k)) continue;
+      seen.add(k); out.push(shotFromEvent(c.event, c.score));
+      if (out.length >= n) break;
+    }
+    return out;
+  }
+
   function buildCandidates(adapter, gameState, now) {
     const candidates = [];
     activeEvents.forEach((e) => {
@@ -95,7 +108,7 @@ function createDirectorCore({ learning, onStateChange }) {
       if (locked) {
         current = {
           primary: shotFromEvent(locked.event, locked.score),
-          alternates: candidates.filter((c) => c !== locked).slice(0, 3).map((c) => shotFromEvent(c.event, c.score)),
+          alternates: altsOf(candidates, locked, 3),
           confidence: Math.min(99, Math.round(locked.score))
         };
         emit();
@@ -118,11 +131,12 @@ function createDirectorCore({ learning, onStateChange }) {
       }
       current = {
         primary: shotFromEvent(best.event, best.score),
-        alternates: candidates.slice(1, 4).map((c) => shotFromEvent(c.event, c.score)),
+        alternates: altsOf(candidates, best, 3),
         confidence: Math.min(99, Math.round(best.score))
       };
     } else {
-      current.alternates = candidates.slice(0, 3).map((c) => shotFromEvent(c.event, c.score));
+      const curC = candidates.find((c) => targetKey(c.event.target) === currentPrimaryKey) || null;
+      current.alternates = altsOf(candidates, curC, 3);
     }
 
     emit();

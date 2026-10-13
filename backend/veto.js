@@ -88,6 +88,7 @@ const MAP_POOLS = {
     { id: 'busan', name: "Busan", type: 'Control', image: '/assets/overwatch/maps/busan.jpg' },
     { id: 'gogadoro', name: "Gogadoro", type: 'Control', image: '/assets/overwatch/maps/gogadoro.jpg' },
     { id: 'wuxing-university', name: "Wuxing University", type: 'Control', image: '/assets/overwatch/maps/wuxing-university.jpg' },
+    { id: 'arena-victoriae', name: "Arena Victoriae", type: 'Control', image: '/assets/overwatch/maps/arena-victoriae.jpg' },
     // Hybrid
     { id: 'kings-row',           name: "King's Row",           type: 'Hybrid',    image: '/assets/overwatch/maps/kings-row.jpg' },
     { id: 'numbani',             name: 'Numbani',              type: 'Hybrid',    image: '/assets/overwatch/maps/numbani.jpg' },

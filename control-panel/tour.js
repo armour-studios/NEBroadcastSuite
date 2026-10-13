@@ -123,6 +123,8 @@
     closeSettings();
     var moved = false;
     if (nav.tab) moved = goTab(nav.tab) || moved;
+    // A Modern page view (Event, Overlays...): ui-style.js navigates there like a nav click.
+    if (nav.view) { moved = goTab('principal') || moved; if (typeof window.__mxGo === 'function') window.__mxGo({ tab: 'principal', view: nav.view }); moved = true; }
     if (nav.prod) { moved = goTab('produccion') || moved; call('_pdShow', nav.prod); moved = true; }
     if (nav.talent) { moved = goTab('equipos') || moved; call('_talentShowPage', nav.talent); moved = true; }
     if (nav.teams) clickSel('[data-teamstab="' + nav.teams + '"]');

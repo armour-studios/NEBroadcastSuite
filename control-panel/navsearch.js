@@ -112,6 +112,8 @@
       clickWhenReady(STEP_SEL.gfx(spec.gfx));
     }
     if (spec.ev)      { clickWhenReady(STEP_SEL.tab('events')); clickWhenReady(STEP_SEL.ev(spec.ev)); }
+    // A Modern page by its nav route (ui-style.js go); Classic falls back to the tab.
+    if (spec.mx) { if (typeof window.__mxGo === 'function' && document.documentElement.getAttribute('data-ui') === 'modern') window.__mxGo(spec.mx); else if (spec.mx.tab) clickWhenReady(STEP_SEL.tab(spec.mx.tab)); }
     if (spec.talent)  {
       clickWhenReady(STEP_SEL.tab('equipos'));
       callWhenReady('_talentShowPage', spec.talent);
@@ -139,6 +141,7 @@
     // say, Go Live (Broadcast) flashed a section that was display:none. Open the owning category.
     if (spec.settings) callWhenReady('openSettings', spec.settings);
 
+    if (spec.flash === 'ev-platform-tabs' && window.__siteEvents && window.__siteEvents.openOther) window.__siteEvents.openOther();
     if (spec.flash)   waitFor(() => document.getElementById(spec.flash), flash, '#' + spec.flash);
     // Drive an existing filter box on the destination page, so a search for a team lands on that
     // page ALREADY filtered to it rather than dumping the producer into a 200-card grid.
@@ -208,9 +211,10 @@
     { n: 'Lobby / Waiting Room', w: 'Dashboard', k: 'lobby waiting room guests green room', to: { dash: 'lobby' } },
     { n: 'Stream Queue', w: 'Dashboard', k: 'stream queue startgg live next sets push auto follow on deck order', to: { tab: 'principal', flash: 'ev-queue-block' } },
     // Esports
-    { n: 'Tournaments (start.gg)', w: 'Events', k: 'startgg start.gg tournament event import challonge nxgen faceit', to: { ev: 'startgg' } },
-    { n: 'Leagues', w: 'Events', k: 'league season standings points schedule weekly fixtures record', to: { ev: 'leagues' } },
-    { n: 'My Events', w: 'Events', k: 'my events saved events history', to: { ev: 'myevents' } },
+    // Leagues and tournaments are run on the Nameless website; the Event page lists them with your
+    // start.gg tournaments (site-events.js). The old in-app Competitions / Leagues pages are retired.
+    { n: 'Your events', w: 'Event', k: 'events leagues league tournaments tournament competitions season standings schedule fixtures website nameless startgg start.gg load event my events', to: { mx: { tab: 'principal', view: 'event' }, flash: 'sev-hub' } },
+    { n: 'Other platforms (start.gg, Challonge, FACEIT, NXGEN, Sheets)', w: 'Event', k: 'startgg start.gg challonge faceit nxgen challengermode google sheet feed import platform', to: { mx: { tab: 'principal', view: 'event' }, flash: 'ev-platform-tabs' } },
     { n: 'Event Ops', w: 'Analytics', k: 'event ops checklist operations tasks check-in csv spreadsheet seeding challonge mirror', to: { stats: 'eventops' } },
     // Talent / cameras
     { n: 'Teams & Rosters', w: 'Talent', k: 'teams roster players logos import csv export library', to: { talent: 'teams', talentSub: 'saved' } },
@@ -250,6 +254,7 @@
     { n: 'Quick Rail \u2014 Notes', w: 'Quick rail', k: 'notes scratchpad reminders', to: { rail: 'notes' } },
     // Settings (scroll-to)
     { n: 'Walkthroughs', w: 'Settings', k: 'tour walkthrough help getting started tutorial guide onboarding quick start how to learn', to: { settings: 'general', flash: 'tour-section' } },
+    { n: 'Diagnostics / show timeline', w: 'Settings', k: 'diagnostics timeline log logs what happened debug stuck scene frozen wrong score troubleshoot problems errors health status history', to: { settings: 'diagnostics' } },
     { n: 'Appearance & Accent', w: 'Settings', k: 'theme colour color accent appearance dark light mode skin brand look', to: { settings: 'appearance', flash: 'settings-appearance' } },
     { n: 'Broadcast Defaults', w: 'Settings', k: 'default best of series overlay font clock defaults auto reload', to: { settings: 'broadcast', flash: 'settings-broadcast-defaults' } },
     { n: 'Rocket League Automation', w: 'Settings', k: 'rl rocket league kickoff scene scoreboard replay transitions stats api pause', to: { game: 'rocket-league:automation' } },
@@ -375,11 +380,8 @@
         w: 'League',
         group: 'Events',
         k: (l.teams || []).map((t) => t.teamName || t.name || '').join(' ') + ' ' + (l.season || ''),
-        go: () => {
-          nav({ ev: 'leagues' });
-          // The Leagues header switcher renders after the tab does, so wait for it, then select.
-          waitFor(() => document.getElementById('lg-switch') && typeof lgRender === 'function', () => { lgActiveId = l.id; lgRender(); }, '#lg-switch');
-        }
+        // Leagues come from the website now: open the Event page, where it is listed and loaded.
+        go: () => nav({ mx: { tab: 'principal', view: 'event' }, flash: 'sev-hub' })
       }));
     },
 
@@ -418,10 +420,11 @@
         if (!x || !x.name) return;
         out.push({
           n: x.name,
-          sub: [x.game, x.player, x.folder].filter(Boolean).join(' · ') || 'Clip',
+          sub: [x.match, x.game, x.player, x.folder === 'highlights' ? 'Highlights' : 'Moments'].filter(Boolean).join(' · ') || 'Clip',
           w: 'Clip', group: 'Replays',
-          k: [x.type, x.player, x.game, x.folder].filter(Boolean).join(' '),
-          go: () => nav({ replays: 'editor', text: { sel: '.rp-clip-card, .clip-card', value: x.name } })
+          k: [x.type, x.player, x.game, x.match, x.folder].filter(Boolean).join(' '),
+          // Opens the clip in the Replays page player.
+          go: () => { nav({ replays: 'editor' }); setTimeout(() => { if (typeof loadClipPreview === 'function') loadClipPreview(x); }, 250); }
         });
       });
       (c.montages || []).slice(0, 400).forEach((m) => {

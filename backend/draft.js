@@ -21,24 +21,32 @@ const LOL = [
   ['pick', 1], ['pick', 0], ['pick', 0], ['pick', 1]
 ];
 
-// Dota 2 Captain's Mode: 3 ban phases + 3 pick phases.
-// Ban-1: A B A B A B (3 each)
-// Pick-1: A B B A (2 each)
-// Ban-2: A B A B (2 each)
-// Pick-2: A B A B (2 each)
-// Ban-3: A B (1 each)
-// Pick-3: B A (1 each, reverse to balance)
+// Dota 2 Captains Mode, as of patch 7.34 (August 2023, still current): 24 steps.
+// A = first-pick team, B = second-pick team.
+// Ban-1 (7):  A A B B A B B      Pick-1 (2): A B
+// Ban-2 (3):  A A B              Pick-2 (6): B A A B B A
+// Ban-3 (4):  A B A B            Pick-3 (2): A B
+// = 3-2-2 bans for the first-pick team, 4-1-2 for the second, picks 1-3-1 each.
 const DOTA2 = [
-  ['ban', 0], ['ban', 1], ['ban', 0], ['ban', 1], ['ban', 0], ['ban', 1],
-  ['pick', 0], ['pick', 1], ['pick', 1], ['pick', 0],
+  ['ban', 0], ['ban', 0], ['ban', 1], ['ban', 1], ['ban', 0], ['ban', 1], ['ban', 1],
+  ['pick', 0], ['pick', 1],
+  ['ban', 0], ['ban', 0], ['ban', 1],
+  ['pick', 1], ['pick', 0], ['pick', 0], ['pick', 1], ['pick', 1], ['pick', 0],
   ['ban', 0], ['ban', 1], ['ban', 0], ['ban', 1],
-  ['pick', 0], ['pick', 1], ['pick', 0], ['pick', 1],
-  ['ban', 0], ['ban', 1],
-  ['pick', 1], ['pick', 0]
+  ['pick', 0], ['pick', 1]
 ];
 
-// Mobile Legends / Honor of Kings: same LoL-style tournament draft (5+5).
+// Mobile Legends (MPL): the LoL-style tournament draft, 10 bans (5+5).
 const ML_DRAFT = LOL;
+
+// Honor of Kings (KPL-style): 4 bans per team, then 5 picks each.
+// Ban-1: A B A B   Pick-1: A B B A A B   Ban-2: B A B A   Pick-2: B A A B
+const HOK_DRAFT = [
+  ['ban', 0], ['ban', 1], ['ban', 0], ['ban', 1],
+  ['pick', 0], ['pick', 1], ['pick', 1], ['pick', 0], ['pick', 0], ['pick', 1],
+  ['ban', 1], ['ban', 0], ['ban', 1], ['ban', 0],
+  ['pick', 1], ['pick', 0], ['pick', 0], ['pick', 1]
+];
 
 // Valorant: 6 bans alternating (3 each), then 10 picks alternating (5 each).
 const VALORANT = [
@@ -66,7 +74,7 @@ const DRAFT_FORMATS = {
   'marvel-rivals': HERO_BANS_2,
   valorant:        VALORANT,
   'mobile-legends': ML_DRAFT,
-  'honor-of-kings': ML_DRAFT
+  'honor-of-kings': HOK_DRAFT
 };
 
 // ── Rosters: [{ id, name, image }] per game ─────────────────────────────────────────────
@@ -79,25 +87,28 @@ function titleCase(id) {
 // Display names that titleCase() can't infer from the file id.
 const NAME_OVERRIDES = {
   // Overwatch
-  dva: 'D.Va', lucio: 'Lúcio', torbjorn: 'Torbjörn', 'soldier-76': 'Soldier: 76',
+  dva: 'D.Va', dmon: 'D.Mon', lucio: 'Lúcio', torbjorn: 'Torbjörn', 'soldier-76': 'Soldier: 76',
   // Marvel Rivals
   'cloak-dagger': 'Cloak & Dagger', 'spider-man': 'Spider-Man', 'star-lord': 'Star-Lord',
   'jeff-the-land-shark': 'Jeff the Land Shark',
   // Valorant
-  'kay-o': 'KAY/O'
+  'kay-o': 'KAY/O',
+  // Dota 2
+  'anti-mage': 'Anti-Mage', 'natures-prophet': "Nature's Prophet", 'keeper-of-the-light': 'Keeper of the Light',
+  'queen-of-pain': 'Queen of Pain'
 };
 
-function idsFromDir(rel) {
+function filesFromDir(rel) {
   try {
-    return fs.readdirSync(path.join(__dirname, '..', rel))
-      .filter((f) => /\.(png|jpe?g|webp)$/i.test(f))
-      .map((f) => f.replace(/\.[^.]+$/, ''));
+    return fs.readdirSync(path.join(__dirname, '..', rel)).filter((f) => /\.(png|jpe?g|webp)$/i.test(f));
   } catch (e) { return []; }
 }
+function idsFromDir(rel) { return filesFromDir(rel).map((f) => f.replace(/\.[^.]+$/, '')); }
 
+// The portrait URL keeps each file's real extension (a .jpg roster used to be linked as .png).
 function rosterFromDir(rel, urlBase) {
-  return idsFromDir(rel)
-    .map((id) => ({ id, name: NAME_OVERRIDES[id] || titleCase(id), image: urlBase + id + '.png' }))
+  return filesFromDir(rel)
+    .map((f) => { const id = f.replace(/\.[^.]+$/, ''); return { id, name: NAME_OVERRIDES[id] || titleCase(id), image: urlBase + f }; })
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -113,6 +124,15 @@ try {
   }));
 } catch (e) { LOL_ROSTER = []; }
 
+// Mobile Legends: names, roles and lanes from assets/mlbb/heroes.json (regenerate with
+// node assets/fetch-mlbb-heroes.js); portraits are assets/heroes/mobile-legends/<id>.jpg.
+let MLBB_ROSTER = [];
+try {
+  MLBB_ROSTER = require('../assets/mlbb/heroes.json')
+    .filter((h) => h && h.id && h.name)
+    .map((h) => ({ id: h.id, name: h.name, role: h.role || '', lane: (h.lane || [])[0] || '', image: '/assets/heroes/mobile-legends/' + h.id + '.jpg' }));
+} catch (e) { MLBB_ROSTER = []; }
+
 // Overwatch role by portrait id — drives the front-panel role filter chips and the
 // 2-per-role ban cap enforced in roleLimitOk() below.
 const OW_ROLES = {
@@ -121,9 +141,9 @@ const OW_ROLES = {
   winston: 'Tank', 'wrecking-ball': 'Tank', zarya: 'Tank',
   anran: 'Damage', ashe: 'Damage', emre: 'Damage', shion: 'Damage', sierra: 'Damage', vendetta: 'Damage', bastion: 'Damage', cassidy: 'Damage', echo: 'Damage', freja: 'Damage',
   genji: 'Damage', hanzo: 'Damage', junkrat: 'Damage', mei: 'Damage', pharah: 'Damage',
-  reaper: 'Damage', sojourn: 'Damage', 'soldier-76': 'Damage', sombra: 'Damage',
+  reaper: 'Damage', sojourn: 'Damage', 'soldier-76': 'Damage',
   symmetra: 'Damage', torbjorn: 'Damage', tracer: 'Damage', venture: 'Damage', widowmaker: 'Damage',
-  ana: 'Support', 'jetpack-cat': 'Support', mizuki: 'Support', wuyang: 'Support', baptiste: 'Support', brigitte: 'Support', illari: 'Support', juno: 'Support',
+  ana: 'Support', doctrine: 'Support', sombra: 'Support', 'jetpack-cat': 'Support', mizuki: 'Support', wuyang: 'Support', baptiste: 'Support', brigitte: 'Support', illari: 'Support', juno: 'Support',
   kiriko: 'Support', lifeweaver: 'Support', lucio: 'Support', mercy: 'Support', moira: 'Support',
   zenyatta: 'Support'
 };
@@ -143,8 +163,8 @@ const ROSTERS = {
   overwatch:        rosterFromDirWithRoles('assets/overwatch/heroes', '/assets/overwatch/heroes/', OW_ROLES),
   'marvel-rivals':  rosterFromDir('assets/heroes/marvel-rivals',  '/assets/heroes/marvel-rivals/'),
   valorant:         rosterFromDir('assets/heroes/valorant',       '/assets/heroes/valorant/'),
-  'mobile-legends': [],   // no portrait folder yet — falls back to text-only
-  'honor-of-kings': []
+  'mobile-legends': MLBB_ROSTER,   // assets/mlbb/heroes.json + portraits, from assets/fetch-mlbb-heroes.js
+  'honor-of-kings': []   // no public English roster source; heroes come from Game Settings > Characters or are typed
 };
 
 // name (case-insensitive) → image, per game, for stamping picks/bans with a portrait.

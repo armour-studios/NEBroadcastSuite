@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-ne-bridge="1">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=1920">
@@ -23,6 +23,8 @@
     pointer-events: none;   /* never intercept clicks (matters in preview, harmless in OBS) */
   }
 </style>
+  <!-- One socket for every graphic below (bridge-host.js) instead of one each. -->
+  <script src="bridge-host.js"></script>
 </head>
 <body>
   <!-- Layer order = stacking order (later = on top). Full-screen takeovers go on top

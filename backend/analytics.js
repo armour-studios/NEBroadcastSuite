@@ -24,6 +24,7 @@ let tickTimer = null;
 let saveTimer = null;
 let _lastPush = 0;
 let _offlineStreak = 0;
+let _tickCount = 0;
 let AUTO = true;                          // auto start/stop with the Twitch live signal
 
 const SESSION_CAP = 100;
@@ -37,15 +38,42 @@ function init(d) {
   deps = d || {};
   FILE = path.join(deps.dataDir || '.', 'analytics.json');
   load();
-  // A live snapshot left over from a crash/restart is finalized so its data isn't lost.
+  // A live snapshot left over from a crash/restart is finalized so its data isn't lost. It ends
+  // when it was last tracked, not now: the time the app was closed was not broadcast time.
   if (DB.live) {
-    const stale = DB.live; stale.active = false; stale.endedAt = stale.endedAt || now();
+    const stale = DB.live; stale.active = false; stale.endedAt = stale.endedAt || trackedEnd(stale);
     DB.sessions.unshift(finalize(stale));
     if (DB.sessions.length > SESSION_CAP) DB.sessions.length = SESSION_CAP;
     DB.live = null; save(true);
   }
+  if (repairSessions(DB.sessions)) save(true);
   if (tickTimer) clearInterval(tickTimer);
   tickTimer = setInterval(tick, 1000);   // 1s scene-time accrual
+}
+
+// tick() adds one second of scene time for every second the app runs a session, so the scene
+// total is how long the session really ran.
+function trackedSeconds(s) {
+  return Object.values((s && s.sceneTime) || {}).reduce((a, v) => a + (Number(v) || 0), 0);
+}
+function trackedEnd(s) {
+  const lastSample = (s.viewerSamples && s.viewerSamples.length) ? s.viewerSamples[s.viewerSamples.length - 1].t : 0;
+  return Math.max(s.lastSeenAt || 0, lastSample || 0, s.startedAt + trackedSeconds(s) * 1000) || now();
+}
+// Sessions finalized before trackedEnd() existed ended at app restart, so a broadcast the app was
+// closed in the middle of reads as 40+ hours. A session can't outlast the app running it: one that
+// is more than 30 minutes longer than its tracked time is cut back to it.
+function repairSessions(list) {
+  let changed = false;
+  (list || []).forEach((s) => {
+    const tracked = trackedSeconds(s);
+    if (!s || s.repaired || tracked < 60 || !(s.durationSec > tracked + 1800)) return;
+    s.durationSec = tracked;
+    s.endedAt = s.startedAt + tracked * 1000;
+    s.repaired = true;
+    changed = true;
+  });
+  return changed;
 }
 
 function load() {
@@ -108,6 +136,7 @@ function classifySegment(st) {
 // (segment-time + viewer-seconds so we can derive avg viewers / retention per segment).
 function tick() {
   if (!live || !live.active) return;
+  live.lastSeenAt = now();
   const st = state();
   const obs = st.obs || {};
   let scene;
@@ -117,6 +146,8 @@ function tick() {
   const seg = classifySegment(st);
   live.segmentTime[seg] = (live.segmentTime[seg] || 0) + 1;
   live.segViewerSum[seg] = (live.segViewerSum[seg] || 0) + (live._lastViewers || 0);
+  // Keep the crash snapshot current, so a session cut short by a crash keeps its real length.
+  if (++_tickCount % 60 === 0) save();
 }
 
 // Central event sink — called from server hook points.
@@ -138,7 +169,7 @@ function event(type, data) {
     case 'wheel_spin':         live.wheelSpins++; break;
     case 'minigame':           live.minigames++; break;
     case 'follow':             live.follows++; break;
-    case 'subscribe':          live.subs++; break;
+    case 'subscribe': case 'sub': case 'resub': case 'gift_sub': live.subs++; break;
     case 'raid':               live.raids++; live.raidViewers += Math.max(0, data.viewers || 0); break;
     case 'bits':               live.bits += Math.max(0, data.amount || 0); break;
     case 'disconnect':         live.disconnects.push({ t: now(), what: (data.what || '').toString().slice(0, 24) }); break;
@@ -237,6 +268,7 @@ function startSession(label) {
   if (live && live.active) return liveLight();
   live = newSession(label);
   _offlineStreak = 0;
+  try { if (typeof deps.onStart === 'function') deps.onStart(live.label); } catch (e) {}
   save(true);
   push(true);
   return liveLight();
@@ -245,7 +277,10 @@ function startSession(label) {
 function stopSession() {
   if (!live || !live.active) return null;
   live.active = false; live.endedAt = now();
+  let linked = null;
+  try { if (typeof deps.onStop === 'function') linked = deps.onStop(); } catch (e) {}
   const sess = finalize(live);
+  if (linked && linked.id) sess.adProofSessionId = linked.id;
   DB.sessions.unshift(sess);
   if (DB.sessions.length > SESSION_CAP) DB.sessions.length = SESSION_CAP;
   live = null; DB.live = null;
@@ -318,6 +353,21 @@ function overview(eventFilter) {
       avgBitrate: (function () { const hs = all.filter((x) => x.health); return hs.length ? Math.round(hs.reduce((a, x) => a + (x.health.avgBitrate || 0), 0) / hs.length) : null; })()
     },
     recent: (evF ? getSessions().filter((s) => (s.eventName || '').toLowerCase() === evF) : getSessions()).slice(0, 12),
+    // Every broadcast in time order, compact, for the Analytics charts (trend lines, per-broadcast
+    // viewers, air time by month, go-live heatmap). `curve` is the viewer curve thinned to <= 48 points.
+    series: all.slice().sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0)).map((s) => {
+      const vs = Array.isArray(s.viewerSamples) ? s.viewerSamples : [];
+      const step = Math.max(1, Math.ceil(vs.length / 48));
+      return {
+        id: s.id, label: s.label || s.eventName || '', eventName: s.eventName || '', game: s.game || '',
+        startedAt: s.startedAt || 0, durationSec: s.durationSec || 0,
+        peakViewers: s.peakViewers || 0, avgViewers: s.avgViewers || 0,
+        ads: (s.ads && s.ads.count) || 0, adSeconds: (s.ads && s.ads.totalSec) || 0, clips: s.clips || 0,
+        follows: (s.engagement && s.engagement.follows) || 0, subs: (s.engagement && s.engagement.subs) || 0,
+        dropPct: s.health ? s.health.avgDropPct : null, disconnects: (s.disconnects || []).length,
+        curve: vs.filter((_, i) => i % step === 0).map((p) => p.v || 0),
+      };
+    }),
     events: Array.from(new Set(DB.sessions.map((s) => s.eventName).filter(Boolean)))
   };
 }
@@ -331,7 +381,7 @@ function exportCsv(id) {
   if (!s) return null;
   const mmss = (x) => { x = Math.max(0, Math.round(x || 0)); const m = Math.floor(x / 60); return m + ':' + String(x % 60).padStart(2, '0'); };
   const lines = [];
-  lines.push('NE Broadcast Suite — Broadcast report');
+  lines.push('Broadcast Studio — Broadcast report');
   lines.push('Label,' + csv(s.label));
   lines.push('Game,' + csv(s.game));
   lines.push('Started,' + csv(new Date(s.startedAt).toLocaleString()));

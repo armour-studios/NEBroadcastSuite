@@ -2,11 +2,15 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>NE | Broadcast Suite</title>
+<title>NE | Broadcast Studio</title>
 <!-- Self-hosted (assets/fonts/*.woff2 already ships with the app, see overlay/fonts.css for the
      same pattern) — a CDN font load here would break at an offline LAN venue with no internet,
      the exact P1 already flagged for the overlay scenes. -->
 <link rel="stylesheet" href="styles.css">
+<!-- Interface style (Settings > Appearance): set before first paint so Modern never flashes Classic.
+     Every Modern rule in ui-modern.css is scoped to html[data-ui="modern"]. -->
+<script>try{if(localStorage.getItem('ne_ui_style')==='modern')document.documentElement.setAttribute('data-ui','modern');}catch(e){}</script>
+<link rel="stylesheet" href="ui-modern.css">
 </head>
 <body>
 
@@ -15,8 +19,8 @@
      and resolves it to the login screen or the app once the session is known. -->
 <div id="auth-gate" class="auth-gate ag-loading">
   <div class="auth-gate-card">
-    <img src="../assets/images/small.png" class="auth-gate-logo" alt="NE Broadcast Suite">
-    <h1 class="auth-gate-title">NE Broadcast Suite</h1>
+    <img src="../assets/images/small.png" class="auth-gate-logo" alt="Broadcast Studio">
+    <h1 class="auth-gate-title">Broadcast Studio</h1>
     <div class="auth-gate-tag">by Armour Studios</div>
     <!-- LOGIN state — shown to users who aren't signed in -->
     <div id="auth-gate-login" class="auth-gate-mode" style="display:none;">
@@ -65,7 +69,7 @@
       </button>
       <div class="prod-header-brand">
         <img src="../assets/images/small.png" class="brand-icon" id="brand-icon-btn" alt="NE" title="Toggle sidebar">
-        <img src="../assets/images/namelesshorizontal.png" class="brand-wordmark" alt="NE Broadcast Suite">
+        <img src="../assets/images/namelesshorizontal.png" class="brand-wordmark" alt="Broadcast Studio">
       </div>
       <div class="prod-header-game">
         <label class="prod-header-label">Game</label>
@@ -172,7 +176,7 @@
       <button class="topbar-iconbtn" id="btn-tour-help" title="Help and walkthroughs" aria-label="Help and walkthroughs">
         <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
       </button>
-      <button class="topbar-iconbtn" id="btn-obs-preview" title="OBS Program Preview">
+      <button class="topbar-iconbtn" id="btn-obs-preview" title="Program preview (what your streaming software is sending)">
         <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
       </button>
       <button class="topbar-iconbtn" id="btn-header-settings" title="Settings" style="position:relative; display:none;"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span id="upd-badge" style="display:none;position:absolute;top:5px;right:5px;width:8px;height:8px;border-radius:50%;background:var(--cp-accent,#7C3AED);border:2px solid var(--bg,#111318);"></span></button>
@@ -409,7 +413,7 @@
       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
     </span>
     <div class="dash-tour-cta-txt">
-      <strong>New to NE Broadcast Suite?</strong>
+      <strong>New to Broadcast Studio?</strong>
       <span>The two-minute quick start takes you from a fresh install to a graphic on air. Each page also has its own walkthrough under the ? button in the top bar.</span>
     </div>
     <button class="btn btn-ghost btn-sm" id="dash-tour-cta-browse">All walkthroughs</button>
@@ -419,7 +423,7 @@
   <!-- Small dismissible promo banner for Nameless Esports — the ✕ retires it for good (localStorage) -->
   <div id="dash-nameless-cta" class="dash-nameless-cta" style="display:none;">
     <img class="dash-nameless-cta-logo" src="../assets/images/nameless.png" alt="">
-    <span class="dash-nameless-cta-txt">NE Broadcast Suite is brought to you by <strong>Nameless Esports</strong></span>
+    <span class="dash-nameless-cta-txt">Broadcast Studio is brought to you by <strong>Nameless Esports</strong></span>
     <div class="dash-nameless-cta-links">
       <a class="dash-nameless-cta-pill" href="https://www.namelessesports.com" target="_blank" rel="noopener noreferrer">
         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
@@ -470,6 +474,19 @@
       <button class="btn btn-ghost btn-sm" id="dbk-dup" title="Duplicate the active brand kit">Duplicate</button>
       <button class="btn btn-primary btn-sm" id="dbk-new" title="Create a new brand kit">+ New</button>
     </div>
+    <!-- Modern: the second row of the ONE brand panel: the game overlay in use and the overlay
+         colours (overlays-page.js renderLookPrev fills .dbk-look-ov). Replaces the separate
+         "Brand and overlay" Dashboard card. -->
+    <div class="dbk-look mx-only">
+      <div class="dbk-look-ov" id="dbk-look-ov"></div>
+      <div class="dbk-look-colors"><span class="dbk-look-k">Overlay colours</span>
+        <div class="dbk-cmode" role="group" aria-label="Overlay colours">
+          <button type="button" data-cmode="team" title="Each team's own colour">Teams</button>
+          <button type="button" data-cmode="brand" title="The brand kit's colours on both sides">Brand</button>
+          <button type="button" data-cmode="default" title="The game's standard side colours">Game</button>
+          <button type="button" data-cmode="game" title="The colours the teams wear in the game">In-game</button>
+        </div></div>
+    </div>
   </div>
 
   <!-- Dashboard widget grid -->
@@ -505,8 +522,8 @@
       <button class="ev-plat-tab" data-plat="faceit" title="Load a FACEIT championship or hub">
         <span class="ev-plat-word">FACEIT</span>
       </button>
-      <button class="ev-plat-tab" data-plat="league" title="Your own league or tournament: a Google Sheet, your website's feed, or one you run in this app">
-        <span class="ev-plat-word">MY LEAGUE</span>
+      <button class="ev-plat-tab" data-plat="league" title="A schedule kept in a Google Sheet, or another site's JSON feed">
+        <span class="ev-plat-word">SHEET / FEED</span>
       </button>
     </div>
 
@@ -615,7 +632,7 @@
       <div class="evl-status" id="ev-league-link-status"></div>
 
       <div class="evl-or">or a league you run here</div>
-      <div class="evl-row">
+      <div class="evl-row evl-row--inapp">
         <select id="ev-league-pick" class="input-select" aria-label="League"></select>
         <button class="btn btn-secondary btn-sm" id="ev-league-golive" type="button">Go live</button>
         <button class="btn btn-ghost btn-sm" id="ev-league-new" type="button">+ New</button>
@@ -1342,7 +1359,7 @@
             <div class="msp-rl-section-hd"><span class="msp-rl-step">•</span> Rocket League <span class="msp-rl-when">look &amp; stats for this match</span></div>
             <div class="msp-rl-row">
 
-              <div class="msp-rl-cell">
+              <div class="msp-rl-cell msp-rl-cell--design">
                 <p class="msp-label">Overlay style <span class="msp-hint">(in-game HUD)</span></p>
                 <select id="select-design-match" class="input-text msp-input"></select>
                 <p class="msp-hint">Which HUD layout the in-game overlay draws. Same setting as the header picker.</p>
@@ -2216,7 +2233,7 @@
             <p class="dc-note" id="cf-dc-note"></p>
           </div>
           <div class="dc-idle" id="cf-dc-idle">
-            <p class="dc-idle-note">No rooms active yet &mdash; go to <strong>Staging</strong> to set up teams and crew, or <strong>Lobby</strong> to invite guests. Monitoring starts as people connect.</p>
+            <p class="dc-idle-note">No rooms active yet. Make team and desk rooms under <strong>Cameras</strong> and send the join links; monitoring starts as people connect.</p>
           </div>
         </div>
 
@@ -2243,10 +2260,6 @@
                 <select class="input-select" id="cf-dc-lang" style="font-size:12px;min-width:130px;">
                   <option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="es-ES">Spanish</option><option value="fr-FR">French</option><option value="de-DE">German</option><option value="pt-BR">Portuguese (BR)</option><option value="it-IT">Italian</option><option value="ja-JP">Japanese</option><option value="ko-KR">Korean</option>
                 </select>
-              </div>
-              <div class="dc-set-row"><label style="font-size:11px;color:var(--muted);flex:1;">OBS audio routing</label>
-                <select class="input-select" id="cf-dc-obs-audio" style="font-size:12px;"><option value="combined">Combined (one track)</option><option value="separated">Separated (per-cam tracks)</option></select>
-                <button class="btn btn-secondary btn-xs" id="cf-dc-obs-apply">Save&hellip;</button>
               </div>
             </div>
           </div>
@@ -2473,7 +2486,7 @@
     <!-- Players sub-tab retired: player cam assignment lives natively in Match — Teams
          (gear ▸ In-Game Player Cams) and the Talent Monitor's Players tab — the same shared
          panel. The hidden button + panel markup stay so legacy render functions are safe. -->
-    <button type="button" class="cf-tab" data-cf="players" style="display:none;">Players</button>
+    <button type="button" class="cf-tab" data-cf="players" title="Link each in-game player to their camera">Player cams</button>
     <button type="button" class="cf-tab active" data-cf="talent">Talent Rooms</button>
     <button type="button" class="cf-tab" data-cf="stations" id="cf-tab-stations" style="display:none;">Stations</button>
     <button type="button" class="cf-tab" data-cf="gameplay">Gameplay</button>
@@ -2483,28 +2496,29 @@
   <!-- ───────────── PLAYERS (retired — hidden sub-tab; see note in cf-subnav) ───────────── -->
   <div class="cf-panel" id="cf-panel-players">
   <div id="facecams-disabled-warning" style="display: none; background: #c53030; color: white; padding: 10px 15px; border-radius: 8px; margin: 0 15px 20px 15px; font-weight: 600; align-items: center; gap: 10px;">
-    <span>Facecams are currently disabled in Settings. They will not be visible on the overlay.</span>
+    <span style="flex:1;">Player cams are switched off, so the HUD shows no cameras at all.</span>
+    <button type="button" class="btn btn-sm" data-empty-click="cf-facecams-enabled" style="background:#fff;color:#c53030;font-weight:800;">Turn on</button>
   </div>
   <!-- Unified In-Game Player Cams — the SAME panel as Match — Teams (gear) and the Talent
        Monitor's Players tab, so cam assignment works identically everywhere. -->
   <section class="section">
     <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
-      <h3 class="section-title" style="flex:1; margin:0;">In-Game Player Cams</h3>
+      <h3 class="section-title" style="flex:1; margin:0;">Player cams</h3>
+      <label class="qt-toggle" title="Show player cameras on the HUD (same setting as Settings, Enable facecams)" style="margin:0;">
+        <span>Show on HUD</span>
+        <label class="switch"><input type="checkbox" id="cf-facecams-enabled" checked><span class="slider"></span></label>
+      </label>
       <button class="btn btn-ghost btn-sm" id="cfp-playercams-automatch" type="button" title="Link every in-game name to the roster player or crew member with the same name">Auto-link by name</button>
       <button class="btn btn-ghost btn-sm" id="cfp-playercams-refresh" type="button">Refresh</button>
     </div>
-    <p class="section-desc" style="margin:0 0 10px; max-width:680px;">Link each live in-game name to a cam feed — the HUD overlays show the mapped cam for whoever is being spectated. The same panel lives in <strong>Match — Teams ▸ gear</strong> and the Dashboard <strong>Talent Monitor ▸ Players</strong> tab.</p>
+    <p class="section-desc" style="margin:0 0 10px; max-width:680px;">Pick a camera for each player. The Rocket League and CS2 HUDs show the camera of whoever is being spectated. With the game open and spectating, the names come straight from the game, so they always match.</p>
     <div id="cfp-playercams-rows" class="playercams-rows"></div>
     <p class="msp-hint" id="cfp-playercams-status"></p>
   </section>
 
-  <section class="section">
+  <section class="section" style="display:none;">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; gap:14px; flex-wrap:wrap;">
       <h3 class="section-title" style="margin-bottom:0;">Manual facecam editor <span style="font-size:11px;color:var(--muted);font-weight:600;">(legacy — the panel above is the quick way)</span></h3>
-      <label class="qt-toggle" title="Show player facecams on the overlay (same setting as Settings → Enable Facecams)" style="margin-left:auto;">
-        <span>Show on overlay</span>
-        <label class="switch"><input type="checkbox" id="cf-facecams-enabled" checked><span class="slider"></span></label>
-      </label>
       <div class="facecam-mode-bar" style="margin-bottom:0; border:none; background:transparent; padding:0;">
         <span class="field-label" style="white-space:nowrap;">Mode:</span>
         <div class="best-of-options">
@@ -2697,9 +2711,10 @@
   </section>
 
   <section class="section">
-    <h3 class="section-title">Saved Facecams</h3>
+    <h3 class="section-title">All saved player cams</h3>
+    <p class="section-desc" style="margin:-4px 0 10px;">Every camera link you have saved, including players who are not in this match. Delete the ones you no longer need.</p>
     
-    <div class="add-facecam-form" style="background: rgba(255,255,255,0.03); padding: 12px; border-radius: 8px; border: 1px dashed var(--border); margin-bottom: 16px;">
+    <div class="add-facecam-form" style="display:none; background: rgba(255,255,255,0.03); padding: 12px; border-radius: 8px; border: 1px dashed var(--border); margin-bottom: 16px;">
       <div style="display: grid; grid-template-columns: 1fr 120px; gap: 8px; margin-bottom: 8px;">
         <input type="text" id="add-fc-name" class="input-text" placeholder="Player Name or ID...">
         <select id="add-fc-platform" class="input-select">
@@ -3794,227 +3809,42 @@
 
 <!-- ════════════════════════════════════════════ TAB: REPLAYS ═══ -->
 <div id="tab-replays-content" class="tab-content">
-  <div class="page-head"><h1>Replays</h1><p>Capture a replay from the OBS replay buffer, trim it, then show it now or add it to a playlist.</p></div>
+  <div class="page-head"><h1>Replays</h1><p>Capture moments during the game, play them back on air, and build highlight reels for the breaks.</p></div>
 
-  <!-- Capture strip: the whole workflow starts here. Capture = save the OBS buffer AND import the
-       clip in one step (starts the buffer first if it's off); the new clip opens in Trim. -->
-  <div class="rp-capture-strip" id="rp-capture-strip">
-    <span class="dmobs-pill" id="rp-buffer-pill">Buffer Off</span>
-    <button class="btn btn-secondary btn-sm" id="rp-buffer-toggle" title="Start/stop the OBS replay buffer">Start Buffer</button>
-    <button class="btn btn-danger rp-capture-btn" id="rp-capture" title="Save the last seconds of the OBS replay buffer and open the clip in Trim (starts the buffer if it's off)">Capture Replay</button>
-    <span class="rp-capture-status" id="rp-capture-status"></span>
-    <span style="flex:1"></span>
-    <ol class="rp-flow-steps" aria-label="Workflow">
-      <li>Capture</li><li>Trim</li><li>Show now or add to playlist</li>
-    </ol>
-  </div>
+  <!-- Replay deck: capture, what's on air, and how replays play out. Everything a producer needs
+       mid-game without scrolling. Every control keeps the id the rest of the app drives. -->
+  <section class="rpx-deck" id="rp-capture-strip">
+    <div class="rpx-deck-row">
+      <div class="rpx-deck-capture">
+        <span class="dmobs-pill" id="rp-buffer-pill">Buffer Off</span>
+        <button class="btn btn-secondary btn-sm" id="rp-buffer-toggle" title="Start/stop the OBS replay buffer">Start Buffer</button>
+        <button class="btn btn-danger rp-capture-btn" id="rp-capture" title="Save the last seconds of the replay buffer as a new moment (starts the buffer if it's off)">Capture</button>
+        <span class="rp-capture-status" id="rp-capture-status"></span>
+      </div>
+      <div class="rpx-onair" id="rpx-onair">
+        <span class="rpx-onair-tag" id="rpx-onair-tag">Off air</span>
+        <span id="rp-screen-status" class="rpx-onair-text"></span>
+        <button class="btn btn-secondary btn-sm" id="rp-stop-program" title="Stop what's on air (incl. a looping clip) and return to the scene marked for return" style="display:none;">Stop</button>
+        <button class="btn btn-danger btn-sm" id="rp-pool-stopall" style="display:none;" title="Stop the running sequence and return">Stop</button>
+      </div>
+      <button class="btn btn-ghost btn-sm rpx-gear" id="rp-settings-toggle" title="Replay settings: capture, auto-clipping and the replay folder">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span>Settings</span>
+      </button>
+    </div>
 
-  <div id="rp-panel-editor">
-
-  <!-- 3-pane editor -->
-  <div class="rp-editor">
-
-    <!-- ── Pane 1: Staging Area (OBS replay folder) ── -->
-    <section class="rp-pane rp-pane-staging" style="display:flex;flex-direction:column;gap:0;padding:0;overflow:hidden;">
-
-      <!-- Header -->
-      <div class="rp-staging-hdr">
-        <div style="display:flex;align-items:center;gap:8px;">
-          <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="14" height="10" rx="1.5"/><path d="M5 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1"/></svg>
-          <span class="rp-staging-title"><span class="rp-step-num">1</span> Captured</span>
-          <span id="rp-staging-count" class="rp-staging-badge"></span>
-        </div>
-        <button class="btn btn-ghost btn-xs" id="rp-scan-folder" title="Refresh OBS replay folder">Refresh</button>
+    <div class="rpx-deck-row rpx-deck-setup">
+      <div class="rp-onair-prog">
+        <label class="rp-mini-label" for="rp-program-scene">Plays in</label>
+        <select id="rp-program-scene" class="input-select" title="When a replay goes on air, OBS switches to this scene automatically"><option value="">none</option></select>
+        <label class="qt-toggle" title="Loop whatever's on air — the clip or the playlist"><span>Loop</span><span class="switch"><input type="checkbox" id="rp-loop"><span class="slider"></span></span></label>
+        <label class="qt-toggle" title="When a replay finishes (and isn't looping), switch OBS back to the scene that was live before"><span>Return</span><span class="switch"><input type="checkbox" id="rp-return-scene" checked><span class="slider"></span></span></label>
       </div>
 
-      <!-- Every file in the OBS replay folder (Capture + OBS-hotkey saves); settings live in Settings ▸ Replays. -->
-
-      <!-- Search filter -->
-      <div style="padding:5px 8px;border-bottom:1px solid var(--border);">
-        <input type="text" id="rp-clip-search" class="input-text" placeholder="Filter clips…" style="width:100%;padding:5px 9px;font-size:12px;">
-      </div>
-
-      <!-- Multi-select bulk-action bar (shown when clips are checked) -->
-      <div id="rp-stage-bulk" class="rp-stage-bulk" style="display:none;">
-        <span id="rp-stage-bulk-count">0 selected</span>
-        <span style="flex:1"></span>
-        <button class="btn btn-ghost btn-xs" id="rp-stage-bulk-clear">Clear</button>
-        <button class="btn btn-danger btn-xs" id="rp-stage-bulk-del">Delete selected</button>
-      </div>
-
-      <!-- File list (auto-filled from OBS folder) -->
-      <div id="rp-staging-list" class="rp-staging-list"></div>
-
-      <!-- Status bar -->
-      <div id="clips-status" class="rp-staging-status"></div>
-    </section>
-
-    <!-- ── Pane 2: Trim ── -->
-    <section class="rp-pane" id="clip-preview-card" style="overflow-y:auto;max-height:calc(100vh - 220px);min-height:0;display:flex;flex-direction:column;">
-      <div class="rp-pane-head" style="margin-bottom:8px;">
-        <div style="display:flex;flex-direction:column;gap:1px;">
-          <h3 style="margin:0;" id="rp-editor-title"><span class="rp-step-num">2</span> Trim</h3>
-          <span id="clip-preview-name" style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;"></span>
-        </div>
-        <div style="display:flex;gap:6px;align-items:center;margin-left:auto;">
-          <select id="rp-speed" class="input-select" style="width:72px;padding:4px 6px;font-size:12px;">
-            <option value="0.25">0.25×</option><option value="0.5">0.5×</option>
-            <option value="1" selected>1×</option><option value="1.5">1.5×</option><option value="2">2×</option>
-          </select>
-          <button class="btn btn-ghost btn-xs" id="rp-settings-toggle" title="Settings — capture, clipping & playlist output">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-          </button>
-        </div>
-      </div>
-
-      <!-- On-air: send to Preview / Program + the playout controls (moved here from the old top bar) -->
-      <div class="rp-onair">
-        <div class="rp-onair-send">
-          <button class="btn btn-warning btn-sm" id="rp-to-preview" title="Cue to the Preview bus (an OBS preview source) without going live">Preview</button>
-          <button class="btn btn-danger btn-sm" id="rp-to-program" title="Show this clip on stream now (uses the trim points)">Show Now</button>
-          <button class="btn btn-secondary btn-sm" id="rp-stop-program" title="Stop what's on air (incl. a looping clip) and return to the scene marked for return" style="display:none;">Stop</button>
-        </div>
-        <div class="rp-onair-prog">
-          <label class="field-label" style="margin:0;" for="rp-program-scene">Scene</label>
-          <select id="rp-program-scene" class="input-select" style="flex:0 1 200px;min-width:120px;padding:5px 8px;font-size:12px;" title="When you send a clip or playlist To Air, OBS switches to this scene automatically"><option value="">none</option></select>
-          <label class="qt-toggle" style="margin:0;" title="Loop whatever's on air — the clip or the playlist"><span>Loop</span><span class="switch"><input type="checkbox" id="rp-loop"><span class="slider"></span></span></label>
-          <label class="qt-toggle" style="margin:0;" title="When a replay finishes (and isn't looping), switch OBS back to the scene that was live before"><span>Return</span><span class="switch"><input type="checkbox" id="rp-return-scene" checked><span class="slider"></span></span></label>
-        </div>
-        <span id="rp-screen-status" class="director-status-line" style="margin:0;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></span>
-        <!-- Playout readiness: does the chosen scene actually hold the replay-player browser source?
-             Without it, To Air switches the scene and streams the clip to a source that isn't there —
-             everything "succeeds" and the viewer sees nothing. Checked live against OBS. -->
-        <div class="rp-ready" id="rp-ready" style="display:none;">
-          <span class="rp-ready-dot" id="rp-ready-dot"></span>
-          <span class="rp-ready-text" id="rp-ready-text"></span>
-          <button class="btn btn-primary btn-xs" id="rp-ready-fix" style="display:none;" title="Add the replay-player browser source to the selected scene in OBS">Add player to OBS</button>
-          <button class="btn btn-ghost btn-xs" id="rp-ready-recheck" title="Re-check OBS">Re-check</button>
-        </div>
-      </div>
-
-      <!-- Playlist preview strip — shown while a whole playlist (Replays or Highlights) is being
-           watched in THIS player. Local only: it auto-advances clip to clip using each clip's trim
-           points and never touches the on-air buses. -->
-      <div class="rp-plprev-bar" id="rp-plprev-bar" style="display:none;">
-        <span class="rp-plprev-tag">PREVIEW</span>
-        <span class="rp-plprev-name" id="rp-plprev-name"></span>
-        <span style="flex:1"></span>
-        <button class="btn btn-ghost btn-xs" id="rp-plprev-prev" title="Previous clip">&#8249;</button>
-        <button class="btn btn-ghost btn-xs" id="rp-plprev-next" title="Next clip">&#8250;</button>
-        <button class="btn btn-secondary btn-xs" id="rp-plprev-exit" title="Leave playlist preview (back to single-clip editing)">Exit</button>
-      </div>
-
-      <!-- Condensed clip metadata (above the video) -->
-      <div class="rp-meta-bar">
-        <div class="rp-meta-row">
-          <input type="text" id="rp-title" class="input-text" placeholder="Clip title…" style="flex:2;min-width:140px;">
-          <input type="text" id="rp-map" class="input-text" placeholder="Map / context…" style="flex:1;min-width:120px;">
-        </div>
-        <div class="rp-meta-row">
-          <div id="rp-tags" class="rp-tags"></div>
-          <input type="text" id="rp-tag-input" class="input-text" placeholder="+ tag, Enter (trains auto-clip AI)…" style="flex:1;min-width:150px;">
-        </div>
-        <div class="rp-meta-row">
-          <textarea id="rp-desc" class="input-text" rows="1" placeholder="Notes…" style="flex:1;min-width:160px;resize:vertical;"></textarea>
-        </div>
-        <div class="rp-meta-row rp-addpl-row">
-          <span class="rp-mini-label" style="margin:0;white-space:nowrap;">Add to playlist</span>
-          <select id="rp-add-to-playlist-sel" class="input-select" style="flex:1;min-width:120px;padding:5px 8px;font-size:12px;">
-            <option value="">New playlist…</option>
-          </select>
-          <button class="btn btn-primary btn-sm" id="rp-save-playlist" title="Add this clip to the selected playlist (or create a new one)">+ Add</button>
-        </div>
-      </div>
-
-      <!-- Video player. Our own transport bar, NOT the browser's `controls`: Chromium renders a
-           different control set depending on whether it has decoded a video frame yet (a big file
-           that has only loaded metadata gets the compact, audio-style bar with no fullscreen
-           button), so the editor appeared to have two different players depending on the clip. -->
-      <div class="rp-player-wrap">
-        <video id="clip-preview-video" preload="auto" crossorigin="anonymous" playsinline></video>
-      </div>
-      <div class="rp-vt" id="rp-vt">
-        <button class="rp-vt-btn rp-vt-play" id="rp-vt-play" title="Play / pause (Space)" aria-label="Play">
-          <svg class="rp-vt-i-play" viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-          <svg class="rp-vt-i-pause" viewBox="0 0 24 24" width="15" height="15" fill="currentColor" style="display:none;"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>
-        </button>
-        <span class="rp-vt-time" id="rp-vt-time">0:00 / 0:00</span>
-        <input type="range" class="rp-vt-seek" id="rp-vt-seek" min="0" max="1000" value="0" step="1" title="Scrub" aria-label="Seek">
-        <button class="rp-vt-btn" id="rp-vt-mute" title="Mute / unmute" aria-label="Mute">
-          <svg class="rp-vt-i-vol" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" stroke="none"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
-          <svg class="rp-vt-i-muted" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" stroke="none"/><line x1="22" y1="9" x2="16" y2="15"/><line x1="16" y1="9" x2="22" y2="15"/></svg>
-        </button>
-        <input type="range" class="rp-vt-vol" id="rp-vt-vol" min="0" max="100" value="100" step="1" title="Volume" aria-label="Volume">
-        <button class="rp-vt-btn" id="rp-vt-full" title="Fullscreen" aria-label="Fullscreen">
-          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
-        </button>
-      </div>
-
-      <!-- Visual trim bar -->
-      <div class="rp-trim-bar-wrap" id="rp-trim-wrap">
-        <div class="rp-trim-bar-track" id="rp-trim-track">
-          <div class="rp-trim-filmstrip" id="rp-trim-filmstrip"></div>
-          <div class="rp-trim-region" id="rp-trim-region"></div>
-          <div class="rp-trim-handle rp-trim-in"  id="rp-trim-handle-in"  title="Drag to set in-point (I)"></div>
-          <div class="rp-trim-handle rp-trim-out" id="rp-trim-handle-out" title="Drag to set out-point (O)"></div>
-          <div class="rp-trim-playhead" id="rp-trim-playhead"></div>
-          <div class="rp-trim-time-tip" id="rp-trim-time-cur"></div>
-        </div>
-        <div class="rp-trim-labels">
-          <span id="rp-trim-t0">0:00.0</span>
-          <span style="color:var(--cp-accent);">In: <b id="clip-trim-in-val">0:00.0</b></span>
-          <span style="color:var(--cp-accent);">Out: <b id="clip-trim-out-val">end</b></span>
-          <span id="rp-trim-dur">0:00.0</span>
-        </div>
-      </div>
-
-      <!-- Quick action row -->
-      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
-        <button class="btn btn-secondary btn-xs" id="clip-set-in" title="Set in-point to playhead (I)">Set In</button>
-        <button class="btn btn-ghost btn-xs" id="clip-go-in" title="Jump to in-point">‹ In</button>
-        <button class="btn btn-ghost btn-xs" id="clip-go-out" title="Jump to out-point">Out ›</button>
-        <button class="btn btn-secondary btn-xs" id="clip-set-out" title="Set out-point to playhead (O)">Set Out</button>
-        <button class="btn btn-ghost btn-xs" id="clip-trim-clear" title="Clear trim (C)">Clear</button>
-        <span style="flex:1"></span>
-        <button class="btn btn-blue btn-xs" id="clip-trim-save">Save edit</button>
-      </div>
-
-      <!-- Keyboard shortcuts hint -->
-      <div class="rp-shortcut-bar">
-        <span class="rp-sc-item"><span class="rp-sc-key">Space</span> play/pause</span>
-        <span class="rp-sc-item"><span class="rp-sc-key">I</span> set in</span>
-        <span class="rp-sc-item"><span class="rp-sc-key">O</span> set out</span>
-        <span class="rp-sc-item"><span class="rp-sc-key">J</span> rew</span>
-        <span class="rp-sc-item"><span class="rp-sc-key">L</span> fwd</span>
-        <span class="rp-sc-item"><span class="rp-sc-key">←→</span> ±1 frame</span>
-      </div>
-    </section>
-
-    <!-- ── Pane 3: Replays / Highlights clip pool + Playlists ── -->
-    <section class="rp-pane" style="display:flex;flex-direction:column;gap:0;padding:0;overflow:hidden;">
-
-      <!-- Pool header -->
-      <div class="rp-staging-hdr">
-        <div style="display:flex;align-items:center;gap:8px;">
-          <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="4" x2="11" y2="4"/><line x1="2" y1="8" x2="11" y2="8"/><line x1="2" y1="12" x2="8" y2="12"/><path d="M13 6v6l4-3z" fill="currentColor" stroke="none"/></svg>
-          <span class="rp-staging-title"><span class="rp-step-num">3</span> Clips &amp; Playlists</span>
-        </div>
-      </div>
-
-      <!-- Two-shelf toggle: Replays = raw capture pool (instant-replay clips during the match),
-           Highlights = curated pool you promote keepers into and build the event reel from. -->
-      <div class="rp-folder-tabs" id="rp-folder-tabs">
-        <button type="button" class="rp-folder-tab active" data-folder="replays" title="Raw clips — instant replays during the match">Replays<span class="rp-folder-live" data-folder-live="replays"></span></button>
-        <button type="button" class="rp-folder-tab" data-folder="highlights" title="Curated clips — the pool you build the event reel from">Highlights<span class="rp-folder-live" data-folder-live="highlights"></span></button>
-        <button type="button" class="rp-folder-tab" data-view="playlists" title="Encoded reels built from this shelf's clips">Playlists</button>
-      </div>
-
-      <!-- Always visible (not selection-gated) — governs EVERY pool push, single or bulk: each row's
-           own To Air button AND the bulk bar's To Air below both read this. Logo picker appears only
-           when Logo is chosen; falls back to the active brand logo when nothing's picked. -->
+      <!-- Governs every push from Moments / Highlights / Up next: a single clip, Play all or Roll. -->
       <div class="rp-pool-transition-row" id="rp-pool-transition-row">
         <label class="rp-mini-label" for="rp-pool-transition">Transition</label>
-        <select id="rp-pool-transition" class="input-select rp-pool-transition-sel" title="How a clip eases in when pushed live from this pool — single To Air, bulk, or Play all">
+        <select id="rp-pool-transition" class="input-select rp-pool-transition-sel" title="How a replay eases in when it goes on air">
           <option value="cut">Cut</option>
           <option value="fade" selected>Fade</option>
           <option value="logo">Logo</option>
@@ -4028,10 +3858,10 @@
         </div>
         <!-- Stinger video: played over the top by the replay player, with the clip underneath
              swapping at the transition point (ms into the sting; 0 = halfway, OBS's convention). -->
-        <div id="rp-pool-stinger-row" style="display:none;gap:6px;align-items:center;flex-wrap:wrap;width:100%;">
+        <div id="rp-pool-stinger-row" style="display:none;gap:6px;align-items:center;flex-wrap:wrap;">
           <input type="file" id="rp-pool-stinger-file" accept="video/*,.webm,.mp4,.mov" class="input-file-hidden">
           <label for="rp-pool-stinger-file" class="btn btn-secondary btn-xs">Upload stinger&hellip;</label>
-          <span id="rp-pool-stinger-name" style="font-size:11px;color:var(--muted);flex:1;min-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">No stinger uploaded</span>
+          <span id="rp-pool-stinger-name" class="rpx-muted-name">No stinger uploaded</span>
           <label class="rp-mini-label" for="rp-pool-stinger-point" title="How far into the stinger the clip underneath swaps. 0 = halfway.">Point (ms)</label>
           <input type="number" id="rp-pool-stinger-point" class="input-text" min="0" step="50" value="0" style="width:78px;padding:4px 6px;font-size:11px;">
           <button class="btn btn-ghost btn-xs" id="rp-pool-stinger-clear" title="Remove the uploaded stinger">Clear</button>
@@ -4039,45 +3869,76 @@
         <!-- OBS transition: OBS itself performs the transition (incl. an OBS stinger transition) on
              the cut TO the replay scene. Clip-to-clip advances happen inside one scene, so they
              can't use it — that's what the stinger-video option above is for. -->
-        <div id="rp-pool-obstrans-row" style="display:none;gap:6px;align-items:center;flex-wrap:wrap;width:100%;">
-          <select id="rp-pool-obstrans" class="input-select" style="flex:1;min-width:130px;padding:4px 6px;font-size:11px;" title="An OBS transition from your scene collection — armed just before the cut to the replay scene"></select>
+        <div id="rp-pool-obstrans-row" style="display:none;gap:6px;align-items:center;flex-wrap:wrap;">
+          <select id="rp-pool-obstrans" class="input-select" style="min-width:130px;padding:4px 6px;font-size:11px;" title="An OBS transition from your scene collection — armed just before the cut to the replay scene"></select>
           <label class="rp-mini-label" for="rp-pool-obstrans-dur">Duration (ms)</label>
           <input type="number" id="rp-pool-obstrans-dur" class="input-text" min="0" step="50" value="500" style="width:78px;padding:4px 6px;font-size:11px;" title="Ignored by OBS stinger transitions — they carry their own timing">
-          <span id="rp-pool-obstrans-hint" style="font-size:10.5px;color:var(--muted);width:100%;line-height:1.35;">Connect OBS to list its transitions.</span>
+          <span id="rp-pool-obstrans-hint" class="rpx-muted-name">Connect OBS to list its transitions.</span>
         </div>
       </div>
+    </div>
 
-      <!-- Multi-select bulk-action bar (shown when clips are checked) — grouped live/organize/
-           destructive, left to right. -->
+    <!-- Playout readiness: does the chosen scene actually hold the replay-player browser source?
+         Without it, a replay switches the scene and streams the clip to a source that isn't there —
+         everything "succeeds" and the viewer sees nothing. Checked live against OBS. -->
+    <div class="rp-ready" id="rp-ready" style="display:none;">
+      <span class="rp-ready-dot" id="rp-ready-dot"></span>
+      <span class="rp-ready-text" id="rp-ready-text"></span>
+      <button class="btn btn-primary btn-xs" id="rp-ready-fix" style="display:none;" title="Add the replay-player browser source to the selected scene in OBS">Add player to OBS</button>
+      <button class="btn btn-ghost btn-xs" id="rp-ready-recheck" title="Re-check OBS">Re-check</button>
+    </div>
+  </section>
+
+  <!-- Up next: moments lined up for the next stoppage, rolled back to back with one press. -->
+  <section class="rpx-queue" id="rpx-queue">
+    <div class="rpx-queue-head">
+      <span class="rpx-queue-title">Up next</span>
+      <span class="rpx-queue-count" id="rpx-queue-count"></span>
+      <span style="flex:1"></span>
+      <button class="btn btn-ghost btn-xs" id="rpx-queue-clear" title="Empty the queue">Clear</button>
+      <button class="btn btn-danger btn-sm" id="rpx-queue-roll" title="Play the queued moments back to back on air, then empty the queue">Roll</button>
+    </div>
+    <div class="rpx-queue-list" id="rpx-queue-list"></div>
+  </section>
+
+  <div class="rpx-body" id="rp-panel-editor">
+
+    <!-- ── Library: Moments · Highlights · Playlists · OBS folder ── -->
+    <section class="rp-pane rpx-library">
+      <div class="rp-folder-tabs" id="rp-folder-tabs">
+        <button type="button" class="rp-folder-tab active" data-folder="replays" title="Everything captured this show, newest first">Moments<span class="rpx-tab-count" id="rpx-count-replays"></span><span class="rp-folder-live" data-folder-live="replays"></span></button>
+        <button type="button" class="rp-folder-tab" data-folder="highlights" title="The moments you starred, in reel order">Highlights<span class="rpx-tab-count" id="rpx-count-highlights"></span><span class="rp-folder-live" data-folder-live="highlights"></span></button>
+        <button type="button" class="rp-folder-tab" data-view="playlists" title="Saved playlists: ad breaks, reels and anything you play in order">Playlists<span class="rpx-tab-count" id="rpx-count-playlists"></span></button>
+        <button type="button" class="rp-folder-tab" data-view="obsfolder" title="Files in the OBS replay folder, including ones saved with OBS's own hotkey">OBS folder<span class="rpx-tab-count" id="rp-staging-count"></span></button>
+      </div>
+
+      <!-- Moments / Highlights toolbar -->
+      <div class="rp-shelf-actions" id="rp-pool-shelf-actions">
+        <button class="btn btn-danger btn-xs" id="rp-pool-playall" title="Play every clip on this tab back to back on air, in the order shown">&#9654; Play all</button>
+        <button class="btn btn-ghost btn-xs" id="rp-pool-selectall" title="Select every clip on this tab (then play, copy, make a playlist or delete them together)">Select all</button>
+        <span style="flex:1"></span>
+        <button class="btn btn-ghost btn-xs" id="rp-clear-pool" title="Remove every clip on this tab">Clear</button>
+      </div>
+
+      <!-- Multi-select bulk-action bar (shown when clips are checked). -->
       <div id="rp-pool-bulk" class="rp-pool-bulk" style="display:none;">
         <div class="rp-pool-bulk-row">
           <span id="rp-pool-bulk-count" class="rp-pool-bulk-count"></span>
-          <button class="btn btn-danger btn-sm" id="rp-pool-bulk-air" title="Play the selected clips back-to-back on air, in the order checked — no playlist or encode needed">&#9654; To Air</button>
-          <button class="btn btn-ghost btn-sm" id="rp-pool-bulk-copy" title="Copy the selected clips onto the other shelf (originals stay)">Copy &rarr; Highlights</button>
-          <button class="btn btn-primary btn-sm" id="rp-pool-bulk-makepl" title="Encode the selected clips into one playlist — a separate step from just being in the pool">Make Playlist</button>
+          <button class="btn btn-danger btn-sm" id="rp-pool-bulk-air" title="Play the selected clips back to back on air, in the order checked">&#9654; To Air</button>
+          <button class="btn btn-ghost btn-sm" id="rp-pool-bulk-queue" title="Add the selected clips to Up next">+ Up next</button>
+          <button class="btn btn-ghost btn-sm" id="rp-pool-bulk-copy" title="Copy the selected clips to Highlights (originals stay)">Copy &rarr; Highlights</button>
+          <button class="btn btn-primary btn-sm" id="rp-pool-bulk-makepl" title="Save the selected clips as a playlist">Make Playlist</button>
           <span style="flex:1"></span>
           <button class="btn btn-ghost btn-xs" id="rp-pool-bulk-clearsel" title="Deselect all">Deselect</button>
-          <button class="btn btn-danger btn-xs" id="rp-pool-bulk-del" title="Delete the selected clips">Delete selected</button>
+          <button class="btn btn-danger btn-xs" id="rp-pool-bulk-del" title="Delete the selected clips">Delete</button>
         </div>
       </div>
 
-      <!-- Shelf-level pool actions. "Play all" runs the whole shelf back-to-back on air through the
-           same per-clip engine the bulk To Air uses — no playlist, no encode, no multi-select first. -->
-      <div class="rp-shelf-actions" id="rp-pool-shelf-actions">
-        <button class="btn btn-danger btn-xs" id="rp-pool-playall" title="Play every clip in this pool back-to-back on air, in the order shown — no playlist or encode needed">&#9654; Play all</button>
-        <button class="btn btn-danger btn-xs" id="rp-pool-stopall" style="display:none;" title="Stop the running sequence and return">&#9632; Stop</button>
-        <button class="btn btn-ghost btn-xs" id="rp-pool-selectall" title="Check every clip in this pool (then use the bulk bar to play a subset, copy, or make a playlist)">Select all</button>
-        <button class="btn btn-ghost btn-xs" id="rp-clear-pool" title="Remove all clips from this pool">Clear pool</button>
-      </div>
+      <!-- Moment cards. Click a card to open it in the player. -->
+      <div id="rp-clip-pool" class="rp-clip-pool rpx-grid"></div>
 
-      <!-- Clip pool grid — click a clip to load it in Trim (trim + To Air/Preview work
-           on it directly, no playlist needed). Card styling matches Staging's list. -->
-      <div id="rp-clip-pool" class="rp-clip-pool"></div>
-
-      <!-- Playlists — now the third tab of this section (multi-select clips above and "Make
-           Playlist" to combine them into one encoded video). The old inline collapse toggle is kept
-           in the DOM but hidden: the tab owns the show/hide, and hiding rather than deleting keeps
-           rpSetPlaylistsSectionExpanded (called from a dozen places) working untouched. -->
+      <!-- Playlists tab. The inline collapse toggle is kept in the DOM but hidden: the tab owns the
+           show/hide, and hiding rather than deleting keeps rpSetPlaylistsSectionExpanded working. -->
       <div class="rp-pl-section" id="rp-pl-section">
         <button type="button" class="rp-pl-section-toggle" id="rp-pl-section-toggle" style="display:none;">
           <span id="rp-pl-section-chev">&#9656;</span> Playlists on this shelf
@@ -4087,9 +3948,8 @@
           <div class="rp-staging-hdr">
             <div style="display:flex;align-items:center;gap:8px;">
               <span class="rp-staging-title">Playlists</span>
-              <!-- Which shelf's reels are listed. Playlists belong to a shelf (Replays / Highlights)
-                   exactly as clips do; this flips it without leaving the tab. -->
-              <button type="button" class="btn btn-ghost btn-xs" id="rp-pl-shelf-switch" title="Show the other shelf's playlists">Replays shelf &#8646;</button>
+              <!-- Which shelf's playlists are listed (Moments / Highlights). -->
+              <button type="button" class="btn btn-ghost btn-xs" id="rp-pl-shelf-switch" title="Show the other shelf's playlists">Moments &#8646;</button>
             </div>
             <button class="btn btn-ghost btn-xs" id="rp-new-playlist" title="Create a new empty playlist">+ New</button>
             <button class="btn btn-ghost btn-xs" id="rp-folder-playlist" title="Build a new playlist from every video in a folder (imported in name order)">+ Folder</button>
@@ -4097,15 +3957,15 @@
           <!-- Bulk shelf actions: copy this shelf's PLAYLISTS to the other (non-destructive), or clear them. -->
           <div class="rp-shelf-actions" id="rp-shelf-actions">
             <button class="btn btn-ghost btn-xs" id="rp-copy-shelf" title="Copy every playlist on this shelf onto the other shelf (originals stay)">Copy playlists &rarr; Highlights</button>
-            <button class="btn btn-ghost btn-xs" id="rp-clear-shelf" title="Remove all playlists from this shelf (clips stay in your pool)">Clear playlists</button>
+            <button class="btn btn-ghost btn-xs" id="rp-clear-shelf" title="Remove all playlists from this shelf (clips stay)">Clear playlists</button>
           </div>
 
           <div style="padding:8px 12px 0;">
             <!-- Top actions: play live / stop / encode -->
             <div class="rp-pl-top-actions">
               <button class="btn btn-danger btn-sm" id="rp-pl-stop" style="display:none;" title="Stop the live playlist and return">Stop</button>
-              <button class="btn btn-secondary btn-sm" id="rp-pl-preview" title="Watch this playlist in Trim — its clips play back-to-back locally, nothing goes on air">▶ Preview</button>
-              <button class="btn btn-warning btn-sm" id="rp-playlist-push-live" title="Play this playlist's clips back-to-back on air (in its scene, with the chosen transition)">▶ Play live</button>
+              <button class="btn btn-secondary btn-sm" id="rp-pl-preview" title="Watch this playlist in the player — its clips play back to back here, nothing goes on air">▶ Preview</button>
+              <button class="btn btn-warning btn-sm" id="rp-playlist-push-live" title="Play this playlist's clips back to back on air (in its scene, with the chosen transition)">▶ Play live</button>
               <button class="btn btn-primary btn-sm" id="rp-process" title="Encode the playlist to a single video file">Encode</button>
             </div>
             <div id="rp-encode-progress" style="display:none;flex-direction:column;gap:3px;margin-top:6px;">
@@ -4150,7 +4010,7 @@
                 <input type="file" id="rp-pl-upload-input" accept="video/*,.mp4,.mov,.mkv,.webm,.avi" multiple class="input-file-hidden">
               </div>
 
-              <!-- Transition — the most-changed per-playlist control, promoted out of the editor's gear modal -->
+              <!-- Transition — the most-changed per-playlist control -->
               <div id="rp-pl-trans-row" style="display:none;margin-top:8px;">
                 <div class="rp-pl-set-row">
                   <label class="rp-mini-label" for="rp-transition">Transition</label>
@@ -4169,7 +4029,7 @@
                 </div>
               </div>
 
-              <!-- Encode options — set-once technicals, collapsed by default so they don't crowd the timeline -->
+              <!-- Encode options — set-once technicals, collapsed by default -->
               <div id="rp-pl-encode-opts" style="display:none;margin-top:8px;">
                 <button type="button" class="rp-pl-encode-opts-toggle" id="rp-pl-encode-opts-toggle">
                   <span id="rp-pl-encode-opts-chev">&#9656;</span> Encode options
@@ -4196,23 +4056,148 @@
           </div>
 
           <!-- Selected playlist items — drag to reorder (scrollable) -->
-          <div id="montage-timeline" class="rp-playlist-items" style="overflow-y:auto;padding:6px 10px 0;min-height:60px;max-height:220px;"></div>
+          <div id="montage-timeline" class="rp-playlist-items" style="overflow-y:auto;padding:6px 10px 0;min-height:60px;max-height:320px;"></div>
           <div class="rp-pl-total" id="rp-pl-total" style="padding:4px 12px;"></div>
         </div>
       </div>
+
+      <!-- OBS folder tab: every file in the OBS replay folder (Capture + OBS-hotkey saves). -->
+      <div class="rpx-obsfolder rp-pane-staging" id="rpx-obsfolder" style="display:none;">
+        <div class="rpx-obsfolder-bar">
+          <input type="text" id="rp-clip-search" class="input-text" placeholder="Filter files…">
+          <button class="btn btn-ghost btn-xs" id="rp-scan-folder" title="Scan the OBS replay folder again">Refresh</button>
+        </div>
+        <!-- Multi-select bulk-action bar (shown when files are checked) -->
+        <div id="rp-stage-bulk" class="rp-stage-bulk" style="display:none;">
+          <span id="rp-stage-bulk-count">0 selected</span>
+          <span style="flex:1"></span>
+          <button class="btn btn-ghost btn-xs" id="rp-stage-bulk-clear">Clear</button>
+          <button class="btn btn-danger btn-xs" id="rp-stage-bulk-del">Delete selected</button>
+        </div>
+        <div id="rp-staging-list" class="rp-staging-list"></div>
+        <div id="clips-status" class="rp-staging-status"></div>
+      </div>
     </section>
-  </div>
 
+    <!-- ── Player: watch, trim and send the selected moment ── -->
+    <section class="rp-pane rpx-player" id="clip-preview-card">
+      <div class="rpx-player-head">
+        <div class="rpx-player-name">
+          <span id="rp-editor-title">Player</span>
+          <span id="clip-preview-name"></span>
+        </div>
+        <select id="rp-speed" class="input-select" title="Playback speed (slow motion)">
+          <option value="0.25">0.25×</option><option value="0.5">0.5×</option>
+          <option value="1" selected>1×</option><option value="1.5">1.5×</option><option value="2">2×</option>
+        </select>
+      </div>
+
+      <!-- Playlist preview strip — shown while a whole playlist is being watched in THIS player.
+           Local only: it auto-advances clip to clip and never touches the on-air buses. -->
+      <div class="rp-plprev-bar" id="rp-plprev-bar" style="display:none;">
+        <span class="rp-plprev-tag">PREVIEW</span>
+        <span class="rp-plprev-name" id="rp-plprev-name"></span>
+        <span style="flex:1"></span>
+        <button class="btn btn-ghost btn-xs" id="rp-plprev-prev" title="Previous clip">&#8249;</button>
+        <button class="btn btn-ghost btn-xs" id="rp-plprev-next" title="Next clip">&#8250;</button>
+        <button class="btn btn-secondary btn-xs" id="rp-plprev-exit" title="Leave playlist preview (back to single-clip editing)">Exit</button>
+      </div>
+
+      <!-- Video player. Our own transport bar, NOT the browser's `controls`: Chromium renders a
+           different control set depending on whether it has decoded a video frame yet. -->
+      <div class="rp-player-wrap">
+        <video id="clip-preview-video" preload="auto" crossorigin="anonymous" playsinline></video>
+        <div class="rpx-player-empty" id="rpx-player-empty">Pick a moment, or press Capture.</div>
+      </div>
+      <div class="rp-vt" id="rp-vt">
+        <button class="rp-vt-btn rp-vt-play" id="rp-vt-play" title="Play / pause (Space)" aria-label="Play">
+          <svg class="rp-vt-i-play" viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          <svg class="rp-vt-i-pause" viewBox="0 0 24 24" width="15" height="15" fill="currentColor" style="display:none;"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>
+        </button>
+        <span class="rp-vt-time" id="rp-vt-time">0:00 / 0:00</span>
+        <input type="range" class="rp-vt-seek" id="rp-vt-seek" min="0" max="1000" value="0" step="1" title="Scrub" aria-label="Seek">
+        <button class="rp-vt-btn" id="rp-vt-mute" title="Mute / unmute" aria-label="Mute">
+          <svg class="rp-vt-i-vol" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" stroke="none"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+          <svg class="rp-vt-i-muted" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" stroke="none"/><line x1="22" y1="9" x2="16" y2="15"/><line x1="16" y1="9" x2="22" y2="15"/></svg>
+        </button>
+        <input type="range" class="rp-vt-vol" id="rp-vt-vol" min="0" max="100" value="100" step="1" title="Volume" aria-label="Volume">
+        <button class="rp-vt-btn" id="rp-vt-full" title="Fullscreen" aria-label="Fullscreen">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+        </button>
+      </div>
+
+      <!-- Send it -->
+      <div class="rp-onair-send rpx-send">
+        <button class="btn btn-danger" id="rp-to-program" title="Play this moment on air now (uses the trim points)">Show now</button>
+        <button class="btn btn-secondary" id="rpx-queue-add" title="Add this moment to Up next">+ Up next</button>
+        <button class="btn btn-secondary rpx-star-btn" id="rpx-star-cur" title="Star this moment: copies it to Highlights">&#9733; Highlight</button>
+        <button class="btn btn-ghost" id="rp-to-preview" title="Cue it on the Preview bus (an OBS preview source) without going live">Preview</button>
+      </div>
+
+      <!-- Visual trim bar -->
+      <div class="rp-trim-bar-wrap" id="rp-trim-wrap">
+        <div class="rp-trim-bar-track" id="rp-trim-track">
+          <div class="rp-trim-filmstrip" id="rp-trim-filmstrip"></div>
+          <div class="rp-trim-region" id="rp-trim-region"></div>
+          <div class="rp-trim-handle rp-trim-in"  id="rp-trim-handle-in"  title="Drag to set in-point (I)"></div>
+          <div class="rp-trim-handle rp-trim-out" id="rp-trim-handle-out" title="Drag to set out-point (O)"></div>
+          <div class="rp-trim-playhead" id="rp-trim-playhead"></div>
+          <div class="rp-trim-time-tip" id="rp-trim-time-cur"></div>
+        </div>
+        <div class="rp-trim-labels">
+          <span id="rp-trim-t0">0:00.0</span>
+          <span style="color:var(--cp-accent);">In: <b id="clip-trim-in-val">0:00.0</b></span>
+          <span style="color:var(--cp-accent);">Out: <b id="clip-trim-out-val">end</b></span>
+          <span id="rp-trim-dur">0:00.0</span>
+        </div>
+      </div>
+
+      <div class="rpx-trim-acts">
+        <button class="btn btn-secondary btn-xs" id="clip-set-in" title="Set in-point to playhead (I)">Set In</button>
+        <button class="btn btn-ghost btn-xs" id="clip-go-in" title="Jump to in-point">‹ In</button>
+        <button class="btn btn-ghost btn-xs" id="clip-go-out" title="Jump to out-point">Out ›</button>
+        <button class="btn btn-secondary btn-xs" id="clip-set-out" title="Set out-point to playhead (O)">Set Out</button>
+        <button class="btn btn-ghost btn-xs" id="clip-trim-clear" title="Clear trim (C)">Clear</button>
+        <span style="flex:1"></span>
+        <button class="btn btn-blue btn-xs" id="clip-trim-save">Save trim</button>
+      </div>
+
+      <div class="rpx-addpl rp-addpl-row">
+        <span class="rp-mini-label">Add to playlist</span>
+        <select id="rp-add-to-playlist-sel" class="input-select">
+          <option value="">New playlist…</option>
+        </select>
+        <button class="btn btn-secondary btn-sm" id="rp-save-playlist" title="Add this clip to the selected playlist (or create a new one)">+ Add</button>
+      </div>
+
+      <!-- Details: title, context, tags and notes. Folded away; a title shows on the moment's card. -->
+      <details class="rpx-details" id="rpx-details">
+        <summary>Title, tags and notes</summary>
+        <div class="rp-meta-bar">
+          <div class="rp-meta-row">
+            <input type="text" id="rp-title" class="input-text" placeholder="Title (shown on the card)…" style="flex:2;min-width:140px;">
+            <input type="text" id="rp-map" class="input-text" placeholder="Map / context…" style="flex:1;min-width:120px;">
+          </div>
+          <div class="rp-meta-row">
+            <div id="rp-tags" class="rp-tags"></div>
+            <input type="text" id="rp-tag-input" class="input-text" placeholder="+ tag, Enter (trains auto-clip AI)…" style="flex:1;min-width:150px;">
+          </div>
+          <div class="rp-meta-row">
+            <textarea id="rp-desc" class="input-text" rows="2" placeholder="Notes…" style="flex:1;min-width:160px;resize:vertical;"></textarea>
+          </div>
+        </div>
+      </details>
+
+      <div class="rp-shortcut-bar">
+        <span class="rp-sc-item"><span class="rp-sc-key">Space</span> play/pause</span>
+        <span class="rp-sc-item"><span class="rp-sc-key">I</span> set in</span>
+        <span class="rp-sc-item"><span class="rp-sc-key">O</span> set out</span>
+        <span class="rp-sc-item"><span class="rp-sc-key">J</span> rew</span>
+        <span class="rp-sc-item"><span class="rp-sc-key">L</span> fwd</span>
+        <span class="rp-sc-item"><span class="rp-sc-key">←→</span> ±1 frame</span>
+      </div>
+    </section>
   </div><!-- #rp-panel-editor -->
-
-  <!-- ── Panel: Exports ── -->
-
-
-  <!-- Capture / clipping settings (collapsible) -->
-  <!-- Capture / clipping settings — modal opened by the gear in the editor (keeps the page short) -->
-  <!-- Video Editor settings modal REMOVED 2026-08-06 — capture/clipping config moved to Settings ▸ Replays (#set-sec-replays). The editor's gear (#rp-settings-toggle) now deep-links there. -->
-
-  <!-- Playout Playlists removed — the right-column playlists handle live playout (scene/loop/transition). -->
 
   <!-- Floating hover preview (absolute-positioned, JS-controlled) -->
   <div class="rp-hover-preview" id="rp-hover-preview">
@@ -4966,6 +4951,7 @@
                 <button type="button" class="cmp-src-type" data-src="manual"><strong>Enter it here</strong><span>Teams, fixtures and results typed into this app.</span></button>
                 <button type="button" class="cmp-src-type" data-src="sheet"><strong>Google Sheet</strong><span>Read from a sheet on a timer.</span></button>
                 <button type="button" class="cmp-src-type" data-src="feed"><strong>Website feed</strong><span>Poll a JSON link your site publishes.</span></button>
+                <button type="button" class="cmp-src-type" data-src="cloud"><strong>Nameless website</strong><span>A tournament or league hosted on your org's website.</span></button>
                 <button type="button" class="cmp-src-type" data-src="push"><strong>API</strong><span>Your bot or script sends updates.</span></button>
               </div>
 
@@ -4997,6 +4983,17 @@
                 <p class="cmp-hint" id="lg-src-token-state"></p>
                 <label class="cmp-toggle" title="Off = matches missing from the feed are left alone"><span class="switch"><input type="checkbox" id="lg-src-prune"><span class="slider"></span></span> Remove matches the feed no longer lists</label>
                 <p class="cmp-hint">The feed returns an <strong>ne-competition</strong> JSON document (or a CSV). The format is on <button type="button" class="btn btn-ghost btn-sm cmp-mini" onclick="cmpOpenApiDocs('cmp-tpl-feed')">Marketplace &gt; API</button>.</p>
+              </div>
+
+              <!-- Nameless website: the org's own tournaments/leagues, read through the signed-in cloud session (competitions.js cmpRenderCloudPicker) -->
+              <div class="cmp-src-body" data-srcbody="cloud" hidden>
+                <p class="cmp-hint" id="lg-src-cloud-hint" hidden></p>
+                <div class="cmp-row" style="align-items:flex-end;">
+                  <div class="cmp-field wide"><label class="field-label" for="lg-src-cloud-pick">Website competition</label><select id="lg-src-cloud-pick" class="input-select"><option value="">Loading...</option></select></div>
+                  <button class="btn btn-primary btn-sm" id="lg-src-cloud-link" type="button">Link</button>
+                </div>
+                <p class="cmp-hint" id="lg-src-cloud-linked"></p>
+                <p class="cmp-hint">The website owns this league: teams, fixtures, results, standings and which match is live come from it, and nothing entered here is sent back. The list refreshes every minute and the league re-syncs whenever the website changes it. If the website marks it live while nothing is on air here, it goes on air by itself.</p>
               </div>
 
               <div class="cmp-src-body" data-srcbody="push" hidden>
@@ -5719,8 +5716,8 @@
               <div class="gfx-ctrl-row" id="gfx-std-layout-row" style="display:none;">
                 <span class="field-label" data-gfx="fix">Board</span>
                 <div class="seg" id="gfx-std-layout-seg">
-                  <button type="button" class="seg-btn active" data-stdlayout="auto" title="Use the Smash top 8 card board">Auto (Top 8)</button>
-                  <button type="button" class="seg-btn" data-stdlayout="placement" title="Top 8 placement cards, each with the entrant's fighter art">Top 8 cards</button>
+                  <button type="button" class="seg-btn active" data-stdlayout="auto" title="Automatic: the Smash top 8 card board when there is one">Auto</button>
+                  <button type="button" class="seg-btn" data-stdlayout="placement" title="Top 8 placement cards, each with the entrant's fighter art">Top 8</button>
                   <button type="button" class="seg-btn" data-stdlayout="podium" title="The standard pedestal top 3 over a standings table">Podium</button>
                 </div>
               </div>
@@ -5845,11 +5842,13 @@
                 <button type="button" class="btn btn-ghost btn-sm" id="mp-clear-scores" title="Blank every map's score (keeps the maps and picks)">Clear scores</button>
                 <button type="button" class="btn btn-ghost btn-sm mp-clear-maps" id="mp-clear-maps" title="Remove every map from the series (maps, picks and scores)">Clear maps</button>
               </div>
+              <div class="mp-list-head">
+                <span class="mp-list-title">Maps <span class="mp-list-count" id="mp-count"></span></span>
+                <span class="mp-list-hint" id="mp-drag-hint">Drag a card by its handle to change the order</span>
+                <button type="button" class="btn btn-secondary btn-sm" id="mp-add-slot">+ Add map</button>
+              </div>
               <div id="mp-head" class="mp-head" aria-hidden="true"></div>
               <div id="mp-slots" class="mp-slots"></div>
-              <div style="margin-top:8px;">
-                <button type="button" class="btn btn-ghost btn-sm" id="mp-add-slot">+ Add map</button>
-              </div>
 
               <div style="margin-top:16px; padding-top:14px; border-top:1px solid var(--border);">
                 <div class="gfx-ctrl-row" style="margin-bottom:0;">
@@ -5889,7 +5888,30 @@
                   </div>
                   <select id="draft-front-start" hidden><option value="a"></option><option value="b"></option></select>
                 </div>
+                <!-- Board look: pure presentation, applies on air straight away (set_draft_meta). -->
+                <div class="pb-field" id="draft-front-layout-row">
+                  <span class="gfx-fp-lbl">Layout</span>
+                  <div class="pb-seg" id="draft-front-layout-seg" role="group" title="Strip: a full-width band over the game's own draft screen. Board: the full-screen two-column board. Auto picks the strip for Dota 2, Mobile Legends and Honor of Kings.">
+                    <button type="button" data-v="auto">Auto</button>
+                    <button type="button" data-v="strip">Strip</button>
+                    <button type="button" data-v="board">Board</button>
+                  </div>
+                </div>
+                <div class="pb-field" id="draft-front-pos-row">
+                  <span class="gfx-fp-lbl">Strip edge</span>
+                  <div class="pb-seg" id="draft-front-pos-seg" role="group">
+                    <button type="button" data-v="top">Top</button>
+                    <button type="button" data-v="bottom">Bottom</button>
+                  </div>
+                </div>
+                <label class="pb-field"><span class="gfx-fp-lbl">Shot clock</span>
+                  <select id="draft-front-clock" class="input-text" title="The countdown shown on air for each pick and ban">
+                    <option value="0">Game default</option><option value="15">15 seconds</option><option value="20">20 seconds</option>
+                    <option value="30">30 seconds</option><option value="45">45 seconds</option><option value="60">60 seconds</option>
+                    <option value="-1">Off</option>
+                  </select></label>
               </div>
+              <p class="pb-ow-map" id="draft-front-ow-map" hidden></p>
               <div class="gfx-popout-summary-body pb-status" id="gfx-front-draft-body"></div>
               <div id="gfx-front-draft-ow" class="dm-front-ow" style="display:none;">
                 <div class="dm-front-ow-turn" id="dm-front-ow-turn"></div>
@@ -6476,6 +6498,7 @@
         <div class="gfx-popout-body">
           <button id="btn-gfx-schedule-push" style="display:none;"></button>
           <button id="btn-gfx-schedule-clear" style="display:none;"></button>
+          <button id="btn-hide-schedule-gfx" style="display:none;"></button>
           <!-- Config on the left (title/layout, source, per-source form), the actual match list
                on the right — was one long stacked column in the old 300px Graphics-hub split. -->
           <div class="gfx-sch-layout">
@@ -6607,8 +6630,22 @@
                 background:rgba(0,0,0,.55); padding:3px; box-sizing:border-box; }
               .vm-map .vm-mode img { position:static; width:100%; height:100%; object-fit:contain; opacity:1; }
               .vm-actions { display:flex; gap:8px; flex-wrap:wrap; }
+              .vm-import { display:flex; gap:8px; margin-bottom:8px; }
+              .vm-import .input-text { flex:1; min-width:0; }
+              .vm-import-preview { margin-bottom:10px; padding:10px 12px; border:1px solid var(--border); border-radius:10px; background:rgba(255,255,255,.02); font-size:12px; }
+              .vm-imp-head { display:flex; align-items:baseline; gap:10px; margin-bottom:6px; font-size:13px; }
+              .vm-imp-head span { color:var(--muted); font-size:11.5px; }
+              .vm-imp-steps { margin:0 0 10px; padding-left:18px; columns:2; column-gap:18px; color:var(--text); }
+              .vm-imp-steps li { break-inside:avoid; padding:1px 0; }
+              .vm-imp-err { color:#f87171; font-weight:600; }
             </style>
             <div class="veto-mgr">
+              <!-- A played veto comes in from the match page instead of being clicked map by map. -->
+              <div class="vm-import">
+                <input type="text" id="veto-import-url" class="input-text" placeholder="Paste a FACEIT room link, or the veto lines copied from an HLTV match page" autocomplete="off" spellcheck="false">
+                <button class="btn btn-secondary btn-sm" id="btn-veto-import" title="Read the teams, best-of and every ban and pick">Import</button>
+              </div>
+              <div class="vm-import-preview" id="veto-import-preview" hidden></div>
               <div class="vm-config">
                 <select id="veto-game" title="Game (map pool)"></select>
                 <select id="veto-bestof" title="Best of">
@@ -7258,10 +7295,10 @@
     </div>
 
     <h4 style="margin:18px 0 4px; font-size:13px; color:#e0e0e0;">Sponsors (sellable slots) <span style="font-weight:500; color:var(--muted); font-size:11px;">— for the selected package</span></h4>
-    <p style="font-size:11px; color:var(--muted); margin:0 0 10px;">
-      Add each sponsor's logo once, then tick the spots it should appear in. Rail / Caster Desk / Banner allow
-      multiple sponsors; Overtime / Replay / Scoreboard hold one sponsor each (ticking one clears the others).
+    <p style="font-size:12px; color:var(--muted); margin:0 0 10px;">
+      Add each sponsor's logo once and pick a tier: the tier decides where the logo shows. Change any placement by hand and the sponsor becomes Custom.
     </p>
+    <div id="sponsor-guide"></div>
     <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap; align-items:center;">
       <img id="sponsor-logo-preview" class="brand-logo-square brand-logo-sm" alt="" style="display:none;" title="Logo ready — click Add Sponsor">
       <span id="sponsor-logo-empty" class="brand-logo-square brand-logo-sm brand-logo-empty">Logo</span>
@@ -7485,7 +7522,7 @@
     <button type="button" class="ev-subnav-btn" data-inttab="developers" hidden>Developers</button>
     <!-- Per-app panels: reached from the Integrations cards (with a back bar), not the top row.
          The buttons stay (hidden) because nav search deep-links click [data-inttab="..."]. -->
-    <button type="button" class="ev-subnav-btn" data-inttab="switcher" hidden>Video Switcher</button>
+    <button type="button" class="ev-subnav-btn" data-inttab="switcher" hidden>Streaming software</button>
     <button type="button" class="ev-subnav-btn" data-inttab="cameras" hidden>Cameras</button>
     <button type="button" class="ev-subnav-btn" data-inttab="tournaments" hidden>Tournament Platforms</button>
     <button type="button" class="ev-subnav-btn" data-inttab="twitch" hidden>Twitch</button>
@@ -7509,19 +7546,11 @@
       <span class="int-strip-lbl">connected</span>
     </div>
     <div class="int-store-grid" id="int-store-grid">
-      <div class="int-card" data-card="obs" data-goto="switcher" data-scroll="integration-obs">
-        <div class="int-card-logo mono-obs">OBS</div>
+      <div class="int-card" data-card="obs" data-goto="switcher">
+        <div class="int-card-logo mono-obs">LIVE</div>
         <div class="int-card-body">
-          <div class="int-card-name">OBS Studio</div>
-          <div class="int-card-tag">Scene switching, replay buffer, recording and stream control over WebSocket.</div>
-        </div>
-        <span class="int-card-status" data-st="off">Not set up</span>
-      </div>
-      <div class="int-card" data-card="vmix" data-goto="switcher" data-scroll="integration-obs">
-        <div class="int-card-logo mono-vmix">vMix</div>
-        <div class="int-card-body">
-          <div class="int-card-name">vMix</div>
-          <div class="int-card-tag">Full OBS alternative — cuts, overlays, streaming and instant replay via the HTTP API.</div>
+          <div class="int-card-name">Streaming software</div>
+          <div class="int-card-tag" id="sw-card-tag">OBS Studio, Streamlabs Desktop or vMix: scene switching, replays, recording and going live.</div>
         </div>
         <span class="int-card-status" data-st="off">Not set up</span>
       </div>
@@ -7549,7 +7578,7 @@
         </div>
         <span class="int-card-status" data-st="off">No token</span>
       </div>
-      <div class="int-card" data-card="challonge" data-goto="tournaments" data-scroll="challonge-conn-badge">
+      <div class="int-card" data-card="challonge" data-goto="tournaments">
         <div class="int-card-logo has-img"><img src="../assets/platforms/challonge.png" alt=""></div>
         <div class="int-card-body">
           <div class="int-card-name">Challonge</div>
@@ -7565,6 +7594,14 @@
         </div>
         <span class="int-card-status" data-st="off">No key</span>
       </div>
+      <div class="int-card" data-card="challengermode" data-goto="tournaments" data-scroll="input-cm-key">
+        <div class="int-card-logo mono-cm">CM</div>
+        <div class="int-card-body">
+          <div class="int-card-name">Challengermode</div>
+          <div class="int-card-tag">Tournaments and Spaces: bracket, teams, live matches and placements.</div>
+        </div>
+        <span class="int-card-status" data-st="off">No key</span>
+      </div>
       <div class="int-card" data-card="nxgen" data-goto="tournaments" data-scroll="input-nxgen-key">
         <div class="int-card-logo has-img"><img src="../assets/images/nxgenwhite.png" alt=""></div>
         <div class="int-card-body">
@@ -7573,7 +7610,7 @@
         </div>
         <span class="int-card-status" data-st="off">No key</span>
       </div>
-      <div class="int-card" data-card="liquipedia" data-goto="tournaments" data-scroll="input-liquipedia-key">
+      <div class="int-card" data-card="liquipedia" data-goto="tournaments" data-scroll="integration-liquipedia">
         <div class="int-card-logo mono-nxgen">LP</div>
         <div class="int-card-body">
           <div class="int-card-name">Liquipedia</div>
@@ -7589,7 +7626,7 @@
         </div>
         <span class="int-card-status" data-st="off">No key</span>
       </div>
-      <div class="int-card" data-card="sheets" data-goto="tournaments" data-scroll="sheets-conn-badge">
+      <div class="int-card" data-card="sheets" data-goto="tournaments">
         <div class="int-card-logo mono-sheets">GS</div>
         <div class="int-card-body">
           <div class="int-card-name">Google Sheets</div>
@@ -7622,6 +7659,14 @@
           <div class="int-card-tag">Live scoreboard, boost and events from the official Stats API on this PC.</div>
         </div>
         <span class="int-card-status" data-st="off">Waiting for game</span>
+      </div>
+      <div class="int-card" data-card="dota2" data-goto="games">
+        <div class="int-card-logo mono-dota">D2</div>
+        <div class="int-card-body">
+          <div class="int-card-name">Dota 2</div>
+          <div class="int-card-tag">Game State Integration: every player's hero, stats and items, and the live Captains Mode draft.</div>
+        </div>
+        <span class="int-card-status" data-st="off">Not set up</span>
       </div>
       <div class="int-card" data-card="cs2" data-goto="games">
         <div class="int-card-logo mono-cs2">CS2</div>
@@ -8295,7 +8340,7 @@
             <button id="btn-startgg-disconnect" class="btn btn-ghost btn-sm" style="display:none; white-space:nowrap; color:var(--danger-2);" title="Remove the saved token and turn start.gg off">Disconnect</button>
           </div>
           <details class="int-keyhelp"><summary>How do I get this?</summary><div class="int-keyhelp-body"><ol><li>Sign in at <a href="https://start.gg" target="_blank" rel="noopener">start.gg</a>, click your profile picture &rarr; <b>Developer Settings</b> — or go straight to <a href="https://start.gg/admin/profile/developer" target="_blank" rel="noopener">start.gg/admin/profile/developer</a>.</li>
-   <li>Click <b>Create new token</b>, name it (e.g. "Broadcast Suite") and copy the 32-character token.</li>
+   <li>Click <b>Create new token</b>, name it (e.g. "Broadcast Studio") and copy the 32-character token.</li>
    <li>Paste it here and press Save — the token is stored locally on this PC only.</li></ol></div></details>
         </div>
 
@@ -8566,23 +8611,23 @@
         <div id="sheets-result" style="font-size:13px; color:var(--muted);"></div>
         <div style="display:flex; flex-direction:column; gap:8px; border-top:1px solid var(--border); padding-top:12px;">
           <p class="field-hint" style="margin:0 0 2px;">For each data type: pick a worksheet tab + a direction. The first row of each tab must be column headers — Teams: <code>Team, Logo, Color, Player 1, Player 2…</code>; Schedule: <code>Team A, Team B, Round, Date, Time, Stream</code>; Standings: <code>Place, Team, Wins, Losses, Points</code>.</p>
-          <div class="field-row" style="margin-bottom:0; align-items:center; gap:8px;">
+          <div class="field-row" style="margin-bottom:0; flex-direction:row; align-items:center; gap:8px;">
             <label class="field-label" style="min-width:80px; margin:0;">Teams</label>
             <select id="sheets-tab-teams" class="input-select" style="flex:1;" data-sheets-map="teams"><option value="">— tab —</option></select>
             <select id="sheets-dir-teams" class="input-select" style="width:130px;" data-sheets-map="teams"><option value="off">Off</option><option value="import">Import (←app)</option><option value="export">Export (app→)</option><option value="both">Two-way ↔</option></select>
           </div>
-          <div class="field-row" style="margin-bottom:0; align-items:center; gap:8px;">
+          <div class="field-row" style="margin-bottom:0; flex-direction:row; align-items:center; gap:8px;">
             <label class="field-label" style="min-width:80px; margin:0;">Schedule</label>
             <select id="sheets-tab-schedule" class="input-select" style="flex:1;" data-sheets-map="schedule"><option value="">— tab —</option></select>
             <select id="sheets-dir-schedule" class="input-select" style="width:130px;" data-sheets-map="schedule"><option value="off">Off</option><option value="import">Import (←app)</option><option value="export">Export (app→)</option><option value="both">Two-way ↔</option></select>
           </div>
-          <div class="field-row" style="margin-bottom:0; align-items:center; gap:8px;">
+          <div class="field-row" style="margin-bottom:0; flex-direction:row; align-items:center; gap:8px;">
             <label class="field-label" style="min-width:80px; margin:0;">Standings</label>
             <select id="sheets-tab-standings" class="input-select" style="flex:1;" data-sheets-map="standings"><option value="">— tab —</option></select>
             <select id="sheets-dir-standings" class="input-select" style="width:130px;" data-sheets-map="standings"><option value="off">Off</option><option value="import">Import (←app)</option><option value="export">Export (app→)</option><option value="both">Two-way ↔</option></select>
           </div>
         </div>
-        <div class="field-row" style="margin-bottom:0; align-items:center; gap:8px;">
+        <div class="field-row" style="margin-bottom:0; flex-direction:row; align-items:center; gap:8px;">
           <label class="field-label" for="input-sheets-autosync" style="margin:0;">Auto-sync every</label>
           <input type="number" id="input-sheets-autosync" class="input-text" min="0" max="3600" value="0" style="width:80px;">
           <span class="field-hint" style="margin:0;">seconds (0 = manual only; minimum 10)</span>
@@ -8844,6 +8889,10 @@
       <img src="../assets/games/fortnite.png" alt="Fortnite" class="game-tab-logo">
       <span class="game-tab-name">Fortnite</span>
     </button>
+    <button class="game-tab-btn" data-game="dota2">
+      <img src="../assets/games/dota2.svg" alt="Dota 2" class="game-tab-logo">
+      <span class="game-tab-name">Dota 2</span>
+    </button>
     <button class="game-tab-btn" data-game="apex">
       <img src="../assets/games/apex.svg" alt="Apex Legends" class="game-tab-logo">
       <span class="game-tab-name">Apex</span>
@@ -8881,22 +8930,45 @@
     <!-- CS2 -->
     <div class="game-section" id="games-section-cs2">
       <div class="gh-pane" data-gtab="connection">
-        <p class="gh-lead">Game State Integration. Install the config into your CS2 folder, restart CS2, then spectate a match.</p>
-        <div class="field-row">
-          <label class="field-label" for="input-csgo-path">CS2 install or cfg folder</label>
-          <input type="text" id="input-csgo-path" class="input-text"
-                 placeholder="C:\Program Files (x86)\Steam\steamapps\common\Counter-Strike Global Offensive">
+        <p class="gh-lead">One click finds CS2 through Steam and installs everything the overlay needs. Nothing to type in the CS2 console.</p>
+        <div class="cs2-setup" id="cs2-setup">
+          <div class="cs2-step" data-step="cfg">
+            <span class="cs2-step-dot"></span>
+            <span class="cs2-step-txt"><b>Game data</b><small id="cs2-step-cfg">Not set up yet.</small></span>
+            <button type="button" class="btn btn-primary btn-sm" id="btn-csgo-setup">Set up CS2</button>
+          </div>
+          <div class="cs2-step" data-step="console">
+            <span class="cs2-step-dot"></span>
+            <span class="cs2-step-txt"><b>Console link</b><small id="cs2-step-console">Lets the app hide the HUD and move the camera without you touching CS2.</small></span>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-csgo-launch">Launch CS2 for observing</button>
+          </div>
+          <div class="cs2-step" data-step="hud">
+            <span class="cs2-step-dot"></span>
+            <span class="cs2-step-txt"><b>Clean observer view</b><small>After one launch, CS2 keeps two keys for good: <b>F9</b> hides its own HUD and radar, <b>F10</b> brings them back. Press F9 once in each match: CS2 resets cheats every match and only allows this with cheats on, so it works in a lobby you host (practice, bots, a private match). Switching players also becomes a hard cut instead of a glide, permanently.</small></span>
+            <span class="switch"><input type="checkbox" id="check-csgo-auto-hud" checked><span class="slider"></span></span>
+          </div>
+          <div class="cs2-step" data-step="live">
+            <span class="cs2-step-dot"></span>
+            <span class="cs2-step-txt"><b>Receiving the match</b><small id="cs2-step-live">Spectate a match in CS2 and the overlay fills in.</small></span>
+            <span id="csgo-conn" class="prod-chip">CS2: waiting</span>
+          </div>
         </div>
-        <div class="gh-actions">
-          <button class="btn btn-primary" id="btn-csgo-install">Install GSI Config</button>
-          <button class="btn btn-secondary" id="btn-csgo-spectator">Install Spectator HUD cfg</button>
-          <span id="csgo-conn" class="prod-chip gh-legacy-chip">CS2: waiting</span>
-        </div>
-        <div id="csgo-result" style="margin-top:10px; font-size:13px; color:var(--muted);"></div>
-        <details class="gh-guide"><summary>What the Spectator HUD cfg does</summary><div class="gh-guide-body">
-        Spectator HUD cfg hides CS2's in-game UI for a clean feed. In CS2 console run
-        <code>exec cs2-spectator</code> when you start spectating a <strong>private match</strong>; press
-        <strong>F9</strong> to toggle back for normal play. Safe online (does nothing without sv_cheats).
+        <div id="csgo-result" class="gh-hint" style="margin-top:10px;"></div>
+        <details class="gh-guide"><summary>Use a different folder</summary><div class="gh-guide-body">
+          <p>If CS2 lives somewhere Steam does not list, paste its folder (the cfg folder, the CS2 folder or the Steam library all work).</p>
+          <div class="field-row">
+            <label class="field-label" for="input-csgo-path">CS2 folder</label>
+            <input type="text" id="input-csgo-path" class="input-text" placeholder="D:\SteamLibrary\steamapps\common\Counter-Strike Global Offensive">
+          </div>
+          <div class="gh-actions">
+            <button class="btn btn-secondary btn-sm" id="btn-csgo-install">Install into this folder</button>
+            <button class="btn btn-ghost btn-sm" id="btn-csgo-spectator">Reinstall the observer cfg only</button>
+          </div>
+        </div></details>
+        <details class="gh-guide"><summary>Without the console link</summary><div class="gh-guide-body">
+          If CS2 was started from Steam directly, the app cannot reach its console. Either close CS2 and press
+          <b>Launch CS2 for observing</b>, or type <code>exec cs2-spectator</code> in the CS2 console once (then F9 hides the HUD and F10 brings it back, in every later session).
+          The observer config only hides the HUD and crosshair, so it is safe online.
         </div></details>
       </div>
       <div class="gh-pane" data-gtab="overlay">
@@ -8908,6 +8980,58 @@
             <span class="switch"><input type="checkbox" id="check-csgo-auto-winner" checked><span class="slider"></span></span></label>
           <label class="gh-toggle"><span class="gh-toggle-txt"><b>Built-in radar</b><small>Off uses an external radar (boltobserv) added as its own OBS source.</small></span>
             <span class="switch"><input type="checkbox" id="check-csgo-builtin-radar"><span class="slider"></span></span></label>
+        </div>
+        <div class="gh-group">
+          <div class="gh-group-title">CS2 Pro HUD layout</div>
+          <p class="gh-hint">Wide puts each team in its own bottom corner. Stacked lists both teams down the left and moves the radar and kill feed to the right. Switches on air instantly.</p>
+          <div class="seg" id="csgo-pro-layout-seg" role="group" style="margin-top:8px;">
+            <button type="button" class="seg-btn" data-layout="wide">Wide</button>
+            <button type="button" class="seg-btn" data-layout="stacked">Stacked</button>
+          </div>
+        </div>
+        <div class="gh-group">
+          <div class="gh-group-title">Radar position and size</div>
+          <p class="gh-hint">Where the CS2 Pro HUD draws its radar, in pixels on the 1920&times;1080 screen. Changes show on air straight away.</p>
+          <div class="cs2-radar-fields" id="cs2-radar-fields">
+            <label class="field-label">Left <input type="number" class="input-text" id="cs2-radar-x" min="0" max="1760" step="2"></label>
+            <label class="field-label">Top <input type="number" class="input-text" id="cs2-radar-y" min="0" max="920" step="2"></label>
+            <label class="field-label">Size <input type="number" class="input-text" id="cs2-radar-size" min="160" max="800" step="10"></label>
+            <button type="button" class="btn btn-ghost btn-sm" id="cs2-radar-reset">Back to default</button>
+          </div>
+        </div>
+      </div>
+      <!-- Observer tools: things for the person running the CS2 observer client, never on stream. -->
+      <div class="gh-pane" data-gtab="cameras">
+        <div class="gh-group">
+          <div class="gh-group-title">Suggest mode</div>
+          <p class="gh-hint">The AI Director picks who to watch next. Suggest mode only shows the pick (the observer key to press and why); Auto-switch presses the key in CS2 for you.</p>
+          <div class="seg" id="csgo-director-mode-seg" role="group" style="margin-top:8px;">
+            <button type="button" class="seg-btn" data-mode="suggest">Suggest only</button>
+            <button type="button" class="seg-btn" data-mode="auto">Auto-switch</button>
+          </div>
+          <label class="gh-toggle" style="margin-top:12px;"><span class="gh-toggle-txt"><b>Observer assist on the HUD over the game</b><small>When the HUD runs over CS2, the Director's pick and the key to press show on its right edge. Only the observer sees it; OBS never does.</small></span>
+            <span class="switch"><input type="checkbox" id="check-csgo-observer-assist" checked><span class="slider"></span></span></label>
+          <div class="gh-actions" style="margin-top:8px;">
+            <button type="button" class="btn btn-secondary" id="btn-csgo-observer-assist">Open the HUD over the game</button>
+          </div>
+          <div id="csgo-observer-msg" class="gh-hint" style="margin-top:6px;"></div>
+        </div>
+        <div class="gh-group">
+          <div class="gh-group-title">Cinematic freezetime</div>
+          <p class="gh-hint">During each freezetime the observer camera plays two slow camera moves over the map, then cuts back to a player about 1.5 seconds before the round goes live. Every map starts with a move above each bombsite; replace them with your own by flying the spectator camera in CS2 and pressing Capture.</p>
+          <label class="gh-toggle" style="margin-top:8px;"><span class="gh-toggle-txt"><b>Play cinematic shots in freezetime</b><small>Uses the console link (Connection tab), so CS2 does not need focus to move the camera.</small></span>
+            <span class="switch"><input type="checkbox" id="check-csgo-cinematic"><span class="slider"></span></span></label>
+          <div class="field-row" style="margin-top:8px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <label class="field-label" for="input-csgo-netcon-port" style="margin:0;">Console port</label>
+            <input type="number" id="input-csgo-netcon-port" class="input-text" min="1024" max="65535" value="2121" style="width:110px;">
+            <span id="csgo-cinematic-conn" class="prod-chip">Console: off</span>
+          </div>
+          <p class="gh-hint" style="margin-top:6px;">The port must match the one CS2 was started with. <b>Launch CS2 for observing</b> on the Connection tab uses it (<code id="csgo-netcon-launch">-netconport 2121</code>).</p>
+          <div style="margin-top:12px;">
+            <div class="gh-hint" style="margin-bottom:6px;">Shots for <b id="csgo-cine-map">the current map</b></div>
+            <div id="csgo-cine-shots"></div>
+          </div>
+          <div id="csgo-cinematic-msg" class="gh-hint" style="margin-top:6px;"></div>
         </div>
       </div>
     </div>
@@ -9045,7 +9169,7 @@
       <div class="gh-pane" data-gtab="connection">
         <p class="gh-lead">Fortnite has no live match feed, so there is nothing to connect. Results are entered on the Scoring tab (or pulled from a Google Sheet).</p>
       </div>
-      <div class="gh-pane" data-gtab="scoring">
+      <div class="gh-pane" data-gtab="match">
         <div class="gh-group">
           <div class="gh-group-title">Series</div>
         <div class="field-row" style="align-items:center; gap:10px; margin-top:12px;">
@@ -9161,7 +9285,7 @@
         </div>
         </div></details>
       </div>
-      <div class="gh-pane" data-gtab="scoring">
+      <div class="gh-pane" data-gtab="match">
         <div class="gh-group">
           <div class="gh-group-title">Points</div>
           <p class="gh-hint">Placement points plus kill points, added up across every game. Defaults are the current ALGS table.</p>
@@ -9204,7 +9328,7 @@
         </div>
         </div>
       </div>
-      <div class="gh-pane" data-gtab="teams">
+      <div class="gh-pane" data-gtab="match">
         <div class="gh-group">
           <div class="gh-group-title">Team identity</div>
           <p class="gh-hint">Logos, tags and colours come from your Teams library, matched to the names Apex reports. Bind any that don't match. These are the squads from the current or last lobby.</p>
@@ -9252,7 +9376,7 @@ PacketSendRate=10</pre>
         </div>
       </div>
       <div class="gh-pane" data-gtab="automation" id="gh-rl-automation"></div>
-      <div class="gh-pane" data-gtab="options">
+      <div class="gh-pane" data-gtab="automation">
         <div class="gh-group">
           <div class="gh-group-title">Ballchasing.com replay stats</div>
           <span id="ballchasing-key-indicator" style="display:none; padding: 3px 10px; background: rgba(74, 222, 128, 0.2); border: 1px solid #4ade80; border-radius: 4px; font-size: 11px; color: #86efac; white-space: nowrap;"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><polyline points="20 6 9 17 4 12"/></svg> Connected</span>
@@ -9341,6 +9465,42 @@ PacketSendRate=10</pre>
         <label for="chk-r6-autoscore" class="field-label" style="margin:0;">Auto-update the scoreboard from live round wins</label>
       </div>
         <p class="gh-hint">Off by default: a spectator client that reconnects mid-round can resend a stale score. Turn on once you have watched the relay behave across a full map.</p>
+      </div>
+    </div>
+
+    <!-- Dota 2 — Valve's Game State Integration (backend/dota-gsi.js) -->
+    <div class="game-section" id="games-section-dota2">
+      <div class="gh-pane" data-gtab="connection">
+        <p class="gh-lead">Live data comes straight from Dota 2 (Valve's Game State Integration). No key needed. While this PC spectates or observes a match, every player's hero, K/D/A, net worth and items arrive, and the Captains Mode draft fills the Pick &amp; Ban board by itself.</p>
+        <div class="field-row" style="gap:8px; margin-top:12px; flex-wrap:wrap;">
+          <button class="btn btn-primary btn-sm" id="btn-dota-setup" type="button">Set up Dota 2</button>
+          <button class="btn btn-secondary btn-sm" id="btn-dota-launch" type="button" title="Starts Dota 2 through Steam with the -gamestateintegration launch option it needs">Launch Dota 2</button>
+        </div>
+        <div class="field-row" style="align-items:center; gap:8px; margin-top:10px;">
+          <input type="text" id="input-dota-path" class="input-text" placeholder="Only if Set up can't find it: your dota 2 beta folder" style="flex:1; max-width:520px;">
+          <button class="btn btn-ghost btn-sm" id="btn-dota-install" type="button">Install here</button>
+        </div>
+        <p class="gh-hint" id="dota-result"></p>
+        <p class="gh-hint">If you start Dota 2 yourself, add <code>-gamestateintegration</code> to its launch options in Steam. Then spectate or observe the match on this PC.</p>
+        <div id="dota-live-readout" class="field-hint" style="max-width:760px; margin-top:8px;"></div>
+      </div>
+      <div class="gh-pane" data-gtab="automation">
+        <div class="field-row" style="align-items:center; gap:10px; margin-top:12px;">
+          <label class="switch"><input type="checkbox" id="chk-dota-autodraft"><span class="slider"></span></label>
+          <label for="chk-dota-autodraft" class="field-label" style="margin:0;">Fill the Pick &amp; Ban board from the in-game draft</label>
+        </div>
+        <div class="field-row" style="align-items:center; gap:10px; margin-top:12px;">
+          <span class="field-label" style="margin:0; min-width:120px;">Radiant is</span>
+          <div class="pb-seg" id="dota-radiant-seg" role="group">
+            <button type="button" data-v="a">Blue team</button>
+            <button type="button" data-v="b">Orange team</button>
+          </div>
+        </div>
+        <p class="gh-hint">Which of your two teams plays Radiant this game. The HUD and the draft board put each team on its own side.</p>
+        <div class="field-row" style="align-items:center; gap:10px; margin-top:12px;">
+          <label class="switch"><input type="checkbox" id="chk-dota-board"><span class="slider"></span></label>
+          <label for="chk-dota-board" class="field-label" style="margin:0;">Show the all-player scoreboard on the Dota 2 HUD</label>
+        </div>
       </div>
     </div>
 
@@ -9534,7 +9694,7 @@ PacketSendRate=10</pre>
     <section class="section">
       <h3 class="section-title">Elgato Stream Deck</h3>
       <p class="field-hint" style="max-width:720px;">
-        The official NE Broadcast Suite plugin turns a Stream Deck into a broadcast control surface:
+        The official Broadcast Studio plugin turns a Stream Deck into a broadcast control surface:
         live score keys in team colors, graphics that light up while on air, a ticking countdown clock,
         run-of-show navigation, audio mutes, replays and more. Keys connect to this app automatically —
         no setup beyond installing the plugin.
@@ -9561,20 +9721,21 @@ PacketSendRate=10</pre>
     <div class="mkt-api-hero">
       <div>
         <h2 class="mkt-hero-title" style="margin-top:0;">API</h2>
-        <p class="mkt-hero-text">Feed league data in from your own bots, scripts, website or Google Sheet, and build your own overlays on the same live feed the built-in graphics use.</p>
+        <p class="mkt-hero-text">Build on Broadcast Studio. Run the show from your own tools (a Discord bot, a web panel, a hardware button), read what is on air, and draw your own overlays from the same live feed the built-in graphics use.</p>
       </div>
       <nav class="mkt-api-jump" aria-label="On this page">
         <a href="#" data-api-jump="api-sec-key">API key</a>
-        <a href="#" data-api-jump="cmp-tpl-api">Endpoints</a>
+        <a href="#" data-api-jump="api-sec-control">Control the show</a>
+        <a href="#" data-api-jump="api-sec-overlay">Live feed and overlays</a>
+        <a href="#" data-api-jump="cmp-tpl-api">Competition data</a>
         <a href="#" data-api-jump="cmp-tpl-feed">Feed format</a>
         <a href="#" data-api-jump="cmp-tpl-sheet">Sheet columns</a>
-        <a href="#" data-api-jump="api-sec-overlay">Overlay feed</a>
       </nav>
     </div>
 
     <section class="section" id="api-sec-key">
       <h3 class="section-title">Your API key</h3>
-      <p class="section-desc" style="margin:4px 0 12px;">Used by anything that writes league data into the app: a Discord bot, a results form, a script or a Stream Deck action.</p>
+      <p class="section-desc" style="margin:4px 0 12px;">One key for every /api/v1 call: controlling the show, reading its state and sending competition data. Treat it like a password.</p>
       <div>
             <div class="cmp-keyrow">
               <input type="password" id="cmp-api-key" class="input-text" readonly placeholder="Loading key..." autocomplete="off">
@@ -9582,16 +9743,41 @@ PacketSendRate=10</pre>
               <button class="btn btn-secondary btn-sm" id="cmp-key-copy" type="button">Copy</button>
               <button class="btn btn-danger btn-sm" id="cmp-key-regen" type="button">Regenerate</button>
             </div>
-            <p class="cmp-hint" style="margin-top:6px;">Send it as <code>Authorization: Bearer &lt;key&gt;</code>. The API only listens on this PC (<code>http://127.0.0.1:3000/api/v1</code>). Regenerating breaks anything using the old key.</p>
+            <p class="cmp-hint" style="margin-top:6px;">Send it as <code>Authorization: Bearer &lt;key&gt;</code> or <code>X-Api-Key: &lt;key&gt;</code>. The API only listens on this PC (<code>http://127.0.0.1:3000/api/v1</code>), so a bot or website on another machine must run a small relay script on the broadcast PC, or publish a feed for the app to poll instead. Regenerating breaks anything using the old key.</p>
       </div>
     </section>
 
+    <section class="section" id="api-sec-control">
+      <h3 class="section-title">Control the show</h3>
+      <p class="section-desc" style="margin:4px 0 12px;">The same actions the control panel and the Stream Deck use. Each call answers with the new state, so your tool always knows what is on air. <code>GET /api/v1/control</code> lists them all with their bodies.</p>
+      <div class="cmp-table-wrap"><table class="cmp-table">
+        <tr><th>Call</th><th>Body</th><th>What it does</th></tr>
+        <tr><td><code>GET /api/v1/state</code></td><td></td><td>Teams, scores, best of, round, the graphic on air, break timer, brand kits, OBS scenes.</td></tr>
+        <tr><td><code>POST /api/v1/control/score</code></td><td><code>{ "side": "blue", "delta": 1 }</code></td><td>Add (or with -1 take away) a game win. The game number follows.</td></tr>
+        <tr><td><code>POST /api/v1/control/team</code></td><td><code>{ "side": "orange", "name": "Riverside" }</code></td><td>Put a team on a side. A team in your library brings its logo and roster. Optional <code>logo</code>, <code>abbr</code>, <code>color</code>.</td></tr>
+        <tr><td><code>POST /api/v1/control/series-reset</code></td><td><code>{}</code></td><td>Back to 0-0, game 1.</td></tr>
+        <tr><td><code>POST /api/v1/control/swap-sides</code></td><td><code>{}</code></td><td>Swap the teams between the sides.</td></tr>
+        <tr><td><code>POST /api/v1/control/best-of</code></td><td><code>{ "value": 5 }</code></td><td>Series length.</td></tr>
+        <tr><td><code>POST /api/v1/control/round</code></td><td><code>{ "text": "Grand Final" }</code></td><td>The round label on the overlays.</td></tr>
+        <tr><td><code>POST /api/v1/control/graphic</code></td><td><code>{ "key": "standings" }</code></td><td>Put one full-screen graphic on air; <code>{ "key": null }</code> hides it. Keys are in <code>/api/v1/state</code>.</td></tr>
+        <tr><td><code>POST /api/v1/control/break</code></td><td><code>{ "visible": true, "seconds": 300 }</code></td><td>Break screen and countdown. Also <code>title</code>, <code>message</code>, or <code>until: "21:30"</code>.</td></tr>
+        <tr><td><code>POST /api/v1/control/banner</code></td><td><code>{ "visible": true }</code></td><td>Sponsor banner on or off. <code>casters</code> works the same for the caster lower third.</td></tr>
+        <tr><td><code>POST /api/v1/control/scene</code></td><td><code>{ "scene": "Gameplay" }</code></td><td>Cut OBS to a scene.</td></tr>
+        <tr><td><code>POST /api/v1/control/brand-kit</code></td><td><code>{ "id": "..." }</code></td><td>Make a brand kit live. Also <code>color-mode</code>, <code>team-color</code>, <code>game</code>, <code>event-name</code>.</td></tr>
+      </table></div>
+      <pre class="cmp-code" style="margin-top:10px;">curl -X POST http://127.0.0.1:3000/api/v1/control/score   -H "Authorization: Bearer YOUR_KEY" -H "Content-Type: application/json"   -d '{"side":"blue","delta":1}'</pre>
+      <p class="cmp-hint">A wrong body answers 400 and says what it expected. Everything runs through the same code as the buttons in the app, so a bot and a producer can work side by side.</p>
+    </section>
+
     <section class="section">
-      <h3 class="section-title">Competition endpoints</h3>
+      <h3 class="section-title">Competition data</h3>
+      <p class="section-desc" style="margin:4px 0 8px;">Leagues and tournaments run on the Nameless website load from the Event page with nothing to set up. Use these calls only when results live in a system of your own.</p>
+      <h4 class="cmp-subhead" style="margin:10px 0 6px; font-size:13px;">Competition endpoints</h4>
       <p class="section-desc" style="margin:4px 0 12px;">Create competitions, report results and put a league on air. Every call takes and returns one document format; the full reference ships as <code>docs/competition-api.md</code>.</p>
       <div id="cmp-tpl-api">
             <div class="cmp-table-wrap"><table class="cmp-table">
               <tr><th>Call</th><th>What it does</th></tr>
+              <tr><td><code>GET /api/v1/schema</code></td><td>The JSON Schema for the document format. No key needed.</td></tr>
               <tr><td><code>GET /api/v1/competitions</code></td><td>List competitions, and which one is live.</td></tr>
               <tr><td><code>POST /api/v1/competitions</code></td><td>Create a competition from a document.</td></tr>
               <tr><td><code>GET /api/v1/competitions/:id</code></td><td>The whole competition as a document.</td></tr>
@@ -9629,7 +9815,7 @@ PacketSendRate=10</pre>
     </section>
 
     <section class="section" id="api-sec-overlay">
-      <h3 class="section-title">Build your own overlay</h3>
+      <h3 class="section-title">Live feed and your own overlays</h3>
       <p class="field-hint" style="max-width:760px;">
         Every graphic in this app is an ordinary web page reading one live state feed over a WebSocket.
         Your own pages can read exactly the same feed — point an OBS browser source at any HTML file you
@@ -9838,21 +10024,67 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
   </div>
 
   <div id="integration-obs" class="integration-panel" style="display:none;">
-  <section class="section">
-      <h3 class="section-title">OBS Integration</h3>
+  <!-- Which program sends the stream. OBS Studio and Streamlabs Desktop share the first section
+       (select-obs-app); vMix has its own. The picker drives select-obs-app + the switcher target. -->
+  <section class="section" id="sw-picker">
+      <h3 class="section-title">Your streaming software</h3>
+      <p class="section-desc" style="margin:4px 0 12px;">The program that sends your stream. The app cuts its scenes, saves replays, records and goes live through it.</p>
+      <div class="pb-seg sw-seg" id="sw-app-seg" role="group">
+        <button type="button" data-v="obs">OBS Studio</button>
+        <button type="button" data-v="streamlabs">Streamlabs Desktop</button>
+        <button type="button" data-v="vmix">vMix</button>
+      </div>
+  </section>
+  <section class="section" id="sw-sec-obs">
+      <h3 class="section-title" id="sw-obs-title">OBS Studio</h3>
       <div style="display: flex; flex-direction: column; gap: 12px; background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px;">
         <p style="font-size: 12px; color: var(--muted); margin: 0;">
-          Connect to OBS (Tools → WebSocket Server Settings, OBS 28+). <strong style="color:#f6c177;">Automatic
-          scene switching is turned off for now</strong> — the app won't change OBS scenes on game events.
-          The connection below still works for manual scene switching and the replay buffer.
+          OBS Studio: Tools → WebSocket Server Settings (OBS 28 or newer). Streamlabs Desktop: Settings → Remote Control. Then connect below.
         </p>
 
         <div style="display: flex; align-items: center; gap: 15px;">
-          <label for="check-obs-enabled" style="font-weight: 600; color: #e0e0e0; cursor: pointer;">Enable OBS Integration</label>
+          <label for="check-obs-enabled" id="sw-obs-enable-lbl" style="font-weight: 600; color: #e0e0e0; cursor: pointer;">Connect to OBS Studio</label>
           <input type="checkbox" id="check-obs-enabled" style="width: 18px; height: 18px; cursor: pointer; accent-color: #055fdb;">
         </div>
 
-        <div style="display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px;">
+        <!-- Set by the Your streaming software picker above; kept as the value the save code reads. -->
+        <div class="field-row" style="margin-bottom: 0; display:none;">
+          <label class="field-label" for="select-obs-app">Streaming app</label>
+          <select id="select-obs-app" class="input-select">
+            <option value="obs">OBS Studio</option>
+            <option value="streamlabs">Streamlabs Desktop</option>
+          </select>
+        </div>
+
+        <div id="slobs-fields" style="display: none; flex-direction: column; gap: 10px;">
+          <div style="display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px;">
+            <div class="field-row" style="margin-bottom: 0;">
+              <label class="field-label" for="input-slobs-ip">Address</label>
+              <input type="text" id="input-slobs-ip" class="input-text" placeholder="127.0.0.1">
+            </div>
+            <div class="field-row" style="margin-bottom: 0; min-width: 90px;">
+              <label class="field-label" for="input-slobs-port">Port</label>
+              <input type="number" id="input-slobs-port" class="input-text" placeholder="59650" min="1" max="65535" style="width: 100%;">
+            </div>
+            <div class="field-row" style="margin-bottom: 0;">
+              <label class="field-label" for="input-slobs-token">API token</label>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="password" id="input-slobs-token" class="input-text" placeholder="From Settings &gt; Remote Control" style="flex: 1;" autocomplete="off">
+                <span id="slobs-token-indicator" style="display: none; padding: 8px 10px; background: rgba(74,222,128,0.2); border: 1px solid #4ade80; border-radius: 6px; font-size: 12px; color: #86efac; white-space: nowrap;">Saved</span>
+                <button type="button" id="btn-slobs-clear-token" title="Clear saved token" style="display:none; padding: 6px 10px; background: rgba(245,101,101,0.15); border: 1px solid #f56565; border-radius: 6px; color: #f56565; font-size: 12px; cursor: pointer; white-space: nowrap;">Clear</button>
+              </div>
+            </div>
+          </div>
+          <div style="background: rgba(99,179,237,0.08); border: 1px solid rgba(99,179,237,0.25); border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #90cdf4; line-height: 1.6;">
+            <strong style="color: #bee3f8;">Getting the token from Streamlabs Desktop:</strong>
+            Settings &rarr; Remote Control &rarr; click the QR code area &rarr; <em>Show details</em>. Copy the <b>API Token</b> into the field above. The port is shown there too (59650 unless changed).<br>
+            Streamlabs on another PC? Turn on <em>Allow remote connections</em> in that same page and use that PC's IP.<br>
+            <span style="color:#f6c177;">Streamlabs can't pick a transition, toggle filters, play media sources or report replay file paths over its API.</span>
+            Cuts use Streamlabs' own default transition, and replays are imported from the replay folder set on the Replays page.
+          </div>
+        </div>
+
+        <div id="obs-fields-grid" style="display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px;">
           <div class="field-row" style="margin-bottom: 0;">
             <label class="field-label" for="input-obs-ip">Server IP</label>
             <input type="text" id="input-obs-ip" class="input-text" placeholder="127.0.0.1">
@@ -9875,7 +10107,7 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
           </div>
         </div>
 
-        <div style="background: rgba(99,179,237,0.08); border: 1px solid rgba(99,179,237,0.25); border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #90cdf4; line-height: 1.6;">
+        <div id="obs-fields-help" style="background: rgba(99,179,237,0.08); border: 1px solid rgba(99,179,237,0.25); border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #90cdf4; line-height: 1.6;">
           <strong style="color: #bee3f8;">How to find these settings in OBS:</strong>
           Tools → WebSocket Server Settings → Enable WebSocket server.<br>
           The password is shown there — copy it into the field above. To skip auth, uncheck <em>Enable Authentication</em>.
@@ -9951,7 +10183,23 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
         </div>
 
         <div style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 14px; margin-top: 4px;">
-          <label class="field-label" style="margin-bottom: 8px;">Scene Collection</label>
+          <label class="field-label" style="margin-bottom: 8px;">Quick setup</label>
+          <p style="font-size: 11px; color: var(--muted); margin-bottom: 12px; line-height: 1.6;">
+            Every show is built on two sources: <code>NE Scoreboard</code> (<code>live.html</code>, the HUD of the game
+            set in this app) and <code>NE Graphics</code> (<code>gfx.html</code>, everything you put on air from the
+            Graphics panel, always on top).
+            <strong>OBS:</strong> adds NE In Game, NE Starting Soon, NE Casters and NE Replay to the scene collection you
+            already use; afterwards put your game capture under <code>NE Scoreboard</code> in <code>NE In Game</code>.
+            <strong>vMix:</strong> adds them as Web Browser inputs, puts NE Graphics on overlay channel 4, and layers
+            NE Scoreboard onto the input you mapped to In Game.
+            Nothing you made is changed or removed, running it again only refreshes, and the automatic cuts are pointed
+            at the new scenes wherever you have not picked one yourself.
+          </p>
+          <button class="btn btn-primary" id="btn-obs-build-scenes">Build show scenes</button>
+        </div>
+
+        <div style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 14px; margin-top: 14px;">
+          <label class="field-label" style="margin-bottom: 8px;">Full scene collection (advanced)</label>
           <p style="font-size: 11px; color: var(--muted); margin-bottom: 12px; line-height: 1.6;">
             Saves a ready-to-use OBS scene collection — <strong>32 scenes</strong> (pre-game, live game HUDs,
             desk/caster layouts, post-game) plus <strong>cam framing scenes</strong>
@@ -9966,7 +10214,7 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
             EQ/compress/duck independently. <strong>Re-importing resets any manual scene tweaks</strong>
             you made in OBS to this collection.
           </p>
-          <button class="btn btn-primary" id="btn-obs-download-collection">
+          <button class="btn btn-secondary" id="btn-obs-download-collection">
             &#8659;&nbsp;Save Scene Collection…
           </button>
           <div class="obs-collection-status" style="font-size:11px;margin-top:6px;color:var(--muted);min-height:16px;"></div>
@@ -9983,16 +10231,16 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
     </section>
 
     <!-- ── vMix — the full alternative production backend to OBS ── -->
-    <section class="section">
+    <section class="section" id="sw-sec-vmix">
       <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
-        <h3 class="section-title" style="margin:0;">vMix Integration <span style="font-size:11px; font-weight:600; color:var(--muted);">— alternative to OBS</span></h3>
+        <h3 class="section-title" style="margin:0;">vMix</h3>
         <span id="vmix-conn-badge" style="display:none; padding: 3px 10px; background: rgba(74, 222, 128, 0.2); border: 1px solid #4ade80; border-radius: 4px; font-size: 11px; color: #86efac; white-space: nowrap;">
           <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><polyline points="20 6 9 17 4 12"/></svg> Connected
         </span>
       </div>
       <div style="display:flex; flex-direction:column; gap:12px; background:rgba(255,255,255,0.05); padding:15px; border-radius:8px;">
         <p style="font-size:12px; color:var(--muted); margin:0;">
-          vMix is a <strong>full alternative to OBS</strong> — pick one production backend. Turn on vMix's
+          Turn on vMix's
           Web API (Settings → Web Controller in vMix) then connect below. Your overlays run in vMix as
           <strong>Web Browser inputs</strong>, and Flows can fire vMix actions (see the Flows editor's vMix group).
         </p>
@@ -10007,7 +10255,7 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
         </div>
 
         <div style="display:flex; align-items:center; gap:15px;">
-          <label for="check-vmix-enabled" style="font-weight:600; color:#e0e0e0; cursor:pointer;">Enable vMix Integration</label>
+          <label for="check-vmix-enabled" style="font-weight:600; color:#e0e0e0; cursor:pointer;">Connect to vMix</label>
           <input type="checkbox" id="check-vmix-enabled" style="width:18px; height:18px; cursor:pointer; accent-color:#055fdb;">
         </div>
 
@@ -10335,17 +10583,31 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
 
   <!-- Sponsor proof-of-play -->
   <div id="stats-panel-sponsors" style="display:none;">
-    <section class="section">
-      <h3 class="section-title">Sponsor Proof of Play</h3>
-      <p class="section-desc">Estimated on-screen time per sponsor logo for a broadcast, broken down by placement — a sellable proof-of-play report for your partners. Start a session when you go live; stop it when you wrap, then export.</p>
-      <div class="app-row" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
-        <input type="text" id="app-label" class="input-text" placeholder="Session label (defaults to event name)" style="flex:1;min-width:200px;">
-        <button class="btn btn-primary btn-sm" id="app-start">Start session</button>
-        <button class="btn btn-danger btn-sm" id="app-stop" style="display:none;">Stop &amp; save</button>
+    <section class="section sp2-hero-sec">
+      <div class="sp2-hero">
+        <div class="sp2-hero-text">
+          <h3 class="section-title" style="margin:0;">Sponsor proof of play</h3>
+          <p class="section-desc" style="margin:4px 0 0;">How long each sponsor mark was on screen, by placement, with estimated impressions from your live viewer count. Tracking starts and stops with your broadcast session; you can also run one by hand.</p>
+        </div>
+        <div class="sp2-status" id="sp2-status"></div>
+      </div>
+      <div class="app-row" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px;">
+        <input type="text" id="app-label" class="input-text" placeholder="Report name (defaults to the event name)" style="flex:1;min-width:200px;">
+        <button class="btn btn-primary btn-sm" id="app-start">Start tracking</button>
+        <button class="btn btn-danger btn-sm" id="app-stop" style="display:none;">Stop and save</button>
         <span id="app-live" class="app-live" style="display:none;"><span class="app-live-dot"></span><span id="app-live-tx">Recording</span></span>
       </div>
+    </section>
+    <section class="section">
+      <div class="sp2-sec-head"><h3 class="section-title" style="margin:0;">Last 30 days</h3><span class="section-desc" style="margin:0;">Every saved report plus the live tracker.</span></div>
+      <div id="app-summary" class="sp2-summary"></div>
+    </section>
+    <section class="section">
+      <div class="sp2-sec-head"><h3 class="section-title" style="margin:0;">This broadcast</h3><span class="section-desc" style="margin:0;">What the live tracker has logged so far, or the last unsaved run.</span></div>
       <div id="app-current"></div>
-      <h4 class="stats-sub" style="margin-top:22px;">Saved reports</h4>
+    </section>
+    <section class="section">
+      <div class="sp2-sec-head"><h3 class="section-title" style="margin:0;">Saved reports</h3><span class="section-desc" style="margin:0;">One per broadcast session. Export a CSV or JSON for the sponsor.</span></div>
       <div id="app-sessions"></div>
     </section>
   </div>
@@ -10432,7 +10694,7 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
     <div class="upd-row">
       <div class="upd-info">
         <div class="upd-ver">Current version <strong id="upd-current">—</strong></div>
-        <div class="upd-status" id="upd-status">Checking for updates…</div>
+        <div class="upd-status" id="upd-status">Not checked yet.</div>
         <div class="upd-progress" id="upd-progress" style="display:none;"><div class="upd-progress-fill" id="upd-progress-fill"></div></div>
         <div class="upd-notes" id="upd-notes" style="display:none;"></div>
       </div>
@@ -10521,6 +10783,22 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
 
   
 
+  <!-- ── Interface style: Classic / Modern (ui-style.js) ── -->
+  <section class="section" data-setcat="appearance" id="settings-ui-style">
+    <h3 class="section-title">Interface style</h3>
+    <p class="section-desc" style="max-width:680px;">How the app looks and how you move around it. Your overlays, data, hotkeys and layout choices stay exactly the same, and you can switch back at any time.</p>
+    <div class="uis-grid" role="radiogroup" aria-label="Interface style">
+      <button type="button" class="uis-card" data-ui-style="classic" role="radio" aria-checked="true">
+        <span class="uis-thumb uis-thumb-classic" aria-hidden="true"><i class="t-top"></i><i class="t-side"></i><i class="t-main"><b></b><b></b></i><i class="t-rail"></i></span>
+        <span class="uis-text"><span class="uis-name">Classic</span><span class="uis-desc">The original look. Bold labels, and everything where you already know it.</span></span>
+      </button>
+      <button type="button" class="uis-card" data-ui-style="modern" role="radio" aria-checked="false">
+        <span class="uis-thumb uis-thumb-modern" aria-hidden="true"><i class="t-top"></i><i class="t-side"><u></u><u></u><u></u></i><i class="t-main"><em></em><b></b><b></b></i><i class="t-rail"></i></span>
+        <span class="uis-text"><span class="uis-name">Modern</span><span class="uis-desc">A redesigned studio. Pages organised around the show, a Dashboard with a big scoreboard and the program preview, a Live dock and a program bar.</span></span>
+      </button>
+    </div>
+  </section>
+
   <section class="section" data-setcat="appearance" id="section-custom-overlays">
     <h3 class="section-title">Custom Overlay URLs</h3>
     <p class="section-desc">Add your own browser-source URLs as named overlay layouts for any game. They appear in the Overlay layout dropdown alongside the built-in HUDs.</p>
@@ -10548,92 +10826,60 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
     <details class="set-fold" id="gc-fold">
     <summary class="set-fold-sum">
       <span class="section-title" style="margin:0;">Custom game content</span>
-      <span class="set-fold-hint">Add maps, modes, roles and characters before an app update ships them</span>
+      <span class="set-fold-hint">Add a new character or map, or fix a picture, before an app update ships it</span>
     </summary>
-    <div style="height:12px;"></div>
-    <p class="section-desc">Add or fix this game's maps, characters, roles and role icons yourself — for when a new hero or map releases and you don't want to wait on an app update. Save &amp; apply makes it live in this app; Export writes a file you can share, Import loads one someone else built. Your content is merged with the built-in content: new items are added, and an item with the same name as a built-in one replaces its image.</p>
-
-    <div style="display:grid; grid-template-columns:160px 1fr 1fr 1fr; gap:8px; margin-bottom:10px; align-items:end;">
-      <div class="field-row" style="margin:0;">
+    <div class="gcb">
+      <div class="field-row gcb-game-row">
         <label class="field-label" for="gc-game">Game</label>
         <select id="gc-game" class="input-select"></select>
       </div>
-      <div class="field-row" style="margin:0;">
-        <label class="field-label" for="gc-author">Author</label>
-        <input type="text" id="gc-author" class="input-text" placeholder="Your name">
-      </div>
-      <div class="field-row" style="margin:0;">
-        <label class="field-label" for="gc-version">Game Version</label>
-        <input type="text" id="gc-version" class="input-text" placeholder="e.g. Season 10">
-      </div>
-      <div class="field-row" style="margin:0;">
-        <label class="field-label" for="gc-config-id">Config ID</label>
-        <input type="text" id="gc-config-id" class="input-text" placeholder="e.g. johndoe.overwatch-s10">
-      </div>
-    </div>
+      <p class="gcb-intro" id="gcb-intro">Everything this app knows for this game. Click a card to change its picture, name or role, or add a new one. Changes apply straight away.</p>
 
-    <p class="section-desc" id="gc-status-line" style="margin-bottom:10px;"></p>
+      <div class="gcb-versions" id="gcb-versions">
+        <label class="field-label" for="gcb-version-sel">Using</label>
+        <select id="gcb-version-sel" class="input-select"></select>
+        <span class="gcb-version-state" id="gcb-version-state"></span>
+        <span style="flex:1;"></span>
+        <button type="button" class="btn btn-secondary btn-sm" id="gcb-version-update" hidden>Update version</button>
+        <button type="button" class="btn btn-secondary btn-sm" id="gcb-version-new">Save as a version</button>
+        <button type="button" class="btn btn-ghost btn-sm gcb-danger" id="gcb-version-del" hidden>Delete version</button>
+      </div>
 
-    <nav class="lg2-tabs gc-tabs" id="gc-tabs">
-      <button type="button" class="lg2-tab active" data-tab="maps">Maps <span class="gc-tab-badge" id="gc-badge-maps">0</span></button>
-      <button type="button" class="lg2-tab" data-tab="modes">Modes <span class="gc-tab-badge" id="gc-badge-modes">0</span></button>
-      <button type="button" class="lg2-tab" data-tab="roles">Roles <span class="gc-tab-badge" id="gc-badge-roles">0</span></button>
-      <button type="button" class="lg2-tab" data-tab="characters">Characters <span class="gc-tab-badge" id="gc-badge-characters">0</span></button>
-    </nav>
+      <nav class="lg2-tabs gc-tabs" id="gc-tabs">
+        <button type="button" class="lg2-tab" data-tab="characters">Characters <span class="gc-tab-badge" id="gc-badge-characters">0</span></button>
+        <button type="button" class="lg2-tab" data-tab="maps">Maps <span class="gc-tab-badge" id="gc-badge-maps">0</span></button>
+        <button type="button" class="lg2-tab" data-tab="roles">Roles <span class="gc-tab-badge" id="gc-badge-roles">0</span></button>
+      </nav>
 
-    <div class="gc-panel" id="gc-panel-maps">
-      <div class="gc-dropzone" id="gc-dropzone-maps">
-        <div class="gc-dropzone-hint">
-          <span>Drop map images here, or</span>
-          <button class="btn btn-primary btn-sm" id="gc-upload-maps" type="button">Upload images</button>
-          <button class="btn btn-ghost btn-sm" id="gc-add-maps" type="button">Add without image</button>
+      <div class="gcb-toolbar" id="gcb-toolbar">
+        <input type="search" id="gcb-search" class="input-text gcb-search" placeholder="Search" autocomplete="off" spellcheck="false">
+        <button type="button" class="btn btn-primary btn-sm" id="gcb-add">Add character</button>
+        <button type="button" class="btn btn-secondary btn-sm" id="gcb-upload" title="Pick several pictures at once. Each file name becomes the name, and a file named after an existing one replaces its picture.">Upload pictures</button>
+        <span class="gcb-status" id="gcb-status" aria-live="polite"></span>
+      </div>
+
+      <div class="gcb-editor" id="gcb-editor" hidden></div>
+      <div class="gcb-body" id="gcb-body"></div>
+      <p class="gcb-drop-hint" id="gcb-drop-hint">Tip: drag pictures from your computer onto this list to add them in one go.</p>
+
+      <details class="gcb-share" id="gcb-share">
+        <summary>Share or reset</summary>
+        <p class="section-desc">Export saves your changes for this game to a file another producer can import. Author and version are optional labels shown to whoever imports it.</p>
+        <div class="gcb-share-fields">
+          <div class="field-row"><label class="field-label" for="gc-author">Author</label><input type="text" id="gc-author" class="input-text" placeholder="Your name"></div>
+          <div class="field-row"><label class="field-label" for="gc-version">Game version</label><input type="text" id="gc-version" class="input-text" placeholder="e.g. Season 20"></div>
+          <div class="field-row"><label class="field-label" for="gc-config-id">File name</label><input type="text" id="gc-config-id" class="input-text" placeholder="e.g. overwatch-season-20"></div>
         </div>
-        <div class="gc-dropzone-sub">PNG, JPG, WebP or SVG. Select several at once — each file name becomes the map name. Click a thumbnail to change its image.</div>
-      </div>
-      <div id="gc-list-maps"></div>
-    </div>
-
-    <div class="gc-panel" id="gc-panel-modes" style="display:none;">
-      <div style="display:flex; gap:8px; margin-bottom:10px;">
-        <input type="text" id="gc-mode-name" class="input-text" style="flex:1;" placeholder="Mode name (e.g. Hardpoint)">
-        <input type="text" id="gc-mode-desc" class="input-text" style="flex:2;" placeholder="Description (optional)">
-        <button class="btn btn-primary btn-sm" id="gc-add-mode" type="button">Add</button>
-      </div>
-      <p class="section-desc" style="margin-bottom:10px;">Modes you add here are offered as the Mode / type on the Maps tab.</p>
-      <div id="gc-list-modes"></div>
-    </div>
-
-    <div class="gc-panel" id="gc-panel-roles" style="display:none;">
-      <div style="display:flex; gap:8px; margin-bottom:10px;">
-        <input type="text" id="gc-role-name" class="input-text" style="flex:1;" placeholder="Add a role (e.g. Flex)">
-        <button class="btn btn-primary btn-sm" id="gc-add-role" type="button">Add</button>
-      </div>
-      <p class="section-desc" style="margin-bottom:10px;">Click a role's icon box to upload its icon (a white or light icon on a transparent background reads best). Icons show in the player Role picker and on overlays that print a role.</p>
-      <div id="gc-list-roles"></div>
-    </div>
-
-    <div class="gc-panel" id="gc-panel-characters" style="display:none;">
-      <div class="gc-dropzone" id="gc-dropzone-characters">
-        <div class="gc-dropzone-hint">
-          <span>Drop character portrait images here, or</span>
-          <button class="btn btn-primary btn-sm" id="gc-upload-characters" type="button">Upload images</button>
-          <button class="btn btn-ghost btn-sm" id="gc-add-characters" type="button">Add without image</button>
+        <div class="gcb-share-actions">
+          <button class="btn btn-secondary btn-sm" id="btn-gc-export" type="button">Export to file</button>
+          <button class="btn btn-secondary btn-sm" id="btn-gc-import" type="button">Import from file</button>
+          <span style="flex:1;"></span>
+          <button class="btn btn-ghost btn-sm" id="btn-gc-reset" type="button" style="display:none;">Go back to the original content</button>
         </div>
-        <div class="gc-dropzone-sub">PNG, JPG, WebP or SVG. Select several at once — each file name becomes the character name. Set a role so role filters and ban limits include it.</div>
-      </div>
-      <div id="gc-list-characters"></div>
+      </details>
+      <div id="gc-result" class="gcb-result"></div>
+      <input type="file" id="gc-file" accept="image/*" hidden>
     </div>
-
-    <input type="file" id="gc-file" accept="image/*" hidden>
-    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:14px; padding-top:14px; border-top:1px solid var(--border);">
-      <button class="btn btn-primary btn-sm" id="btn-gc-save" type="button">Save &amp; apply</button>
-      <span class="gc-chip gc-chip-warn" id="gc-dirty" style="display:none;">Unsaved changes</span>
-      <span style="flex:1;"></span>
-      <button class="btn btn-secondary btn-sm" id="btn-gc-export" type="button" title="Write this content to a .zip you can share">Export to file</button>
-      <button class="btn btn-secondary btn-sm" id="btn-gc-import" type="button">Import from file</button>
-      <button class="btn btn-ghost btn-sm" id="btn-gc-reset" type="button" style="display:none;">Reset to built-in</button>
-    </div>
-    <div id="gc-result" style="margin-top:10px; font-size:13px;"></div>
     </details>
   </section>
 
@@ -10711,6 +10957,10 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
         <label class="qt-toggle"><span>Enabled</span><span class="switch"><input type="checkbox" id="settings-auto-reload" checked><span class="slider"></span></span></label>
       </div>
       <div class="field-row" style="margin:0;">
+        <label class="field-label">Follow the bracket's game</label>
+        <label class="qt-toggle" title="When you push a start.gg set from a different bracket than the last one (for example a Rocket League set after Ultimate singles), switch to that bracket's game. Changing the game by hand still sticks for the rest of that bracket."><span>Switch game per start.gg set</span><span class="switch"><input type="checkbox" id="settings-follow-set-game"><span class="slider"></span></span></label>
+      </div>
+      <div class="field-row" style="margin:0;">
         <label class="field-label">Show Series Score on HUD</label>
         <label class="qt-toggle"><span>Visible</span><span class="switch"><input type="checkbox" id="settings-show-series" checked><span class="slider"></span></span></label>
       </div>
@@ -10718,6 +10968,46 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
         <label class="field-label">Show promotions</label>
         <label class="qt-toggle" title="A slim line on the Dashboard, Events and Marketplace pages about Nameless events and sponsors. Never shown while you are live, and never on air."><span>Nameless events &amp; sponsors</span><span class="switch"><input type="checkbox" id="settings-show-promos" checked><span class="slider"></span></span></label>
       </div>
+    </div>
+  </section>
+
+  <!-- ── Match titles: one template for the Twitch title and the VOD file names ── -->
+  <section class="section" data-setcat="broadcast" id="settings-match-titles">
+    <h3 class="section-title">Match Titles</h3>
+    <p class="section-desc" style="max-width:760px;margin-bottom:10px;">Name the stream and the recordings after the match on air. Placeholders: <code>{event}</code> <code>{round}</code> <code>{team1}</code> <code>{team2}</code> <code>{score}</code> <code>{bestof}</code> <code>{game}</code> <code>{maps}</code> <code>{date}</code> <code>{time}</code>. A placeholder with nothing in it disappears along with its dash or brackets.</p>
+    <div class="settings-grid-2">
+      <div class="mtt-card">
+        <label class="qt-toggle"><span>Update the Twitch title when the match changes</span><span class="switch"><input type="checkbox" id="mtt-twitch-auto"><span class="slider"></span></span></label>
+        <label class="field-label" for="mtt-twitch-tpl" style="margin-top:10px;">Twitch title</label>
+        <input type="text" id="mtt-twitch-tpl" class="input-text" maxlength="300" spellcheck="false" />
+        <div class="mtt-preview"><span class="mtt-preview-k">Now:</span> <span id="mtt-twitch-preview"></span></div>
+        <div class="mtt-status-row">
+          <span class="field-hint" id="mtt-twitch-status" style="margin:0;"></span>
+          <span style="flex:1;"></span>
+          <button type="button" class="btn btn-sm" id="mtt-twitch-push">Update now</button>
+        </div>
+      </div>
+      <div class="mtt-card">
+        <label class="qt-toggle"><span>Rename OBS recordings after each match</span><span class="switch"><input type="checkbox" id="mtt-vod-rename"><span class="slider"></span></span></label>
+        <label class="field-label" for="mtt-vod-tpl" style="margin-top:10px;">Recording name</label>
+        <input type="text" id="mtt-vod-tpl" class="input-text" maxlength="300" spellcheck="false" />
+        <div class="mtt-preview"><span class="mtt-preview-k">Now:</span> <span id="mtt-vod-preview"></span></div>
+        <div class="mtt-opts">
+          <label class="mtt-check"><input type="checkbox" id="mtt-vod-folder"> Event subfolder</label>
+          <label class="mtt-check"><input type="checkbox" id="mtt-vod-date"> Date in front</label>
+          <label class="mtt-check"><input type="checkbox" id="mtt-vod-csv"> Log to recordings.csv</label>
+        </div>
+        <p class="field-hint" style="margin:6px 0 0;">Start and stop the recording once per series. The name uses the match on air when it started, including score and edits made while it ran.</p>
+      </div>
+    </div>
+    <label class="mtt-check" style="margin-top:10px;"><input type="checkbox" id="mtt-strip-sponsors"><span>Remove sponsor prefixes from player tags, so <code>TSM | Leffen</code> becomes <code>Leffen</code></span></label>
+    <div id="mtt-vod-log-wrap" style="display:none;margin-top:14px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+        <span class="field-label" style="margin:0;">Recent recordings</span>
+        <span style="flex:1;"></span>
+        <button type="button" class="btn btn-ghost btn-sm" id="mtt-vod-clear">Clear list</button>
+      </div>
+      <div id="mtt-vod-log" class="mtt-log"></div>
     </div>
   </section>
 
@@ -10985,14 +11275,13 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
         <label class="qt-toggle"><span>Shots</span><span class="switch"><input type="checkbox" id="check-capture-shot"><span class="slider"></span></span></label>
       </div>
       <div class="field-row" style="margin-top:10px;">
-        <label class="field-label" for="select-montage-template">New-montage template</label>
+        <label class="field-label" for="select-montage-template">Style for new playlists <span style="opacity:.55;font-weight:400;">(Make Playlist on the Replays page)</span></label>
         <select id="select-montage-template" class="input-select" style="max-width:320px;">
           <option value="highlights">Highlight reel</option>
           <option value="brb">BRB reel</option>
           <option value="postgame">Post-game recap</option>
         </select>
       </div>
-      <button class="btn btn-secondary btn-sm" id="btn-montage-create" style="margin-top:8px;">Build montage from selected</button>
 
       <hr style="border:none;border-top:1px solid var(--border);margin:18px 0 12px;">
       <span class="field-label" style="margin:0 0 8px;">Auto ad-break <span style="font-weight:500;color:var(--muted);">— rolls the chosen playlist on an interval (applies to the whole show, not just the selected playlist)</span></span>
@@ -11122,7 +11411,9 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
     <div class="qrail-resize" id="qrail-resize" title="Drag to resize"></div>
     <!-- vertical icon-only nav (right edge) — click active tab to close panel -->
     <nav class="qrail-tabs" id="qrail-tabs">
-      <button class="qrail-tab active" data-qtab="quick" title="Scenes — quick scene cuts &amp; overlay view"><span class="qrail-tab-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg></span></button>
+      <button class="qrail-tab active" data-qtab="controls" title="Controls — score, break timer, graphics, scenes and replay in one place"><span class="qrail-tab-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg></span></button>
+      <button class="qrail-tab" data-qtab="show" title="Show — next matches, run of show, replay and stream title"><span class="qrail-tab-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M10 8.5v5l4-2.5z" fill="currentColor"/><line x1="8" y1="21" x2="16" y2="21"/></svg></span></button>
+      <button class="qrail-tab" data-qtab="quick" title="Scenes — quick scene cuts &amp; overlay view"><span class="qrail-tab-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg></span></button>
       <button class="qrail-tab" data-qtab="ros" title="Rundown — drive the run of show"><span class="qrail-tab-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/></svg></span><span class="qrail-tab-dot" id="qrail-ros-dot" style="display:none;"></span></button>
       <button class="qrail-tab" data-qtab="startgg" title="Start.gg — stream queue &amp; live matches"><span class="qrail-tab-ico"><img src="../assets/images/start.png" alt="start.gg" class="qrail-sgg-logo"></span><span class="qrail-tab-dot" id="qrail-sgg-dot" style="display:none;"></span></button>
       <button class="qrail-tab" data-qtab="graphics" title="Overlays — toggle on-screen elements"><span class="qrail-tab-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></span></button>
@@ -11152,7 +11443,9 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
     <div class="qrail-body">
 
       <!-- ── QUICK: producer cockpit — now/next, put-on-air chips (with gear), program cuts ── -->
-      <div class="qrail-panel active" data-qpanel="quick">
+      <div class="qrail-panel active" data-qpanel="controls"><div class="dkc" id="dock-controls"></div></div>
+      <div class="qrail-panel" data-qpanel="show"><div class="dkc" id="dock-show"></div></div>
+      <div class="qrail-panel" data-qpanel="quick">
 
         <!-- Producer cockpit: ON STREAM (what's live) + a Run-of-Show phase controller (back / current / next). -->
         <div class="qk-cockpit" id="qk-cockpit">
@@ -12575,12 +12868,18 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
 <script src="app.js"></script>
 <script src="obs-preview.js"></script>
 <script src="stats-analytics.js"></script>
+<script src="analytics-ui.js"></script>
+<script src="an-charts.js"></script>
+<script src="analytics-charts.js"></script>
 <script src="spotlight.js"></script>
 <script src="leagues.js"></script>
 <script src="br-lobby.js"></script>
 <script src="gameconfig.js"></script>
 <script src="promos.js"></script>
 <script src="games-hub.js"></script>
+<script src="gfx-form-kit.js"></script>
+<script src="dock-controls.js"></script>
+<script src="dock-show.js"></script>
 <script src="league-interchange.js"></script>
 <script src="competitions.js"></script>
   <script src="events.js"></script>
@@ -12593,6 +12892,19 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
      _dccSetRole, which the modules above define. -->
 <script src="navsearch.js"></script>
   <script src="nav-simplify.js"></script>
+<!-- Last: the Modern shell reads the sidebar after app.js has wrapped its items. -->
+<script src="ui-modern-copy.js"></script>
+<script src="ui-style.js"></script>
+<script src="ui-widgets.js"></script>
+<script src="ui-home.js"></script>
+<script src="../overlay/custom-render.js"></script>
+<script src="overlay-builder.js"></script>
+<script src="overlays-page.js"></script>
+<script src="site-events.js"></script>
+<script src="settings-connections.js"></script>
+<script src="settings-diagnostics.js"></script>
+<script src="sticky-fit.js"></script>
+<script src="fix-bars.js"></script>
 
 </body>
 </html>

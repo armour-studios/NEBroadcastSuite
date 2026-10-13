@@ -141,6 +141,30 @@ switcher.getState()                  // normalized {active, preview, overlays, s
 
 ---
 
+## 4b. Update 2026-10-08: automated paths now follow the switcher
+
+The §5a punch-list below is DONE. With `state.switcher.target === 'vmix'`:
+
+- **Automated cuts** go through `switcherAutoCut(name, transition)` in server.js (validates the vMix input
+  exists, AI shield, enabled/connected; returns `{ok, reason}`): game-event auto-switch (`obsSwitch`), RL
+  kickoff / scoreboard / post-game and the countdown "then" cut (`rlSwitchScene`), flow `obs_scene` and
+  `obs_scene_previous` (vMix previous program tracked as `state.vmix.previousTitle`).
+- **Commercial break** cuts to the mapped input and back to `switcherProgramName()`.
+- **Replays**: save-replay (button, flow, goal auto-replay, bottom-bar clip) = `ReplayMarkLast` (last 10s as a
+  replay event); the replay-buffer toggle = `ReplayStartStopRecording`; replay push-to-program uses `switcherCut`.
+- **One moment map for both switchers**: `state.obs.scenes` holds OBS scene names or vMix input titles. The
+  broadcast swaps `obs.availableScenes` / `obs.currentScene` for vMix input titles / the program input, so every
+  existing scene picker, program highlight and Stream Deck scene key follows vMix with no per-caller change.
+- **Setup**: `backend/vmix-place.js`. Overlay card "+" = a named Web Browser input (`AddInput Browser|url`, then
+  `SetInputName`; existing = `BrowserNavigate`). "Build show scenes" = NE Scoreboard (`live.html`), NE Graphics
+  (`gfx.html`, put on overlay channel 4 = top), NE Casters, NE Replay Player; NE Scoreboard is layered onto the
+  input mapped to In Game (`SetMultiViewOverlay 1,NE Scoreboard`). gfx.html's own graphics are never added as
+  separate inputs (they would show twice).
+- Tests: `test/vmix-place.test.js` (fake vMix), `scripts/e2e-vmix.js` (running app vs a fake vMix on :18088).
+- ⚠ Not yet run against a REAL vMix. Function names/arguments to confirm first: `AddInput Browser|url`,
+  `ReplayMarkLast`, `ReplayStartStopRecording`, `SetMultiViewOverlay` (vMix 24+ also calls it `SetLayer`).
+- Still open: the Switcher page tab is hidden; vMix tiles have no thumbnails; TCP tally (:8099).
+
 ## 5. Phased build plan — status as of 2026-07-08 (code-verified, not aspirational)
 
 Phase 1 turned out to deliver more than originally scoped — the switcher abstraction from §4 is

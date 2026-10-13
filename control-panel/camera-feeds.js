@@ -10,11 +10,10 @@
 // ══════════════ Camera Feeds tab — Players / Casters / Gameplay / Settings ══════════════
 const CF_OVERLAY_BASE = 'http://localhost:3000';
 function cfShowSubtab(cf) {
-  // Players sub-tab retired — player cam assignment lives in Match — Teams (gear) and the
-  // Talent Monitor's Players tab. Old saved subtab values / deep links land on Talent Rooms.
-  if (cf === 'players') cf = 'talent';
   document.querySelectorAll('#cf-subnav .cf-tab').forEach((b) => b.classList.toggle('active', b.dataset.cf === cf));
   document.querySelectorAll('#tab-facecams-content .cf-panel').forEach((p) => p.classList.toggle('active', p.id === 'cf-panel-' + cf));
+  // Player cams: the same shared panel as Match ▸ Rocket League ▸ Players and the Talent Monitor.
+  if (cf === 'players' && typeof renderPlayerCamMounts === 'function') renderPlayerCamMounts(true);
   if (cf === 'talent') cfLoadTalent();
   if (cf === 'gameplay') { renderCfShares(); renderCfStreamStations(currentState); }
   if (cf === 'stations') cfLoadStations();
@@ -95,6 +94,7 @@ async function cfLoadTalent() {
     if (hint) hint.innerHTML = (anyMatchPlayers || allTeams.some(t => t.hasRoom && t.players.length))
       ? '' : '<div class="talent-note">Set up teams + rosters on the <b>Teams</b> page, then hit <b>Generate rooms</b> to create private VDO rooms for every player.</div>';
     cfUpdateListenPill(currentState);
+    wrap.dataset.loaded = '1';
     renderVdoRooms();             // rooms manager reads currentState + this fresh fetch
     _cfDirectorData = d;          // cache for the Director Control Center
     cfRenderDirectorCenter();
@@ -104,9 +104,19 @@ async function cfLoadTalent() {
     cfFilterTalent();             // re-apply any active search filter
     // Auto-start the (media-free) director presence so connection status updates the moment a
     // player joins — no need to manually open the Director Control Center.
-    if (!_directorOn) { cfStartDirectorConsoles(); renderQtalent(); }
+    if (!_directorOn && !window._directorUserStopped && cfMonitorVisible()) { cfStartDirectorConsoles(); renderQtalent(); }
     else if (typeof cfSyncDirectorConsoles === 'function') cfSyncDirectorConsoles();   // add any new rooms
-  } catch (e) { wrap.innerHTML = `<p style="color:#f56565;">Error: ${tlEsc(e.message)}</p>`; }
+  } catch (e) {
+    // The rooms manager is built from currentState, so it can still render without this fetch.
+    try { renderVdoRooms(); } catch (_) {}
+    const network = e instanceof TypeError;   // fetch could not reach the app (e.g. still starting)
+    if (!wrap.dataset.loaded) {
+      wrap.innerHTML = network
+        ? '<p class="talent-note">Connecting to the app&hellip; this list fills in on its own.</p>'
+        : `<p style="color:#f56565;">Could not load the talent rooms: ${tlEsc(e.message)}</p>`;
+    }
+    if (network) { clearTimeout(window._cfRetryT); window._cfRetryT = setTimeout(() => { if (typeof cfLoadTalent === 'function') cfLoadTalent(); }, 3000); }
+  }
 }
 
 // ── VDO Rooms manager — every room in one list; generate or link an existing room ──
@@ -129,7 +139,7 @@ function _vdoRoomRows() {
   rows.push({ kind: 'group', key: 'casters',   label: 'Hosts / Casters desk', badge: 'HOSTS',     color: '#e83a8b', vdo: c.vdo });
   rows.push({ kind: 'group', key: 'guests',    label: 'Guest lobby',          badge: 'LOBBY',     color: '#a855f7', vdo: c.guestsVdo });
   rows.push({ kind: 'group', key: 'observers', label: 'In-game observers',    badge: 'OBSERVERS', color: '#2dd4bf', vdo: c.observersVdo });
-  rows.push({ kind: 'group', key: 'interview', label: 'Interview room',       badge: 'INTERVIEW', color: '#fbbf24', vdo: c.interview });
+  // No separate "Interview room" row: interviews use the desk room (Set desk on a named room below).
   (c.rooms || []).forEach((r) => rows.push({ kind: 'named', key: r.id, label: r.name || 'Talent room',
     badge: 'ROOM', color: '#8b5cf6', vdo: r.vdo, isDesk: c.deskRoomId === r.id }));
   return rows;
@@ -197,6 +207,10 @@ function renderVdoRooms() {
       const name = ctx.row.querySelector('.cf-room-linkname')?.value.trim();
       const pass = ctx.row.querySelector('.cf-room-linkpw')?.value.trim();
       if (!name) { showToast('Enter the existing room name', '#fbbf24'); return; }
+      if (!pass) { showToast('Enter the room password too: without it the app cannot build working links', '#fbbf24'); return; }
+      // Both go into every join link unescaped (?room=...#p=...), so a space, & or # breaks them all.
+      // VDO.Ninja room names are letters, digits and underscores anyway.
+      if (!/^[A-Za-z0-9_-]+$/.test(name) || !/^[A-Za-z0-9_-]+$/.test(pass)) { showToast('Room name and password can only use letters, numbers, - and _', '#fbbf24'); return; }
       const [type, data] = roomMsg(ctx.kind, ctx.key, { room: name, password: pass || '' });
       send(type, data);
       showToast('Room linked — join links now point at your room', '#22c55e');
@@ -225,8 +239,8 @@ function renderVdoRooms() {
     }
   });
   const add = el('cf-room-add');
-  if (add) add.addEventListener('click', () => {
-    const name = prompt('Name for the new talent room (e.g. "Analyst desk 2", "Green room")');
+  if (add) add.addEventListener('click', async () => {
+    const name = await customPrompt('New talent room', 'For example: Analyst desk 2, Green room.', '', 'Create');
     if (!name || !name.trim()) return;
     send('save_caster_room', { name: name.trim() });
     showToast('Room created', '#22c55e');
@@ -291,6 +305,12 @@ function cfDirectorConsoles() {
     const g = G[k];
     if (g && g.room && g.directorUrl) out.push({ key: k, label, color, room: g.room, url: g.directorUrl, kind: 'group' });
   });
+  // The desk (interview) room and named talent rooms: players moved there must be visible to a
+  // director console, or "Return" has no console to move them back with.
+  if (d.casterRoom && d.casterRoom.room && d.casterRoom.directorUrl) out.push({ key: 'desk', label: 'DESK', color: '#e83a8b', room: d.casterRoom.room, url: d.casterRoom.directorUrl, kind: 'group' });
+  (d.namedRooms || []).forEach((r) => {
+    if (r && r.room && r.directorUrl) out.push({ key: 'named_' + r.id, label: String(r.name || 'Talent room').toUpperCase(), color: '#8b5cf6', room: r.room, url: r.directorUrl, kind: 'group' });
+  });
   // WEBSITE station rooms — the rooms the invite system actually fills. First-class console
   // tabs (full-width, same top toggles, same talent sidebar) pointed at the bound station.
   const stRooms = (window._cfStationDetail && window._cfStationDetail.rooms) || [];
@@ -299,7 +319,7 @@ function cfDirectorConsoles() {
       key: 'station_' + r.id,
       label: (r.name || (r.kind === 'observer' ? 'Observer feeds' : 'Caster room')).toUpperCase(),
       color: r.kind === 'observer' ? '#2dd4bf' : '#8b5cf6',
-      room: 'st_' + r.id,
+      room: r.vdoRoom || ('st_' + r.id),   // the real VDO room, so drag-to-room transfers land there
       url: r.monitorUrl,
       kind: 'station'
     });
@@ -392,6 +412,16 @@ function cfSwitchConsole(roomId) {
   cfRenderConsoleTabs();
 }
 
+// Is any monitoring surface on screen? Director iframes are one VDO session per room, so they are
+// only mounted when someone can see them: the DCC Monitor tab, the dock's Talent tab or a Modern
+// Cameras drawer. Opening one of those starts monitoring (cfTalentAutoOpen); a hidden boot does not.
+function cfMonitorVisible() {
+  const mv = el('dcc-monitor-view');
+  if (mv && mv.offsetParent) return true;
+  const dock = document.querySelector('.qrail-panel.active[data-qpanel="talent"]');
+  if (dock && dock.offsetParent) return true;
+  return !!document.querySelector('.mx-drawer.is-open #tab-facecams-content, .mx-drawer.is-open #dcc-monitor-view');
+}
 function cfStartDirectorConsoles() {
   const consoles = cfDirectorConsoles();
   if (!consoles.length) { const n = el('cf-dc-note'); if (n) n.textContent = 'No rooms to manage yet — generate team/caster rooms first.'; }
@@ -412,7 +442,7 @@ function cfStartDirectorConsoles() {
   cfRenderConsoleTabs();
   clearInterval(_connPoll); _connPoll = setInterval(cfPollGuests, 3000); setTimeout(cfPollGuests, 1200);
   cfUpdateConnStatus();
-  const n = el('cf-dc-note'); if (n) n.textContent = 'Monitoring rooms as director (no camera/mic). Connection dots update as players join. Use the per-player buttons or drag onto the Interview room to transfer.';
+  const n = el('cf-dc-note'); if (n) n.textContent = 'Monitoring rooms as director (no camera/mic). Connection dots update as players join. Use the per-player buttons or drag a player onto a room tab to transfer.';
 }
 // Mount consoles for any rooms that appeared after the director started (e.g. the Casters / Guests /
 // Observers rooms get provisioned when you open those tabs). Adds them live without a restart, so
@@ -432,7 +462,21 @@ function cfSyncDirectorConsoles() {
     _directorFrames[c.room] = { iframe: f, ready: false, kind: c.kind };
     added = true;
   });
-  if (added) { cfRenderConsoleTabs(); setTimeout(cfPollGuests, 800); }
+  const want = new Set(cfDirectorConsoles().map((c) => c.room));
+  let removed = false;
+  Object.keys(_directorFrames).forEach((room) => {
+    if (want.has(room)) return;
+    const f = _directorFrames[room];
+    if (f && f.iframe) f.iframe.remove();
+    delete _directorFrames[room];
+    removed = true;
+  });
+  if (removed && !_directorFrames[_dcActiveRoom]) {
+    const first = cfDirectorConsoles()[0];
+    _dcActiveRoom = first ? first.room : '';
+    if (first && typeof cfSwitchConsole === 'function') cfSwitchConsole(first.room);
+  }
+  if (added || removed) { cfRenderConsoleTabs(); setTimeout(cfPollGuests, 800); }
 }
 function cfStopDirectorConsoles() {
   _directorOn = false;
@@ -542,19 +586,32 @@ function cfPollGuests() {
     if (f.iframe && f.iframe.contentWindow) { try { f.iframe.contentWindow.postMessage({ action: 'getGuestList', cib: 'gl' }, '*'); } catch (e) {} }
   });
 }
+// Connection / camera dots for every talent row, team and caster card. Called from many places,
+// often several times in one state redraw (once per talent host, from applyState, from the
+// director consoles…), and each pass searched the whole page five times and rewrote every dot's
+// attributes. It is display-only, so coalesce bursts into one pass and skip unchanged writes.
+let _cfConnTimer = null;
 function cfUpdateConnStatus() {
+  if (_cfConnTimer) return;
+  _cfConnTimer = setTimeout(() => { _cfConnTimer = null; _cfUpdateConnStatusNow(); }, 50);
+}
+function _cfSet(dot, key, val, title) {
+  if (dot.dataset[key] !== val) dot.dataset[key] = val;
+  if (dot.title !== title) dot.title = title;
+}
+function _cfUpdateConnStatusNow() {
   const live = _directorOn;
   document.querySelectorAll('.mc-player[data-stream]').forEach((row) => {
     const sid = row.dataset.stream;
     const on = _connectedStreams.has(sid);
     const dot = row.querySelector('.mc-stat-conn');
-    if (dot) { dot.dataset.conn = !live ? '0' : (on ? '1' : '0'); dot.title = !live ? 'Start monitoring to detect connection' : (on ? 'Connected' : 'Not detected in any room'); }
+    if (dot) { _cfSet(dot, 'conn', !live ? '0' : (on ? '1' : '0'), !live ? 'Start monitoring to detect connection' : (on ? 'Connected' : 'Not detected in any room')); }
     // Camera icon pulses green when the player is live in a room with their camera up.
     const camEl = row.querySelector('.mc-stat-cam');
     if (camEl) {
       const camLive = live && _videoStreams.has(sid);
       camEl.classList.toggle('live', camLive);
-      camEl.title = camLive ? 'Camera live' : (camEl.dataset.camConfig === '1' ? 'Camera linked (not live yet)' : 'No camera');
+      if (camEl.title !== (camLive ? 'Camera live' : (camEl.dataset.camConfig === '1' ? 'Camera linked (not live yet)' : 'No camera'))) camEl.title = camLive ? 'Camera live' : (camEl.dataset.camConfig === '1' ? 'Camera linked (not live yet)' : 'No camera');
     }
   });
   document.querySelectorAll('.mc-team[data-side]').forEach((team) => {
@@ -562,19 +619,18 @@ function cfUpdateConnStatus() {
     const any = rows.some((r) => _connectedStreams.has(r.dataset.stream));
     const all = rows.length && rows.every((r) => _connectedStreams.has(r.dataset.stream));
     const dot = team.querySelector('.mc-team-conn');
-    if (dot) { dot.dataset.conn = !live ? '0' : (all ? '1' : (any ? 'partial' : '0')); dot.title = !live ? 'Start director consoles to detect connection' : (all ? 'All players connected' : (any ? 'Some players connected' : 'No players detected')); }
+    if (dot) { _cfSet(dot, 'conn', !live ? '0' : (all ? '1' : (any ? 'partial' : '0')), !live ? 'Start director consoles to detect connection' : (all ? 'All players connected' : (any ? 'Some players connected' : 'No players detected'))); }
   });
   // Caster lineup cards — same live pulse, keyed by each slot's stream id.
   document.querySelectorAll('.cf-ln-conn[data-stream], .qtalent-conn[data-stream]').forEach((dot) => {
     const on = _connectedStreams.has(dot.dataset.stream);
-    dot.dataset.conn = !live ? '0' : (on ? '1' : '0');
-    dot.title = !live ? 'Start Director monitoring to detect connection' : (on ? 'Connected' : 'Not detected in the room');
+    _cfSet(dot, 'conn', !live ? '0' : (on ? '1' : '0'), !live ? 'Start Director monitoring to detect connection' : (on ? 'Connected' : 'Not detected in the room'));
   });
   // Talent camera dots (rail + dashboard) — pulse green when monitoring sees their video.
   document.querySelectorAll('.qtalent-host .qtalent-cam[data-stream]').forEach((cam) => {
     const camLive = live && _videoStreams.has(cam.dataset.stream);
     cam.classList.toggle('live', camLive);
-    cam.title = camLive ? 'Camera live' : 'Camera not live';
+    const camTitle = camLive ? 'Camera live' : 'Camera not live'; if (cam.title !== camTitle) cam.title = camTitle;
   });
   // Live-update each talent host's connection count without a full re-render.
   if (live) {
@@ -582,7 +638,7 @@ function cfUpdateConnStatus() {
       const monTxt = host.querySelector('.qtalent-mon .qt-mon-txt'); if (!monTxt) return;
       const dots = host.querySelectorAll('.qtalent-conn[data-stream]');
       const conn = Array.prototype.filter.call(dots, (dt) => dt.dataset.conn === '1').length;
-      monTxt.textContent = `Monitoring · ${conn}/${dots.length} connected`;
+      const monLine = `Monitoring · ${conn}/${dots.length} connected`; if (monTxt.textContent !== monLine) monTxt.textContent = monLine;
     });
   }
 }
@@ -645,13 +701,14 @@ window.addEventListener('message', (e) => {
 });
 
 el('cf-dc-start')?.addEventListener('click', async () => {
+  window._directorUserStopped = false;
   // Pull fresh room data (teams + caster/interview + the Casters/Guests/Observers group rooms)
   // before mounting consoles, so every provisioned room shows up — even started from the dock.
   try { const d = await (await fetch(`${VDO_API}/api/vdo/links`)).json(); _cfDirectorData = d; } catch (_) {}
   cfStartDirectorConsoles();
   renderQtalent();
 });
-el('cf-dc-stop')?.addEventListener('click', cfStopDirectorConsoles);
+el('cf-dc-stop')?.addEventListener('click', () => { window._directorUserStopped = true; cfStopDirectorConsoles(); });
 
 // Unified mixer — route each row's audio change to the right handler.
 el('cf-dc-mixer')?.addEventListener('change', (e) => {
@@ -739,7 +796,7 @@ function talentRow(side, p, teamName, room) {
       </div>` : '';
   return `<div class="talent-row" draggable="true" data-side="${tlEsc(side || '')}" data-pid="${tlEsc(p.playerId)}" data-team-name="${tlEsc(teamName || '')}" data-stream="${tlEsc(p.streamId || '')}" data-room="${tlEsc(room || '')}" data-name="${tlEsc(p.name || '')}" data-search="${tlEsc((p.name || '') + ' ' + (p.streamId || ''))}">
     <div class="tl-id">
-      <span class="talent-drag-grip" title="Drag into the Interview room (director consoles must be running)">${svgIcon('grip')}</span>
+      <span class="talent-drag-grip" title="Drag onto a room tab in the monitor to move them (monitoring must be running)">${svgIcon('grip')}</span>
       <div class="tl-id-main">
         <span class="talent-gt-name" title="Gamertag — drives the feed ID">${tlEsc(p.name) || '(unnamed)'}</span>
         <input class="talent-sid" value="${tlEsc(p.streamId)}" spellcheck="false" title="Stream ID (defaults to the gamertag — edit to override)">
@@ -804,7 +861,9 @@ function mcSaveCamera(camInput) {
 function mcTeamCard(side, t) {
   const players = (t.players || []).length
     ? (t.players || []).map((p) => mcPlayerRow(side, p, t)).join('')
-    : '<div class="talent-empty">No players yet — add this team\'s roster on the <b>Teams</b> page.</div>';
+    : ((currentState.players || []).length
+      ? '<div class="talent-empty">No players yet. The game is live: open <b>Player cams</b> and press <b>Add to rosters</b> to add the in-game players here with their own camera links.</div>'
+      : '<div class="talent-empty">No players yet. Add this team\'s roster on the <b>Teams</b> page, or spectate the match and use <b>Player cams</b> to add the in-game players.</div>');
   return `<div class="mc-team talent-team" style="--tc:${tlEsc(t.color) || '#888'}" data-side="${side}" data-room="${tlEsc(t.room || '')}">
     <div class="mc-team-head talent-team-head">
       <span class="mc-team-conn mc-stat" data-conn="0" title="Team connection — start director consoles to detect"></span>
@@ -833,7 +892,13 @@ function mcPlayerRow(side, p, t) {
   // through as a STRING ("0"/"1"), and hid everyone when the talent-team↔RL-side mapping didn't line
   // up. Numeric coercion (Number(pl.team) === 1 → orange) matches the Players page.
   const allIngame = (currentState.players || []).filter((pl) => pl && pl.name);
-  const optFor = (pl) => `<option value="${tlEsc(pl.name)}"${(pl.name && p.name && pl.name.toLowerCase() === p.name.toLowerCase()) ? ' selected' : ''}>${tlEsc(pl.name)}</option>`;
+  // The in-game player this roster entry is (gamertag or name, ignoring case and spacing). Cams are
+  // saved under that in-game name, because that is what the HUD looks up.
+  const nkey = (x) => String(x || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const ingame = allIngame.find((pl) => nkey(pl.name) === nkey(p.gamertag) || nkey(pl.name) === nkey(p.name)) || null;
+  const camName = ingame ? ingame.name : (p.name || '');
+  const camPid = ingame ? (ingame.primaryid || '') : (p.primaryid || '');
+  const optFor = (pl) => `<option value="${tlEsc(pl.name)}"${ingame && pl.name === ingame.name ? ' selected' : ''}>${tlEsc(pl.name)}</option>`;
   const blueIn = allIngame.filter((pl) => Number(pl.team) !== 1);
   const orangeIn = allIngame.filter((pl) => Number(pl.team) === 1);
   const ingameOpts = (blueIn.length && orangeIn.length)
@@ -844,18 +909,19 @@ function mcPlayerRow(side, p, t) {
   const audioBlock = p.obsUrl ? `<details class="talent-audio"${(a.volume != null || a.pan || a.mono) ? ' open' : ''}><summary>Audio</summary><div class="talent-audio-line"><label title="Volume 0–200">vol<input type="number" class="tl-a-vol" min="0" max="200" step="5" value="${a.volume != null ? a.volume : 100}"></label><label title="Stereo pan">pan<input type="range" class="tl-a-pan" min="-100" max="100" step="5" value="${a.pan != null ? a.pan : 0}"></label><label><input type="checkbox" class="tl-a-mono"${a.mono ? ' checked' : ''}> mono</label></div></details>` : '';
   return `<div class="talent-row mc-player" draggable="true" data-side="${tlEsc(side)}" data-pid="${tlEsc(p.playerId)}" data-stream="${tlEsc(p.streamId || '')}" data-room="${tlEsc(t.room || '')}" data-name="${tlEsc(p.name || '')}" data-search="${tlEsc((p.name || '') + ' ' + (p.streamId || ''))}">
     <div class="mc-p-line">
-      <span class="talent-drag-grip" title="Drag to the Interview / Desk room">${svgIcon('grip')}</span>
+      <span class="talent-drag-grip" title="Drag onto a room tab in the monitor to move them">${svgIcon('grip')}</span>
       <span class="mc-stats">
         <span class="mc-stat mc-stat-conn" data-conn="0" title="Connection — monitoring detects this automatically"></span>
         <span class="mc-stat mc-stat-cam${camSaved ? ' on' : ''}" data-cam-config="${camSaved ? '1' : '0'}" title="${camSaved ? 'Camera linked' : 'No camera linked'}">${svgIcon('camera')}</span>
       </span>
       <span class="mc-p-name" title="In-game name (Rocket League roster)">${tlEsc(p.name) || '(unnamed)'}</span>
       <span class="mc-loc" style="display:none"></span>
+      ${allIngame.length ? `<span class="mc-p-ingame">${ingameSelect}</span>` : ''}
       <span class="mc-p-quick">
         <button class="cf-ico-btn tl-listen" title="Listen in on this player">${svgIcon('headphones')}</button>
         <button class="cf-ico-btn tl-copy" data-url="${tlEsc(p.joinUrl)}" data-kind="join" title="Copy the invite / join link">${svgIcon('userplus')}</button>
         <button class="cf-ico-btn tl-copy" data-url="${tlEsc(p.obsUrl)}" data-kind="obs" title="Copy the OBS view link">${svgIcon('copy')}</button>
-        <button class="cf-ico-btn mc-rlcam${camSaved ? ' is-on' : ''}" data-pname="${tlEsc(p.name || '')}" data-pid="${tlEsc(p.primaryid || '')}" data-obs="${tlEsc(p.obsUrl || '')}" title="${camSaved ? 'Linked as RL facecam — click to unlink' : 'Set this VDO feed as the Rocket League facecam'}">${svgIcon('camera')}</button>
+        <button class="cf-ico-btn mc-rlcam${camSaved ? ' is-on' : ''}" data-pname="${tlEsc(camName)}" data-pid="${tlEsc(camPid)}" data-obs="${tlEsc(p.obsUrl || '')}" title="${camSaved ? 'Linked as RL facecam — click to unlink' : 'Set this VDO feed as the Rocket League facecam'}">${svgIcon('camera')}</button>
         <button class="cf-ico-btn mc-move-btn mc-intv" data-move="interview" title="Pull into the Interview / Desk room (sets them as interviewee)">${svgIcon('mic')}</button>
         <button class="cf-ico-btn mc-move-btn cf-ico-del mc-return" data-move="home" title="Send back to their team room" style="display:none">${svgIcon('refresh')}</button>
         <button class="cf-ico-btn mc-expand" title="Details, camera & all links">${svgIcon('chevdown')}</button>
@@ -871,14 +937,6 @@ function mcPlayerRow(side, p, t) {
         </div>
       </div>
       <div class="mc-field"><span class="mc-field-lbl">Stream ID</span><input class="input-text talent-sid mc-p-sid" value="${tlEsc(p.streamId)}" spellcheck="false" title="Stream ID (defaults to gamertag — edit to override)"></div>
-      <div class="mc-field">
-        <span class="mc-field-lbl">In-game</span>
-        <div class="mc-p-links">
-          <div class="tl-grp"><span class="tl-grp-cap">Link camera to in-game player</span><div class="tl-grp-btns">
-            ${ingameSelect}
-          </div></div>
-        </div>
-      </div>
       <div class="mc-field">
         <span class="mc-field-lbl">Links</span>
         <div class="mc-p-links">
@@ -1289,10 +1347,14 @@ function cfGroupMembersFor(key, serverGroup) {
 }
 
 async function cfLoadGroups() {
-  let d = {};
-  try { d = await (await fetch(`${VDO_API}/api/vdo/links`)).json(); } catch (e) { d = {}; }
-  _cfDirectorData = d;   // keep Director data + the per-member "Move to" room options fresh
-  if (typeof cfSyncDirectorConsoles === 'function') cfSyncDirectorConsoles();   // pick up group rooms live
+  let d = {}, fetched = false;
+  try { d = await (await fetch(`${VDO_API}/api/vdo/links?peek=1`)).json(); fetched = !!d; } catch (e) { d = {}; }
+  // Only adopt a real answer: cfSyncDirectorConsoles now REMOVES consoles for rooms that are not in
+  // _cfDirectorData, so one failed fetch ({}) would tear down every running director console.
+  if (fetched) {
+    _cfDirectorData = d;   // keep Director data + the per-member "Move to" room options fresh
+    if (typeof cfSyncDirectorConsoles === 'function') cfSyncDirectorConsoles();   // pick up group rooms live
+  }
   const groups = d.groups || {};
   Object.keys(_CF_GROUP_META).forEach((key) => {
     const meta = _CF_GROUP_META[key];

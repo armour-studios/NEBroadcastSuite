@@ -2,14 +2,17 @@
 
 This guide is for league organisers and the developers who run their tools. It explains how to get a league's teams, fixtures, results and standings into the broadcast app. Once they're in, the ticker, schedule board, standings, starting-soon and BRB scenes update on their own.
 
-There are four ways in. They all feed the same league inside the app, so you can mix them: for example, fixtures from a Google Sheet and live results from a Discord bot.
+There are five ways in. They all feed the same league inside the app, so you can mix them: for example, fixtures from a Google Sheet and live results from a Discord bot.
 
 | You have | Use | Needs |
 |---|---|---|
 | Nothing yet, or a small league | **Enter it in the app** | Nothing |
 | A Google Sheet | **Google Sheet source** | Share the sheet (or a service account) |
 | A league website or database | **Website feed** (the app polls a URL you publish) | One JSON endpoint |
+| A tournament or league hosted on the Nameless website | **Nameless website source** (read-only; the website is the source of truth) | Signed in to the website in the app |
 | A bot, form or script on the broadcast PC | **Local API** (you push updates) | The API key |
+
+The Nameless website source is the org's own competitions, read through the app's signed-in cloud session. Its wire contract (for the website team) is `docs/website-competitions-contract.md`; the document it returns is the one below.
 
 A one-off CSV or JSON file can also be imported on a league's **Data source** tab.
 
@@ -131,9 +134,9 @@ This is the recommended path for a league website: the broadcast PC calls out, s
 
 ## Local API (push)
 
-The app runs an HTTP API on the broadcast PC at `http://127.0.0.1:3000/api/v1`. It only accepts connections from that machine. A bot or service on another host can poll your system and call this API from a small script on the broadcast PC, or you can use the website feed instead.
+The app runs an HTTP API on the broadcast PC at `http://127.0.0.1:3000/api/v1`. It is **loopback-only**: it accepts connections from that machine and nothing else, and there is no setting to open it up. A bot or service on another host therefore cannot call it directly; run a small relay script on the broadcast PC that polls your system and calls this API, or publish a website feed and let the app poll you instead.
 
-**Auth:** every route except `/schema` needs the key from **Esports > Competitions > Developer docs**, sent as either:
+**Auth:** every route except `/schema` needs the key from **Apps > API** in the app (**Marketplace > API** in the Classic interface; the page has Show / Copy / Regenerate). Send it as either header:
 
 ```
 Authorization: Bearer nek_...
@@ -160,7 +163,7 @@ A competition's `:id` is the id shown on its Data source tab.
 
 Setting `status: "live"` on a match clears `live` from any other match in that competition. Setting `status: "scheduled"` clears the score.
 
-Errors come back as `{ ok: false, error }` or `{ ok: false, errors: [...] }` with status `400`, `401` or `404`. Validation warnings (skipped rows) come back in `warnings`.
+Errors come back as `{ ok: false, error }` or `{ ok: false, errors: [...] }` with status `400`, `401` or `404`. Validation warnings (skipped rows) come back in `warnings`. A `401` with "No API key has been created yet" means nobody has opened **Apps > API** in the app yet — the key is created the first time that page loads.
 
 ### Examples
 

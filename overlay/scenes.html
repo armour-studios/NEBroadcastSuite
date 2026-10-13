@@ -104,6 +104,7 @@
         { name: 'RL Worlds HUD', path: '/rl-worlds.html', desc: 'RLCS Worlds-style HUD with stats sidebar and ticker.', live: 'always' },
         { name: 'Live HUD (auto-game)', path: '/live.html', desc: 'Unified HUD that automatically follows whichever game is currently active.', live: 'always' },
         { name: 'CS2 / CS:GO HUD', path: '/csgo.html', desc: 'GSI-driven CS2 overlay - scorebar, players, radar, bomb, economy.', live: 'always' },
+        { name: 'CS2 Pro HUD', path: '/cs2-pro.html', desc: 'Second CS2 layout: player photo cards, team utility bars, auto K/D/A scoreboard in freezetime and timeouts, radar.', live: 'always' },
         { name: 'Valorant HUD', path: '/valorant.html', desc: 'Round scorebar, agents, spike and economy.', live: 'always' },
         { name: 'Overwatch 2 HUD', path: '/overwatch.html', desc: 'Hero line-up, objective and score HUD.', live: 'always' },
         { name: 'Marvel Rivals HUD', path: '/marvel-rivals.html', desc: 'Hero roster and objective scorebar.', live: 'always' },
@@ -392,20 +393,23 @@
           doc.documentElement.style.overflow = 'hidden';
         } catch (e) {}
       }
-      var RO = new ResizeObserver(function(entries) {
-        entries.forEach(function(entry) {
-          var wrap = entry.target;
-          if (wrap.dataset.loaded) return;
-          var pw = entry.contentRect.width;
-          if (!pw) return;
-          wrap.dataset.loaded = '1';
-          var fr = wrap.querySelector('.preview-iframe');
-          if (!fr || !fr.dataset.src) return;
-          fr.src = fr.dataset.src;
-          fr.addEventListener('load', function() { injectZoom(fr, pw); });
-        });
-      });
-      document.querySelectorAll('.preview-wrap').forEach(function(wrap) { RO.observe(wrap); });
+      // Only previews on (or near) screen load: every card loading its full overlay at once (~100
+      // live pages, each with its own socket) was heavy, and under that burst some previews failed to
+      // load their scripts.
+      function loadPreview(wrap) {
+        if (wrap.dataset.loaded) return;
+        var pw = wrap.getBoundingClientRect().width;
+        if (!pw) return;
+        wrap.dataset.loaded = '1';
+        var fr = wrap.querySelector('.preview-iframe');
+        if (!fr || !fr.dataset.src) return;
+        fr.src = fr.dataset.src;
+        fr.addEventListener('load', function() { injectZoom(fr, pw); });
+      }
+      var IO = ('IntersectionObserver' in window) ? new IntersectionObserver(function(entries) {
+        entries.forEach(function(entry) { if (entry.isIntersecting) { loadPreview(entry.target); IO.unobserve(entry.target); } });
+      }, { rootMargin: '300px 0px' }) : null;
+      document.querySelectorAll('.preview-wrap').forEach(function(wrap) { if (IO) IO.observe(wrap); else loadPreview(wrap); });
     })();
   </script>
 </body>

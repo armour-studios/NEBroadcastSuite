@@ -403,7 +403,9 @@
       // Title-only (breakScreen.titleOnly, or the older ?showTimer=0 URL param): keep the label,
       // drop the digits and the progress bar. The block then depends on there BEING a title rather
       // than on a timer, or turning the clock off would hide the label along with it.
-      const titleOnly = !!b.titleOnly || !SHOW_TIMER;
+      // No countdown running counts as title-only too: the card says INTERMISSION (or the break
+      // title) instead of sitting on air as a bare logo.
+      const titleOnly = !!b.titleOnly || !SHOW_TIMER || (!hasEndsAt && !hasFrozen);
       const hasTimer  = SHOW_TIMER && (hasEndsAt || hasFrozen);
       const showBlock = titleOnly ? !!String(labelText || '').trim() : hasTimer;
       el('countdown-wrap').classList.toggle('title-only', titleOnly);

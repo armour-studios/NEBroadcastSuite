@@ -78,7 +78,9 @@ const NAV = {
   integ: within('int-subnav', 'data-inttab'),
   card: values(/class="int-card" data-card="(\w+)"/g),
   rail: values(/class="qrail-tab[^"]*" data-qtab="(\w+)"/g),
-  settings: values(/class="set-rail-btn[^"]*" data-stab="(\w+)"/g)
+  settings: values(/class="set-rail-btn[^"]*" data-stab="(\w+)"/g),
+  // Modern page views, as ui-style.js routes them (go: { view: '...' }).
+  view: new Set([...fs.readFileSync(path.join(CP, 'ui-style.js'), 'utf8').matchAll(/view: '(\w+)'/g)].map((m) => m[1]))
 };
 Object.keys(NAV).forEach((k) => { if (!NAV[k].size) fail('could not read any values for nav.' + k + ' from the markup (did it move?)'); });
 

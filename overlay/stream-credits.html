@@ -74,7 +74,7 @@
 .cr-top8-rec { margin-left: auto; font-size: 12px; font-weight: 700; color: rgba(255,255,255,.92); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
 .cr-act-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px;
   background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07); }
-.cr-act-ico { font-size: 16px; flex: 0 0 auto; }
+.cr-act-ico { font-size: 16px; flex: 0 0 auto; display: inline-flex; color: var(--accent-ink, var(--accent, #a78bfa)); }
 .cr-act-lbl { font-size: 13px; font-weight: 700; color: rgba(255,255,255,.85); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cr-act-count { margin-left: auto; font-size: 16px; font-weight: 900; color: #fff; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
 .cr-act-names { font-size: 11px; color: rgba(255,255,255,.92); padding: 0 10px 4px; line-height: 1.5;
@@ -119,7 +119,7 @@
     /* ── Rolling twitch supporter sections ──────────────── */
     .roll-section { text-align: center; margin: 0 auto 40px; max-width: 1240px; }
     .roll-section-label { display: inline-flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-    .roll-section-label .icon { font-size: 20px; }
+    .roll-section-label .icon { font-size: 20px; display: inline-flex; color: var(--accent-ink, var(--accent, #a78bfa)); }
     .roll-section-label .title { font-size: 14px; font-weight: 700; letter-spacing: 4px; text-transform: uppercase; color: rgba(255,255,255,0.92); }
     .roll-section-label .count { font-size: 12px; font-weight: 700; color: rgba(255,255,255,0.28); }
     .name-grid { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px 12px; }
@@ -190,7 +190,7 @@
   <aside class="cr-rail cr-rail-right is-empty" id="cr-activity"></aside>
 
   <div class="empty-state" id="empty-state" style="display:none;">
-    <div class="empty-icon">🎬</div>
+    <div class="empty-icon"><svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="m2 6 4-4h4L6 6m4 0 4-4h4l-4 4"/></svg></div>
     <div class="empty-label">No credits yet</div>
   </div>
 
@@ -375,15 +375,26 @@ function creditSponsors(st) {
 }
 
 /* ── Twitch supporters (grouped) ────────────────────────────── */
+// Line icons (not emoji: those render differently per machine and ignore the brand colour).
+const ICONS = {
+ "raid": "<svg viewBox=\"0 0 24 24\" width=\"1em\" height=\"1em\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M14.5 17.5 3 6V3h3l11.5 11.5\"/><path d=\"m13 19 6-6\"/><path d=\"m16 16 4 4\"/><path d=\"m19 21 2-2\"/></svg>",
+ "hype_train": "<svg viewBox=\"0 0 24 24\" width=\"1em\" height=\"1em\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M13 2 3 14h9l-1 8 10-12h-9l1-8z\"/></svg>",
+ "sub": "<svg viewBox=\"0 0 24 24\" width=\"1em\" height=\"1em\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z\"/></svg>",
+ "resub": "<svg viewBox=\"0 0 24 24\" width=\"1em\" height=\"1em\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M21 12a9 9 0 1 1-2.6-6.4\"/><path d=\"M21 3v6h-6\"/></svg>",
+ "gift_sub": "<svg viewBox=\"0 0 24 24\" width=\"1em\" height=\"1em\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><rect x=\"3\" y=\"8\" width=\"18\" height=\"4\" rx=\"1\"/><path d=\"M12 8v13\"/><path d=\"M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7\"/><path d=\"M7.5 8a2.5 2.5 0 0 1 0-5C10 3 12 8 12 8s2-5 4.5-5a2.5 2.5 0 0 1 0 5\"/></svg>",
+ "bits": "<svg viewBox=\"0 0 24 24\" width=\"1em\" height=\"1em\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M6 3h12l4 6-10 12L2 9z\"/><path d=\"M2 9h20\"/><path d=\"m12 21-4-12 4-6 4 6z\"/></svg>",
+ "follow": "<svg viewBox=\"0 0 24 24\" width=\"1em\" height=\"1em\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21.2l8.8-8.8a5.5 5.5 0 0 0 0-7.8z\"/></svg>",
+ "channel_points": "<svg viewBox=\"0 0 24 24\" width=\"1em\" height=\"1em\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><circle cx=\"12\" cy=\"12\" r=\"4\"/></svg>"
+};
 const SECTIONS = [
-  { key: 'raid',           icon: '⚔️', label: 'Raiders' },
-  { key: 'hype_train',     icon: '🚂', label: 'Hype Train' },
-  { key: 'sub',            icon: '⭐', label: 'New Subscribers' },
-  { key: 'resub',          icon: '♻️', label: 'Resubscribers' },
-  { key: 'gift_sub',       icon: '🎁', label: 'Gift Subscribers' },
-  { key: 'bits',           icon: '💎', label: 'Bit Supporters' },
-  { key: 'follow',         icon: '❤️', label: 'New Followers' },
-  { key: 'channel_points', icon: '🔵', label: 'Channel Points' },
+  { key: 'raid',           icon: ICONS.raid, label: 'Raiders' },
+  { key: 'hype_train',     icon: ICONS.hype_train, label: 'Hype Train' },
+  { key: 'sub',            icon: ICONS.sub, label: 'New Subscribers' },
+  { key: 'resub',          icon: ICONS.resub, label: 'Resubscribers' },
+  { key: 'gift_sub',       icon: ICONS.gift_sub, label: 'Gift Subscribers' },
+  { key: 'bits',           icon: ICONS.bits, label: 'Bit Supporters' },
+  { key: 'follow',         icon: ICONS.follow, label: 'New Followers' },
+  { key: 'channel_points', icon: ICONS.channel_points, label: 'Channel Points' },
 ];
 function groupLog(log) { const g = {}; for (const e of log) { (g[e.type] = g[e.type] || []).push(e); } return g; }
 function chipLabel(e) {
@@ -635,18 +646,26 @@ async function loadLog() {
    drawing the last talent bar it built, so a desk that has since been cleared still credits people
    by name on air. 'close' alone is not enough to recover — a rejected or half-open socket can sit in
    CONNECTING and never fire it — so a poll rebuilds the connection whenever it is not OPEN. */
-let _ws = null, _wsSince = 0;
+let _ws = null, _wsSince = 0, _dialing = false;
 async function connectWS() {
   // Safe to call from both the close handler and the watchdog: bail if a socket is already up or dialling.
-  if (_ws && (_ws.readyState === WebSocket.CONNECTING || _ws.readyState === WebSocket.OPEN)) return;
+  // _dialing covers the token fetch below: both callers used to pass the check during that await and
+  // each opened a socket, leaving an orphan that kept pushing duplicate activity into the log.
+  if (_dialing || (_ws && (_ws.readyState === WebSocket.CONNECTING || _ws.readyState === WebSocket.OPEN))) return;
+  _dialing = true;
   let wsToken = '';
-  try { wsToken = (await (await fetch(`${API_BASE}/api/ws-token`)).json()).token || ''; } catch (e) {}
-  const ws = new WebSocket(`ws://127.0.0.1:${WS_PORT}` + (wsToken ? ('?token=' + encodeURIComponent(wsToken)) : ''));
+  // Deadline: a hung fetch left _dialing set and every reconnect path bailing for minutes.
+  const ac = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const t = ac ? setTimeout(() => ac.abort(), 4000) : null;
+  try { wsToken = (await (await fetch(`${API_BASE}/api/ws-token`, ac ? { signal: ac.signal } : undefined)).json()).token || ''; } catch (e) {}
+  finally { if (t) clearTimeout(t); _dialing = false; }
+  if (_ws && (_ws.readyState === WebSocket.CONNECTING || _ws.readyState === WebSocket.OPEN)) return;
+  const ws = new WebSocket(`ws://${location.hostname && location.protocol.startsWith('http') ? location.hostname.replace(/^(localhost|\[?::1\]?)$/, '127.0.0.1') : '127.0.0.1'}:${WS_PORT}` + (wsToken ? ('?token=' + encodeURIComponent(wsToken)) : ''));
   _ws = ws; _wsSince = Date.now();
   ws.addEventListener('open', () => { try { ws.send(JSON.stringify({ type: 'request_state' })); } catch (e) {} });
   ws.addEventListener('message', (e) => {
     let msg; try { msg = JSON.parse(e.data); } catch { return; }
-    if (msg.type === 'twitch_activity') { activityLog.push({ ...msg.data, timestamp: msg.data.timestamp || Date.now() }); maybeRender(); return; }
+    if (msg.type === 'twitch_activity') { activityLog.push({ ...msg.data, timestamp: msg.data.timestamp || Date.now() }); if (activityLog.length > 500) activityLog.splice(0, activityLog.length - 500); maybeRender(); return; }
     if (msg.type === 'twitch_activity_log_cleared') { activityLog = []; maybeRender(); return; }
     if (msg.type === 'full_state' && msg.data) {
       const d = msg.data;

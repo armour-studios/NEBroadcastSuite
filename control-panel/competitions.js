@@ -21,7 +21,18 @@ const _cmpTokenState = {};   // leagueId -> hasToken (the token itself never com
 function cmpState() { return (typeof currentState !== 'undefined' && currentState) || {}; }
 function cmpLeagues() { return (typeof lgLeagues !== 'undefined' && lgLeagues.length) ? lgLeagues : (cmpState().leagues || []); }
 function cmpEsc(s) { return typeof esc === 'function' ? esc(s) : String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
-const CMP_SRC_LABEL = { manual: 'Entered here', sheet: 'Google Sheet', feed: 'Website feed', push: 'API' };
+const CMP_SRC_LABEL = { manual: 'Entered here', sheet: 'Google Sheet', feed: 'Website feed', push: 'API', cloud: 'Nameless website' };
+// Sources the app PULLS on a schedule (they get sync status, Test / Sync now, the synced-rows note).
+function cmpPulls(type) { return type === 'sheet' || type === 'feed' || type === 'cloud'; }
+// Nameless website competitions: the list rides the LIBRARY tier (not every broadcast), so keep the
+// last one we saw; the sign-in state arrives via cloud_status → applyCloudStatus (wrapped below).
+let _cmpCloudList = [];
+let _cmpCloudSess = null;   // null = no cloud_status heard yet → fall back to window._cloudWorkspaceId
+function cmpCloudSignedIn() { return _cmpCloudSess ? !!_cmpCloudSess.authed : !!window._cloudWorkspaceId; }
+function cmpCloudIsOrg() {
+  const w = _cmpCloudSess ? _cmpCloudSess.workspaceId : window._cloudWorkspaceId;
+  return !!(w && !String(w).startsWith('user:'));
+}
 
 function cmpAgo(ts) {
   if (!ts) return '';
@@ -79,7 +90,7 @@ function cmpRender(force) {
       const src = (live.source && live.source.type) || 'manual';
       const sync = (st.compSync || {})[live.id];
       let line = CMP_SRC_LABEL[src] || 'Entered here';
-      if ((src === 'sheet' || src === 'feed') && sync) {
+      if (cmpPulls(src) && sync) {
         line += sync.lastError ? ' — last sync failed: ' + sync.lastError : (sync.lastOkAt ? ' — synced ' + cmpAgo(sync.lastOkAt) : '');
       }
       meta.textContent = line + '. ' + (live.teams || []).length + ' teams, ' + (live.schedule || []).length + ' fixtures.';
@@ -139,11 +150,13 @@ function cmpRenderGrid(leagues, liveId, sync) {
     const played = (l.schedule || []).filter((m) => (Array.isArray(m.games) && m.games.length) || (m.result && m.result.scoreA != null && m.result.scoreB != null)).length;
     let status = '';
     let statusErr = false;
-    if (src === 'sheet' || src === 'feed') {
+    if (cmpPulls(src)) {
       if (s && s.running) status = 'Syncing…';
       else if (s && s.lastError) { status = 'Sync failed: ' + s.lastError; statusErr = true; }
       else if (s && s.lastOkAt) status = 'Synced ' + cmpAgo(s.lastOkAt) + (s.summary ? ' — ' + s.summary : '');
-      else status = (src === 'sheet' ? (l.source.sheetUrl ? 'Waiting for first sync' : 'Add the sheet link') : (l.source.feedUrl ? 'Waiting for first sync' : 'Add the feed URL'));
+      else if (src === 'sheet') status = l.source.sheetUrl ? 'Waiting for first sync' : 'Add the sheet link';
+      else if (src === 'feed') status = l.source.feedUrl ? 'Waiting for first sync' : 'Add the feed URL';
+      else status = l.source.cloudCompetitionId ? 'Waiting for first sync' : 'Pick a website competition';
     }
     const gameLabel = (games[l.game] && (games[l.game].name || games[l.game].label)) || l.game || 'No game set';
     return `<div class="cmp-card${isLive ? ' is-live' : ''}" data-lid="${cmpEsc(l.id)}">
@@ -156,7 +169,7 @@ function cmpRenderGrid(leagues, liveId, sync) {
       <div class="cmp-card-actions">
         <button class="btn btn-secondary btn-sm cmp-mini" type="button" data-cmp-open="overview">Open</button>
         <button class="btn btn-ghost btn-sm cmp-mini" type="button" data-cmp-open="source">Data source</button>
-        ${(src === 'sheet' || src === 'feed') ? '<button class="btn btn-ghost btn-sm cmp-mini" type="button" data-cmp-sync>Sync now</button>' : ''}
+        ${cmpPulls(src) ? '<button class="btn btn-ghost btn-sm cmp-mini" type="button" data-cmp-sync>Sync now</button>' : ''}
         ${isLive ? '' : '<button class="btn btn-primary btn-sm cmp-mini" type="button" data-cmp-live>Go live</button>'}
       </div></div>`;
   });
@@ -280,6 +293,7 @@ function cmpSourceOf(lg) {
   return {
     type: s.type || 'manual', sheetUrl: s.sheetUrl || '', tabs: { teams: 'Teams', matches: 'Matches', standings: '', ...(s.tabs || {}) },
     feedUrl: s.feedUrl || '', intervalSec: s.intervalSec || 60, auto: s.auto !== false, prune: s.prune !== false,
+    cloudCompetitionId: s.cloudCompetitionId || '',
   };
 }
 function cmpSetInput(id, v) { const i = el(id); if (i && document.activeElement !== i) i.value = v; }
@@ -290,8 +304,13 @@ function lgRenderSourceTab() {
   const s = cmpSourceOf(lg);
   document.querySelectorAll('#lg-src-types .cmp-src-type').forEach((b) => b.classList.toggle('active', b.dataset.src === s.type));
   document.querySelectorAll('#lg2-panel-source [data-srcbody]').forEach((b) => { b.hidden = b.dataset.srcbody !== s.type; });
-  const pulls = s.type === 'sheet' || s.type === 'feed';
+  const pulls = cmpPulls(s.type);
   const sync = el('lg-src-sync'); if (sync) sync.hidden = !pulls;
+  // A website competition has no interval: the list is checked every minute and the document only
+  // when the website says it changed, so "Check every" would be a lie there.
+  const intervalField = el('lg-src-interval') && el('lg-src-interval').closest('.cmp-field');
+  if (intervalField) intervalField.hidden = s.type === 'cloud';
+  if (s.type === 'cloud') cmpRenderCloudPicker(lg, s);
 
   cmpSetInput('lg-src-sheet-url', s.sheetUrl);
   cmpSetInput('lg-src-tab-teams', s.tabs.teams);
@@ -307,7 +326,7 @@ function lgRenderSourceTab() {
     const sh = cmpState().sheets || {};
     access.textContent = sh.hasKey
       ? 'Reading with your connected service account' + (sh.saEmail ? ' (' + sh.saEmail + ')' : '') + ' — share the sheet with that email.'
-      : 'Share the sheet as "Anyone with the link, Viewer". For a private sheet, connect a service account in Settings > Google Sheets.';
+      : 'Share the sheet as "Anyone with the link, Viewer". For a private sheet, connect a service account under Apps > Google Sheets.';
   }
   if (s.type === 'feed' && _cmpTokenState[lg.id] === undefined) send('competition_feed_token_status', { leagueId: lg.id });
   const ts = el('lg-src-token-state');
@@ -345,7 +364,7 @@ function cmpRenderSyncedNote(lg) {
   const host = el('lg-detail'); if (!host || !lg) return;
   let note = el('lg-src-synced-note');
   const s = cmpSourceOf(lg);
-  const pulls = s.type === 'sheet' || s.type === 'feed';
+  const pulls = cmpPulls(s.type);
   if (!pulls) { if (note) note.remove(); return; }
   if (!note) {
     note = document.createElement('p');
@@ -354,9 +373,69 @@ function cmpRenderSyncedNote(lg) {
     const tabs = el('lg2-tabs');
     if (tabs && tabs.parentNode) tabs.parentNode.insertBefore(note, tabs);
   }
-  note.textContent = 'This league syncs from ' + (s.type === 'sheet' ? 'a Google Sheet' : 'a website feed') +
+  note.textContent = 'This league syncs from ' + (s.type === 'sheet' ? 'a Google Sheet' : s.type === 'cloud' ? 'the Nameless website' : 'a website feed') +
     '. Change teams, fixtures and results there — edits made here to synced matches are replaced on the next sync.';
 }
+
+// ── Nameless website competitions (source.type 'cloud') ──
+function cmpRenderCloudPicker(lg, s) {
+  const sel = el('lg-src-cloud-pick'); if (!sel || !lg) return;
+  const list = _cmpCloudList;
+  const signedIn = cmpCloudSignedIn();
+  const hint = el('lg-src-cloud-hint');
+  if (hint) {
+    hint.textContent = !signedIn ? 'Sign in on Settings > Profile to see your website competitions.'
+      : !cmpCloudIsOrg() ? 'Website competitions belong to an organization — your account is not in one.'
+      : !list.length ? 'No competitions on your website yet. Create one there and it shows up here within a minute.' : '';
+    hint.hidden = !hint.textContent;
+  }
+  if (document.activeElement !== sel) {
+    const keep = sel.value || s.cloudCompetitionId;
+    sel.innerHTML = list.length
+      ? list.map((c) => `<option value="${cmpEsc(c.id)}">${cmpEsc([c.name || 'Untitled', c.season, c.kind === 'tournament' ? 'Tournament' : 'League'].filter(Boolean).join(' · ') + (c.live ? ' (live)' : ''))}</option>`).join('')
+      : '<option value="">' + (signedIn ? 'No competitions yet' : 'Sign in first') + '</option>';
+    if (keep && list.some((c) => c.id === keep)) sel.value = keep;
+  }
+  sel.disabled = !list.length;
+  const btn = el('lg-src-cloud-link'); if (btn) btn.disabled = !list.length;
+  const linked = el('lg-src-cloud-linked');
+  if (linked) {
+    const c = list.find((x) => x.id === s.cloudCompetitionId);
+    linked.textContent = !s.cloudCompetitionId ? 'Not linked yet — pick a competition and press Link.'
+      : 'Linked to ' + (c ? [c.name || 'Untitled', c.season].filter(Boolean).join(' · ') : s.cloudCompetitionId) + (c && c.live ? ' — live on the website' : '') + '.';
+  }
+}
+el('lg-src-cloud-link')?.addEventListener('click', () => {
+  const lg = lgActive(); const sel = el('lg-src-cloud-pick');
+  if (!lg || !sel || !sel.value) { showToast('Pick a website competition first.', '#f59e0b'); return; }
+  const c = _cmpCloudList.find((x) => x.id === sel.value);
+  // A fresh league takes the website's name/season/game; a named one keeps the producer's.
+  if (c) {
+    if (!lg.name || lg.name === 'New League') lg.name = c.name || lg.name;
+    if (!lg.season && c.season) lg.season = c.season;
+    if (!lg.game && c.game) lg.game = c.game;
+  }
+  cmpUpdateSource({ type: 'cloud', cloudCompetitionId: sel.value, intervalSec: 60, auto: true });
+  if (typeof lgRender === 'function') lgRender();
+  lgRenderSourceTab();
+  const box = el('lg-src-status'); if (box) { box.className = 'cmp-status'; box.textContent = 'Syncing…'; }
+  cmpFlushThen(() => send('competition_sync_now', { leagueId: lg.id }));
+});
+// cloud_status replies are routed in app.js to applyCloudStatus(); it is a global function
+// declaration (a writable window property), so wrap it here instead of adding a second router.
+(function cmpHookCloudStatus() {
+  const orig = window.applyCloudStatus;
+  if (typeof orig !== 'function') return;
+  window.applyCloudStatus = function (s) {
+    try { return orig.apply(this, arguments); }
+    finally {
+      _cmpCloudSess = s || {};
+      const p = el('lg2-panel-source');
+      const lg = typeof lgActive === 'function' ? lgActive() : null;
+      if (p && p.style.display !== 'none' && lg && cmpSourceOf(lg).type === 'cloud') cmpRenderCloudPicker(lg, cmpSourceOf(lg));
+    }
+  };
+})();
 
 function cmpUpdateSource(patch) {
   const lg = lgActive(); if (!lg) return;
@@ -471,7 +550,7 @@ function evLeagueLink() {
     const need = { challonge: 'challonge', nxgen: 'nxgen', faceit: 'faceit' }[c.kind];
     const has = { challonge: cmpState().challonge?.hasKey, nxgen: cmpState().nxgen?.hasKey, faceit: cmpState().faceit?.hasKey }[c.kind];
     evLeagueGoToPlatform(need);
-    if (!has) { showToast('Add your ' + ({ challonge: 'Challonge', nxgen: 'NXGEN', faceit: 'FACEIT' }[c.kind]) + ' key in Settings > Integrations to load this.', '#f59e0b', 4500); return; }
+    if (!has) { showToast('Add your ' + ({ challonge: 'Challonge', nxgen: 'NXGEN', faceit: 'FACEIT' }[c.kind]) + ' key under Apps to load this.', '#f59e0b', 4500); return; }
     if (c.kind === 'challonge') send('load_challonge_tournament', { slug: c.slug });
     if (c.kind === 'nxgen') send('load_nxgen_event', { slug: c.slug });
     if (c.kind === 'faceit') send('load_faceit_event', { id: c.url });
@@ -523,7 +602,7 @@ function evLeagueRender(force) {
       const next = feed && feed.next && feed.next.id ? feed.next : null;
       el('ev-league-live-name').textContent = [live.name || 'League', live.season].filter(Boolean).join(' — ');
       const bits = [CMP_SRC_LABEL[src] || src];
-      if ((src === 'sheet' || src === 'feed') && sync) bits.push(sync.lastError ? 'sync failed' : sync.lastOkAt ? 'synced ' + cmpAgo(sync.lastOkAt) : 'syncing');
+      if (cmpPulls(src) && sync) bits.push(sync.lastError ? 'sync failed' : sync.lastOkAt ? 'synced ' + cmpAgo(sync.lastOkAt) : 'syncing');
       if (next) bits.push((next.status === 'live' ? 'Live: ' : 'Next: ') + next.teamA + ' vs ' + next.teamB);
       el('ev-league-live-meta').textContent = bits.join(' · ');
       el('ev-league-live-meta').title = sync && sync.lastError ? sync.lastError : '';
@@ -630,8 +709,15 @@ function cmpApplyState() {
   cmpRender(false);
   const p = el('lg2-panel-source');
   const lg = typeof lgActive === 'function' ? lgActive() : null;
+  const open = p && p.style.display !== 'none' && lg;
+  // Library-tier key: present only on the broadcasts where it changed, so remember the last copy.
+  const cc = cmpState().cloudCompetitions;
+  if (Array.isArray(cc) && JSON.stringify(cc) !== JSON.stringify(_cmpCloudList)) {
+    _cmpCloudList = cc;
+    if (open && cmpSourceOf(lg).type === 'cloud') cmpRenderCloudPicker(lg, cmpSourceOf(lg));
+  }
   if (lg) cmpRenderSyncedNote(lg);
-  if (p && p.style.display !== 'none' && lg) cmpRenderSyncStatus(lg);
+  if (open) cmpRenderSyncStatus(lg);
 }
 window.cmpApplyState = cmpApplyState;
 window.cmpRender = cmpRender;

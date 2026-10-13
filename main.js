@@ -27,7 +27,7 @@ let controlPanel;
 let launcherWin = null;      // small pre-auth launcher window (branding + login + updates)
 let panelDidLoad = false;    // control panel renderer finished loading (gates the launcher animation)
 let tray = null;
-let encodeTrayTitle = 'NE Broadcast Suite';
+let encodeTrayTitle = 'Broadcast Studio';
 let rlUiHotkeyRegistered = null;
 
 // Dev machines only (same .env.local signal as the DevTools auto-open below): expose the
@@ -231,11 +231,11 @@ function updateTrayEncode(progress) {
     encodeTrayTitle = `Export done: ${active.name || 'Montage'}`;
     tray.setToolTip(encodeTrayTitle);
     setTimeout(() => {
-      encodeTrayTitle = 'NE Broadcast Suite';
+      encodeTrayTitle = 'Broadcast Studio';
       if (tray) tray.setToolTip(encodeTrayTitle);
     }, 8000);
   } else {
-    encodeTrayTitle = 'NE Broadcast Suite';
+    encodeTrayTitle = 'Broadcast Studio';
     tray.setToolTip(encodeTrayTitle);
   }
 }
@@ -278,7 +278,7 @@ function createControlPanel() {
     minWidth: 680,
     minHeight: 600,
     show: false,   // paint fully before showing to eliminate white-flash
-    title: 'NE | Broadcast Suite',
+    title: 'NE | Broadcast Studio',
     icon: path.join(__dirname, 'assets', 'icon.png'),
     backgroundColor: '#0b0c0f',
     // Frameless: drop the OS title bar so our header sits at the very top, but keep
@@ -397,6 +397,11 @@ function createControlPanel() {
   });
 
   controlPanel.webContents.setWindowOpenHandler(({ url }) => {
+    // The Live dock's pop-out is the panel itself in dock-only mode. It has to open as a real child
+    // window (so the opener can watch it close and reclaim it), not be bounced to the browser.
+    if (url.startsWith('file:') && url.includes('page=qrail-popout')) {
+      return { action: 'allow', overrideBrowserWindowOptions: { width: 400, height: 900, minWidth: 320, autoHideMenuBar: true, backgroundColor: '#0b0c0f', title: 'Live dock' } };
+    }
     if (url.startsWith('http')) {
       require('electron').shell.openExternal(url);
     }
@@ -578,27 +583,47 @@ function setupPopoutHandler() {
 // main.js owns the updater; the control panel drives it and shows status through the
 // WS bridge (server runs in this same process). Only functional in a packaged build.
 function setupAutoUpdate() {
-  let autoUpdater;
-  try { autoUpdater = require('electron-updater').autoUpdater; }
-  catch (e) { console.log('[UPDATE] electron-updater unavailable:', e.message); return; }
-
-  autoUpdater.autoDownload = true;           // download silently in background; user just clicks install
-  autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.fullChangelog = false;
-
   const push = (status) => {
+    if (status && status.state !== 'checking') clearTimeout(checkWatchdog);
     try {
       if (server && typeof server.broadcastUpdateStatus === 'function') {
         server.broadcastUpdateStatus({ currentVersion: app.getVersion(), packaged: app.isPackaged, ...status });
       }
     } catch (e) { /* ignore */ }
   };
+  // A check that never answers (proxy, hung request) used to leave Settings on "Checking for
+  // updates..." for good: give it 45s, then say so.
+  let checkWatchdog = null;
+  const armWatchdog = () => {
+    clearTimeout(checkWatchdog);
+    checkWatchdog = setTimeout(() => push({ state: 'error', message: 'The update check did not finish (no answer from GitHub). Try again later.' }), 45000);
+  };
+
+  let autoUpdater;
+  try { autoUpdater = require('electron-updater').autoUpdater; }
+  catch (e) {
+    console.log('[UPDATE] electron-updater unavailable:', e.message);
+    // Say so in Settings instead of "Checking for updates..." forever, and answer Check clicks.
+    push({ state: 'error', message: 'Updates are unavailable in this build (' + e.message + ').' });
+    if (server && typeof server.setUpdateHandlers === 'function') {
+      const na = () => push({ state: 'error', message: 'Updates are unavailable in this build.' });
+      server.setUpdateHandlers({ check: na, download: na, install: na });
+    }
+    return;
+  }
+
+  autoUpdater.autoDownload = true;           // download silently in background; user just clicks install
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.fullChangelog = false;
+  // Before the first check runs (4s after launch) Settings shows the version and "not checked yet".
+  push({ state: app.isPackaged ? 'idle' : 'dev' });
   const notes = (info) => (typeof info?.releaseNotes === 'string' ? info.releaseNotes : '').replace(/<[^>]+>/g, '').slice(0, 1500);
 
-  autoUpdater.on('checking-for-update', () => push({ state: 'checking' }));
+  autoUpdater.on('checking-for-update', () => { armWatchdog(); push({ state: 'checking' }); });
   autoUpdater.on('update-available', (info) => push({ state: 'available', version: info.version, notes: notes(info) }));
   autoUpdater.on('update-not-available', () => push({ state: 'up-to-date' }));
-  autoUpdater.on('download-progress', (p) => push({ state: 'downloading', percent: Math.round(p.percent || 0) }));
+  let downloading = false;
+  autoUpdater.on('download-progress', (p) => { downloading = true; push({ state: 'downloading', percent: Math.round(p.percent || 0) }); });
   autoUpdater.on('update-downloaded', (info) => push({ state: 'downloaded', version: info.version }));
   autoUpdater.on('error', (err) => push({ state: 'error', message: (err && err.message) || String(err) }));
 
@@ -608,7 +633,9 @@ function setupAutoUpdate() {
         if (!app.isPackaged) { push({ state: 'dev' }); return; }   // only works in the installed build
         autoUpdater.checkForUpdates().catch((e) => push({ state: 'error', message: e.message }));
       },
-      download: () => autoUpdater.downloadUpdate().catch((e) => push({ state: 'error', message: e.message })),
+      // autoDownload already fetches an available update; a second downloadUpdate() while that one
+      // runs would start it again.
+      download: () => { if (downloading) return; downloading = true; autoUpdater.downloadUpdate().catch((e) => push({ state: 'error', message: e.message })).finally(() => { downloading = false; }); },
       install: () => { try { autoUpdater.quitAndInstall(); } catch (e) { push({ state: 'error', message: e.message }); } }
     });
   }
@@ -699,7 +726,7 @@ function setupApp() {
         _fs.writeFileSync(_path.join(app.getPath('userData'), 'startup-error.log'),
           new Date().toISOString() + '\n' + msg + '\n');
       } catch (_) { }
-      try { require('electron').dialog.showErrorBox('NE Broadcast Suite — startup error', msg); } catch (_) { }
+      try { require('electron').dialog.showErrorBox('Broadcast Studio — startup error', msg); } catch (_) { }
       throw e;
     }
 

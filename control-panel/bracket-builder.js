@@ -250,9 +250,9 @@ function bbRenderPools() {
   });
 }
 function bbSelectPool(id) { bbCommitPool(); bbLoadPool(id); bbRenderPools(); bbRender(); bbAutosave(); }
-function bbRenamePool(id) {
+async function bbRenamePool(id) {
   const p = (bbModel.pools || []).find((x) => x.id === id); if (!p) return;
-  const name = prompt('Pool name:', p.name); if (name == null) return;
+  const name = await customPrompt('Rename pool', '', p.name, 'Rename'); if (name == null) return;
   p.name = name.trim() || p.name; bbRenderPools(); bbAutosave();
 }
 function bbTeamsDatalist() {
@@ -549,9 +549,9 @@ function bbAddPhase() {
   bbPhases.push(p);
   bbLoadPhase(p.id); bbRenderPhases(); bbSendPhases();
 }
-function bbRenamePhase(id) {
+async function bbRenamePhase(id) {
   const ph = bbPhases.find((x) => x.id === id); if (!ph) return;
-  const name = prompt('Phase name:', ph.name); if (name == null) return;
+  const name = await customPrompt('Rename phase', '', ph.name, 'Rename'); if (name == null) return;
   ph.name = name.trim() || ph.name; bbRenderPhases(); bbSendPhases();
 }
 async function bbDeletePhase(id) {

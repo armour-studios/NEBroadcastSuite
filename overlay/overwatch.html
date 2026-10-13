@@ -312,15 +312,15 @@ html,body{width:1920px;height:1080px;overflow:hidden;background:transparent;
 <script src="scene-base.js"></script>
 <script>
 const HERO_ROLES = {
-  dva:'tank',domina:'tank',doomfist:'tank','junker-queen':'tank',mauga:'tank',hazard:'tank',
+  dva:'tank',dmon:'tank',domina:'tank',doomfist:'tank','junker-queen':'tank',mauga:'tank',hazard:'tank',
   orisa:'tank',ramattra:'tank',reinhardt:'tank',roadhog:'tank',
   sigma:'tank',winston:'tank','wrecking-ball':'tank',zarya:'tank',
   anran:'damage',ashe:'damage',bastion:'damage',emre:'damage',shion:'damage',sierra:'damage',vendetta:'damage',cassidy:'damage',echo:'damage',freja:'damage',
   genji:'damage',hanzo:'damage',junkrat:'damage',mei:'damage',
   pharah:'damage',reaper:'damage',sojourn:'damage','soldier-76':'damage',
-  sombra:'damage',symmetra:'damage',torbjorn:'damage',tracer:'damage',
+  symmetra:'damage',torbjorn:'damage',tracer:'damage',
   venture:'damage',widowmaker:'damage',
-  ana:'support',baptiste:'support','jetpack-cat':'support',mizuki:'support',wuyang:'support',brigitte:'support',illari:'support',
+  ana:'support',baptiste:'support',doctrine:'support',sombra:'support','jetpack-cat':'support',mizuki:'support',wuyang:'support',brigitte:'support',illari:'support',
   juno:'support',kiriko:'support',lifeweaver:'support',lucio:'support',
   mercy:'support',moira:'support',zenyatta:'support'
 };
@@ -450,7 +450,10 @@ function buildHistoryBar(containerId,hist,tA,tB,fallbackMode,showLabels){
     card.appendChild(icon);
 
     const OW_FB='/assets/games/overwatch2.png';
-    if(m.winner){
+    if(m.winner==='draw'){
+      // Played, nobody won: no team logo, just the result.
+      const lbl=document.createElement('span'); lbl.className='ow-hist-label dcr'; lbl.textContent='DRAW'; card.appendChild(lbl);
+    } else if(m.winner){
       const winTeam=m.winner==='a'?tA:tB;
       if(winTeam){
         const img=document.createElement('img'); img.className='ow-hist-logo';

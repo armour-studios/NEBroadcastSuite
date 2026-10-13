@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Custom overlay</title>
+<link rel="stylesheet" href="fonts.css">
+<style>
+  html, body { margin: 0; padding: 0; width: 1920px; height: 1080px; overflow: hidden; background: transparent; }
+  #stage { position: relative; width: 1920px; height: 1080px; overflow: hidden; }
+  #msg { position: absolute; left: 40px; top: 40px; font: 600 22px Inter, sans-serif; color: #fff; background: rgba(0,0,0,.6); padding: 10px 14px; border-radius: 8px; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<script src="scene-base.js"></script>
+<script src="custom-render.js"></script>
+<script>
+/* A custom overlay built on Overlays ▸ Builder, as an OBS browser source:
+     http://localhost:3000/custom.html?id=<overlay id>
+   The layout comes from /api/custom-overlays/:id; live data from SceneBase. When the producer saves,
+   the server bumps state.customOverlayRevs[id] and this page fetches the new layout on its own. */
+(function () {
+  var id = SceneBase.qp('id') || '';
+  var stage = document.getElementById('stage');
+  var layout = null, rev = null, last = null, loading = false, again = false, retry = null, retryMs = 2000;
+  function msg(t) {
+    var m = document.getElementById('msg');
+    if (!t) { if (m) m.remove(); return; }
+    if (!m) { m = document.createElement('div'); m.id = 'msg'; document.body.appendChild(m); }
+    m.textContent = t;
+  }
+  // A save that lands while a fetch is in flight is fetched again afterwards (it used to be dropped,
+  // leaving the old layout up until the next save). A failed fetch retries with backoff instead of
+  // leaving the source blank forever. A 404 (deleted) is an answer, not a failure.
+  function load() {
+    if (!id) return;
+    if (loading) { again = true; return; }
+    loading = true; again = false;
+    clearTimeout(retry);
+    fetch('/api/custom-overlays/' + encodeURIComponent(id), { cache: 'no-store' })
+      .then(function (r) {
+        if (r.status === 404) return { overlay: null };
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (d) {
+        retryMs = 2000;
+        layout = d && d.overlay ? d.overlay : null;
+        // Only a preview shows a message; on air an unknown overlay stays transparent.
+        if (!layout && SceneBase.preview) msg('This custom overlay was deleted.'); else msg('');
+        draw();
+      })
+      .catch(function () {
+        retry = setTimeout(load, retryMs);
+        retryMs = Math.min(retryMs * 2, 30000);
+      })
+      .then(function () { loading = false; if (again) load(); });
+  }
+  function draw() {
+    if (!layout) { stage.textContent = ''; return; }   // deleted: nothing stays on air
+    try { CustomOverlay.render(stage, layout, last || {}, { now: SceneBase.now() }); }
+    catch (e) { if (window.console) console.error('[custom] render failed', e); }
+  }
+  if (!id) { if (SceneBase.preview) msg('No overlay id in the link.'); return; }
+  load();
+  // In-game pieces (clock, scores, player lists, boost) move on the live tick, not just full_state.
+  SceneBase.liveUpdates('game', 'players', 'spectatedPlayer');
+  // Show conditions read the REAL break-screen / casters state; a standalone source would otherwise
+  // see them forced visible and show break-only pieces all the time.
+  SceneBase.trustVisibility('breakScreen', 'casters', 'ticker');
+  SceneBase.connect(function (s) {
+    last = s;
+    var r = s && s.customOverlayRevs ? s.customOverlayRevs[id] : null;
+    if (r && r !== rev) { rev = r; load(); }
+    draw();
+  });
+  // Countdowns, the clock and rotating sponsors tick between state updates.
+  setInterval(function () { if (layout && Array.isArray(layout.elements) && layout.elements.some(CustomOverlay.usesLive)) draw(); }, 500);
+})();
+</script>
+</body>
+</html>

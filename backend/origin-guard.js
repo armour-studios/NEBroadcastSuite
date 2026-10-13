@@ -27,10 +27,40 @@ function hostOnly(hostHeader) {
   return h.split(':')[0];
 }
 
-function isAllowedOrigin(origin, hostHeader) {
+// The Host header names who the browser THINKS it is talking to. DNS rebinding (evil.com re-resolved
+// to 127.0.0.1) makes a public page same-origin with this server: its fetches carry Host: evil.com and,
+// being same-origin GETs, often no Origin at all, so the Origin check alone let it read /api/ws-token
+// and drive the show. Real callers use loopback, an IP literal (LAN), or a LAN machine name; a public
+// DNS name never reaches this server legitimately. NE_ALLOW_HOSTS adds names (comma-separated).
+function isAllowedHost(hostHeader) {
+  const h = hostOnly(hostHeader);
+  if (!h) return true;                                         // HTTP/1.0 and non-browser clients
+  if (LOOPBACK.has(h)) return true;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h) || h.startsWith('[')) return true;   // IPv4 / IPv6 literal
+  if (!h.includes('.')) return true;                           // single-label LAN name (STUDIO-PC)
+  if (/\.(local|lan|home|internal|home\.arpa|localhost)$/.test(h)) return true;
+  const extra = String(process.env.NE_ALLOW_HOSTS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  // A Twitch EventSub webhook arrives through a tunnel (ngrok, cloudflared) with the tunnel's
+  // public name as Host: the one configured in EVENTSUB_WEBHOOK_URL is allowed (and HMAC-checked).
+  try { if (process.env.EVENTSUB_WEBHOOK_URL) extra.push(new URL(process.env.EVENTSUB_WEBHOOK_URL).hostname.toLowerCase()); } catch (_) {}
+  return extra.includes(h);
+}
+
+// "null" / file:// is how the control panel (Electron loadFile) shows up, but it is ALSO what any
+// website can produce with a sandboxed iframe or a data: page. Those only count when the caller is
+// the desktop app or OBS's browser (their User-Agent carries Electron/ or OBS/, which a web page
+// cannot forge: User-Agent is a forbidden header for fetch and WebSocket). `ua` undefined = the
+// caller did not supply one to check (kept permissive for that call shape).
+function trustedOpaqueCaller(ua) {
+  if (ua === undefined) return true;
+  return /\b(Electron|OBS)\//.test(String(ua || ''));
+}
+
+function isAllowedOrigin(origin, hostHeader, ua) {
+  if (!isAllowedHost(hostHeader)) return false;
   if (origin === undefined || origin === null || origin === '') return true;
   const o = String(origin).trim().toLowerCase();
-  if (o === 'null' || o.startsWith('file://')) return true;
+  if (o === 'null' || o.startsWith('file://')) return trustedOpaqueCaller(ua);
   if (o.startsWith('overwolf-extension://')) return true;
   if (extraOrigins().includes(o)) return true;
   let u;
@@ -39,6 +69,8 @@ function isAllowedOrigin(origin, hostHeader) {
   const host = u.hostname.toLowerCase();
   if (LOOPBACK.has(host) || LOOPBACK.has('[' + host + ']')) return true;
   const reqHost = hostOnly(hostHeader);
+  // Same-host (an overlay opened by LAN address talks back to that address). The Host check above
+  // already refused public names, so this can no longer be satisfied by a rebinding domain.
   return !!reqHost && (host === reqHost || '[' + host + ']' === reqHost);
 }
 
@@ -47,11 +79,13 @@ function isAllowedOrigin(origin, hostHeader) {
 function originGuardMiddleware(log) {
   return function originGuard(req, res, next) {
     const origin = req.headers.origin;
-    if (!isAllowedOrigin(origin, req.headers.host)) {
-      if (typeof log === 'function') log(`[security] refused ${req.method} ${req.path} from origin ${origin}`);
+    if (!isAllowedOrigin(origin, req.headers.host, req.headers['user-agent'] || '')) {
+      if (typeof log === 'function') log(`[security] refused ${req.method} ${req.path} from origin ${origin} host ${req.headers.host}`);
       return res.status(403).json({ ok: false, error: 'origin-not-allowed' });
     }
-    res.setHeader('Access-Control-Allow-Origin', origin && origin !== 'null' ? origin : '*');
+    // Reflect the caller's origin ("null" included) instead of '*', so a permitted opaque caller can
+    // read the response and nothing broader is advertised.
+    if (origin) res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -60,4 +94,4 @@ function originGuardMiddleware(log) {
   };
 }
 
-module.exports = { isAllowedOrigin, originGuardMiddleware };
+module.exports = { isAllowedOrigin, isAllowedHost, originGuardMiddleware };

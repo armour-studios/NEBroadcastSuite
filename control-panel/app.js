@@ -45,7 +45,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
       c.classList.toggle('active', c.id === `tab-${tab}-content`);
     });
     const scroll = el('tab-scroll'); if (scroll) scroll.scrollTop = 0;  // back to top on switch
-    if (tab === 'media' && typeof mdLoad === 'function') mdLoad();   // lazy-load media on open
+    if (tab === 'media' && _assetsTab === 'media' && typeof mdLoad === 'function') mdLoad();   // lazy-load media on open
     if (tab === 'events' && typeof evAutoLoad === 'function') evAutoLoad();   // auto-pull in-house tournaments
     if (tab === 'replays' && !_stagingLoading) scanStagingArea();   // auto-scan the OBS folder
     // Scene previews are live overlays — only run them while Assets ▸ Overlays is open.
@@ -66,8 +66,8 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     // On Air + Graphics are Dashboard sections full-time now — Production dropped its Graphics
     // pane, so they are never lent back out.
     _borrowGraphicsToDash();
-    // Show Deck: one element, home is the DCC's Show Deck tab (inside the Talent Monitor widget)
-    // on the Dashboard — it no longer appears on the Talent page. See placeShowDeck.
+    // Show Deck: ONE element with two homes - the DCC's Show Deck tab on the Dashboard and the
+    // Talent page's Desk lineup tab. placeShowDeck moves it; it is never cloned.
     placeShowDeck(tab);
     if (tab === 'ajustes') setApplySettingsCat();   // ensure the settings rail shows the right category
   });
@@ -129,6 +129,22 @@ if (SETTINGS_AS_MODAL) {
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && el('tab-ajustes-content')?.classList.contains('open')) closeSettingsModal(); });
   el('btn-settings-popout')?.addEventListener('click', () => { closeSettingsModal(); if (typeof openPopout === 'function') openPopout('ajustes'); });
 }
+// Esc closes the topmost .mp-modal pop-up (brand kit editor, scene editor, bug report, Map Pool
+// picker, clip editor) through its own Close button, so each one's cleanup still runs. Capture
+// phase, so the Settings handler above does not close Settings underneath an open pop-up.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || e.defaultPrevented) return;
+  if (document.querySelector('.app-prompt-overlay, dialog[open]')) return;
+  // An open dropdown inside the pop-up takes the first Esc.
+  if ([...document.querySelectorAll('.team-dd, .mp-ipick-dd')].some((d) => d.offsetParent)) return;
+  const open = [...document.querySelectorAll('.mp-modal')].filter((m) => m.style.display && m.style.display !== 'none');
+  const m = open[open.length - 1];
+  if (!m) return;
+  const btn = m.querySelector('#brand-editor-close, #se-close, #bug-close, #mp-close, #qr-edit-close, .mp-head [title="Close"]');
+  if (!btn) return;
+  e.stopPropagation();
+  btn.click();
+}, true);
 // Apply the saved/default category once at startup so the page isn't a full scroll on first open.
 setApplySettingsCat();
 
@@ -142,6 +158,8 @@ setApplySettingsCat();
 // to the DCC otherwise, so the Dashboard's tab is never left showing an empty pane.
 function placeShowDeck(tab) {
   const sd = el('talent-deck'); if (!sd) return;
+  // Lent to a Modern drawer: leave it there until the drawer closes (it restores the deck itself).
+  if (sd.closest && sd.closest('.mx-drawer')) return;
   // 'equipos' is the Talent page (historic key — the nav label reads 'Talent').
   const wantTalent = (tab === 'equipos')
     && !!document.querySelector('#talent-page-nav .talent-page-btn.active[data-talentpage="showdeck"]');
@@ -159,7 +177,7 @@ function _activePageTab() {
   return (on && on.dataset.tab) || '';
 }
 
-// ── DCC: Director Control Center — flat nav (Monitor | Players | Hosts | Teams+OOS) ──
+// ── DCC: Director Control Center — role tabs (Show Deck | Players | Monitor) ──
 (function initDCC() {
   const dcc = document.getElementById('cf-director-center');
   if (!dcc) return;
@@ -236,7 +254,7 @@ function _activePageTab() {
 
   tabs.forEach((t) => t.addEventListener('click', () => switchRole(t.dataset.dcrole)));
 
-  // Start on Monitor tab. Deferred to a macrotask: this IIFE runs synchronously near the TOP of
+  // Start on the Show Deck tab. Deferred to a macrotask: this IIFE runs synchronously near the TOP of
   // app.js (well before later `let`/`const` declarations — e.g. VDO_API — are reached), and
   // switchRole('monitor') cascades into cfTalentAutoOpen(), which references those. Calling it
   // synchronously here throws "Cannot access before initialization" and — because it's an uncaught
@@ -267,7 +285,7 @@ function _activePageTab() {
   window._dccUpdateMonDot = updateMonDot;
 })();
 
-// ── Talent page sub-nav: TEAMS | CREW ──
+// ── Talent page sub-nav: SHOW DECK | TEAMS | CREW ──
 (function initTalentPages() {
   const nav = document.getElementById('talent-page-nav'); if (!nav) return;
   const panels = { showdeck: el('talent-showdeck-home'), teams: el('talent-panel-teams'), crew: el('talent-panel-crew') };
@@ -405,7 +423,10 @@ function _activePageTab() {
     const deskSlot = parseInt(el('crew-f-desk-slot')?.value || '0', 10) || 0;
     const libPayload = { kind, name, handle: socialHandle || handle, role, social, country, notes, camUrl, camSlot: defaultCam, deskSlot };
     if (_fromLibId) libPayload.id = _fromLibId;
-    send('save_caster_to_library', libPayload);
+    // Only on-camera people go to the caster library. Producers, admins and socials used to land
+    // there as "casters" and filled the talent lists with people who never go on air (unless they
+    // are being put on the desk, or were already in the library).
+    if (groupToKind[group] || deskSlot || _fromLibId) send('save_caster_to_library', libPayload);
     setTimeout(() => { if (typeof renderDccAll === 'function') renderDccAll(); if (typeof renderDccHostsGrid === 'function') renderDccHostsGrid(); }, 350);
     if (dlg) dlg.close();
     setTimeout(renderCrewList, 300);
@@ -451,7 +472,7 @@ function _activePageTab() {
     const shifts = (data.casters && data.casters.shifts) || [];
     const supportList = (data.casters && Array.isArray(data.casters.support)) ? data.casters.support : [];
     const stationRooms = (window._cfStationDetail && window._cfStationDetail.rooms) || [];
-    const sig = JSON.stringify({ c: crew.map((c) => [c.id, c.name, c.handle, c.group, c.country || '']), s: [1, 2, 3, 4].map(slotName), r: roles, l: labels, sh: shifts.map((s) => s.id + s.name), sup: supportList.map((s) => s.crewId + (s.role || '')), rm: stationRooms.map((r) => r.id + r.connected + '/' + r.slots) });
+    const sig = JSON.stringify({ c: crew.map((c) => [c.id, c.name, c.handle, c.group, c.country || '']), s: [1, 2, 3, 4].map(slotName), sid: ((data.casters && data.casters.list) || []).map((x) => x.slot + ':' + x.streamId), r: roles, l: labels, sh: shifts.map((s) => s.id + s.name), sup: supportList.map((s) => s.crewId + (s.role || '')), rm: stationRooms.map((r) => r.id + r.connected + '/' + r.slots) });
     if (sig === window._tdSig) return;
     window._tdSig = sig;
     const disp = (c) => c.handle || c.name;   // gamertag-first, matching the desk
@@ -469,21 +490,51 @@ function _activePageTab() {
     // search, and there was no way to add someone new without leaving the deck. The suggestion list
     // is our own dropdown (mountCrewTypeahead), not a native <datalist>: that one came out as an
     // unstyled system popup listing crew in roster order instead of A–Z.
-    const cell = (label, id, cur, variant) => {
+    // Each seat's stream id (what the desk overlay views), for the camera-connected dot.
+    const deskList = (data.casters && Array.isArray(data.casters.list)) ? data.casters.list : [];
+    const sidOf = (n) => { const e = deskList.find((x) => Number(x.slot) === n); return e ? (e.streamId || '') : ''; };
+    const cell = (label, id, cur, variant, slot) => {
       const curC = crew.find((c) => c.name === cur);
       // Fall back to the raw slot name when the occupant isn't a crew record (e.g. added straight to
       // the desk) so the slot still SHOWS who's in it — a blank slot you can't clear was the bug.
       return `<div class="td-slot td-slot--${variant}"><span class="td-slot-lbl">${esc(label)}</span>
-        <input type="text" class="input-text td-sel" id="${id}" value="${esc(curC ? disp(curC) : (cur || ''))}" placeholder="Search crew…" autocomplete="off"></div>`;
+        <input type="text" class="input-text td-sel" id="${id}" value="${esc(curC ? disp(curC) : (cur || ''))}" placeholder="Search crew…" autocomplete="off">
+        ${slot && cur ? `<div class="td-cam">${sidOf(slot) ? `<span class="cf-ln-conn td-cam-dot" data-stream="${esc(sidOf(slot))}" data-conn="0" title="Start monitoring (Live monitor) to see whether their camera is connected"></span>` : ''}<button type="button" class="td-cam-btn" data-tdcam="copy" data-slot="${slot}" title="Copy the camera link: it opens ${esc(cur)}'s camera and mic straight into this desk seat">Cam link</button><button type="button" class="td-cam-btn" data-tdcam="watch" data-slot="${slot}" title="Watch this seat's camera feed in a window">Watch</button></div>` : ''}</div>`;
     };
     wrap.innerHTML =
       cell('Host', 'td-host', roles.host || '', 'host')
-      + [1, 2, 3, 4].map((n) => cell(labels[n] || ('Caster ' + n), 'td-c' + n, slotName(n), 'caster')).join('')
+      + [1, 2, 3, 4].map((n) => cell(labels[n] || ('Caster ' + n), 'td-c' + n, slotName(n), 'caster', n)).join('')
       + cell('Observer', 'td-obs', roles.observer || '', 'obs');
+    if (typeof cfUpdateConnStatus === 'function') cfUpdateConnStatus();
+    // Camera buttons on a filled seat: the join link is asked for on demand (it carries the room
+    // password, so it never rides the state broadcast). Delegated once on the wrapper.
+    if (!wrap._tdCamWired) {
+      wrap._tdCamWired = true;
+      wrap.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-tdcam]'); if (!b) return;
+        window._tdCamWant = b.getAttribute('data-tdcam');
+        send('desk_cam_link', { slot: Number(b.getAttribute('data-slot')) });
+      });
+    }
     // The slots are re-rendered from scratch on every state change, so the dropdown is re-mounted
     // each time (the mount is idempotent per element via its own data flag).
     ['td-host', 'td-c1', 'td-c2', 'td-c3', 'td-c4', 'td-obs'].forEach((id) => {
       const i = el(id); if (i && window.mountCrewTypeahead) window.mountCrewTypeahead(i, () => crew);
+    });
+    // Caster slot labels ("Caster 1" -> "Play-by-play") are renamed here: double-click the label.
+    // set_slot_label used to be reachable only from the retired Staging pane.
+    [1, 2, 3, 4].forEach((n) => {
+      const lbl = el('td-c' + n)?.closest('.td-slot')?.querySelector('.td-slot-lbl');
+      if (!lbl) return;
+      lbl.title = 'Double-click to rename this slot';
+      lbl.style.cursor = 'text';
+      lbl.addEventListener('dblclick', async () => {
+        const cur = labels[n] || ('Caster ' + n);
+        // Electron does not implement window.prompt(); use the app's own prompt dialog.
+        const next = await customPrompt('Rename desk slot', 'Name for desk slot ' + n, cur, 'Save');
+        if (next == null) return;
+        send('set_slot_label', { slot: n, label: next.trim().slice(0, 40) });
+      });
     });
     [1, 2, 3, 4].forEach((n) => {
       el('td-c' + n)?.addEventListener('change', function () {
@@ -825,12 +876,14 @@ function _pcamSources(vdo) {
   };
   if (vdo && vdo.teams) ['blue', 'orange'].forEach((side) => {
     const t = vdo.teams[side]; if (!t) return;
-    (t.players || []).forEach((p) => push(p.name, `${p.name} — ${t.name || side}`, p.obsUrl, 'Match players'));
+    (t.players || []).forEach((p) => push(p.name, `${p.name} — ${t.name || side}`, p.obsUrl, 'Talent Rooms: this match'));
   });
   ((vdo && vdo.allTeams) || []).forEach((t) => (t.players || []).forEach((p) =>
-    push(p.name, `${p.name} — ${t.name}`, p.obsUrl, 'Team library')));
+    push(p.name, `${p.name} — ${t.name}`, p.obsUrl, 'Talent Rooms: saved teams')));
   ((currentState?.casters?.library) || []).forEach((c) =>
     push(c.name || c.handle, `${c.name || c.handle} — crew`, c.vdoOverride || c.camUrl, 'Crew'));
+  (((currentState && currentState.lanSeats && currentState.lanSeats.enabled && currentState.lanSeats.seats) || [])).forEach((x) =>
+    push('', `${_lanSideName(x.side)}, ${x.label}`, x.link, 'LAN seats'));
   (_pcamCloudFeedsCache || []).forEach((f) =>
     push(f.personName, `${f.personName}${f.teamName ? ' — ' + f.teamName : ''} (cloud)`, f.obsViewUrl, 'Cloud cameras'));
   return out;
@@ -987,16 +1040,166 @@ function renderCfStations() {
   }));
   _wireCopyLinks();
 }
+// Player cams: one row per in-game player, each linked to a camera feed. The HUD shows the cam of
+// whoever is being spectated, matching the same way _pcamFind does here.
+// A real account id, or '' for the placeholders RL / CS2 send for bots and hidden accounts.
+function _pcamId(raw) { const s = (raw == null ? '' : String(raw)).trim(); return (!s || /^0*$/.test(s) || /^unknown$/i.test(s)) ? '' : s; }
+function _pcamKey(s) { return String(s || '').toLowerCase().replace(/\s+/g, ' ').trim(); }
+function _pcamFind(facecams, row) {
+  const id = _pcamId(row.pid);
+  return (id && facecams.find((f) => f.platformId && String(f.platformId) === id))
+    || facecams.find((f) => f.name === row.name)
+    || facecams.find((f) => _pcamKey(f.name) === _pcamKey(row.name)) || null;
+}
+// LAN seat cameras (backend/lan-seats.js): one permanent link per seat, and each match the producer
+// says who is sitting where (or each seat's helper reports it). Shared by every Player cams mount.
+// The name for a side of seats: the team whose in-game players are seated there, else the loaded
+// team for that side (Team 1 side = blue, Team 2 side = orange).
+function _lanSideName(sd) {
+  const st = currentState || {};
+  const ls = st.lanSeats || {};
+  const players = Array.isArray(st.players) ? st.players : [];
+  const votes = [0, 0];
+  (ls.seats || []).filter((x) => x.side === sd && x.player).forEach((x) => {
+    const p = players.find((pl) => _pcamKey(pl.name) === _pcamKey(x.player));
+    if (p) votes[Number(p.team) === 1 ? 1 : 0]++;
+  });
+  const t = votes[0] || votes[1] ? (votes[1] > votes[0] ? 1 : 0) : (sd === 'b' ? 1 : 0);
+  const team = st.teams && st.teams[t ? 'orange' : 'blue'];
+  return (team && team.name) || (sd === 'b' ? 'Team 2' : 'Team 1');
+}
+function _lanAgo(ms) {
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  return s < 60 ? s + 's ago' : Math.round(s / 60) + 'm ago';
+}
+function _pcamSeatsHtml(rows) {
+  const ls = (currentState && currentState.lanSeats) || {};
+  const mode = `<div class="pcam-mode" role="group" aria-label="How cameras are set up">
+      <span>Cameras</span>
+      <button type="button" data-lanmode="player" class="${ls.enabled ? '' : 'is-on'}" title="Remote: every player has their own camera link that follows them">Each player's own link</button>
+      <button type="button" data-lanmode="seat" class="${ls.enabled ? 'is-on' : ''}" title="LAN: a camera at every seat with a permanent link; say who is sitting where each match">LAN seats</button>
+    </div>`;
+  if (!ls.enabled) return mode;
+  const seats = ls.seats || [];
+  const ag = ls.agent || {};
+  const seen = ls.seen || {};
+  const live = rows.filter((r) => r.live);
+  const opts = (cur) => {
+    const names = live.map((r) => r.name);
+    if (cur && !names.some((n) => _pcamKey(n) === _pcamKey(cur))) names.push(cur);
+    const team = (n) => { const r = live.find((x) => x.name === n); return r ? _lanTeamName(r.team) : 'Not in the lobby'; };
+    const groups = {};
+    names.forEach((n) => { (groups[team(n)] = groups[team(n)] || []).push(n); });
+    return '<option value="">Empty seat</option>' + Object.keys(groups).map((g) => `<optgroup label="${tlEsc(g)}">` + groups[g].map((n) =>
+      `<option value="${tlEsc(n)}"${_pcamKey(n) === _pcamKey(cur) ? ' selected' : ''}>${tlEsc(n)}</option>`).join('') + '</optgroup>').join('');
+  };
+  const helperLine = (s) => {
+    if (!ag.enabled) return '';
+    const h = seen[s.id];
+    const fresh = h && Date.now() - h.at < 60000;
+    return `<div class="lan-helper${fresh ? ' is-live' : ''}">${h ? (fresh ? 'Helper sees ' : 'Helper last saw ') + tlEsc(h.name) + ' · ' + _lanAgo(h.at) : 'No helper reporting from this seat yet'}
+      <button type="button" class="lan-helper-dl" title="Download this seat's helper: run it on the PC at this seat and leave it open">Get helper</button></div>`;
+  };
+  const side = (sd) => `<div class="lan-side lan-side-${sd}"><div class="lan-side-head">${tlEsc(_lanSideName(sd))}<small>${sd === 'b' ? 'Side 2' : 'Side 1'}</small></div>${seats.filter((s) => s.side === sd).map((s) => `
+      <div class="lan-seat${s.player ? ' is-filled' : ''}" data-seat="${tlEsc(s.id)}">
+        <div class="lan-seat-row">
+          <button type="button" class="lan-seat-name lan-rename" title="Rename this seat (e.g. PC 4)">${tlEsc(s.label)}</button>
+          <select class="input-select lan-seat-sel" data-seat="${tlEsc(s.id)}" title="Who is sitting here this match">${opts(s.player)}</select>
+          <button type="button" class="btn btn-ghost btn-xs lan-copy" title="Copy this seat's camera link (open it on the seat PC once; it never changes)"${s.joinUrl ? '' : ' disabled'}>Copy link</button>
+          <button type="button" class="btn btn-ghost btn-xs lan-custom${s.custom ? ' is-on' : ''}" title="${s.custom ? 'Using your own camera link. Click to change or clear it' : 'Use your own camera link for this seat (capture card, other service)'}">${s.custom ? 'Own link' : '…'}</button>
+        </div>
+        ${helperLine(s)}
+      </div>`).join('')}</div>`;
+  const filled = seats.filter((s) => s.player).length;
+  return mode + `<div class="lan-panel">
+      <div class="lan-tools">
+        <span class="lan-count">${filled} of ${seats.length} seats filled</span>
+        <label class="lan-per">Seats per side
+          <select class="input-select lan-per-sel">${[1, 2, 3, 4, 5, 6].map((n) => `<option value="${n}"${n === ls.perSide ? ' selected' : ''}>${n}</option>`).join('')}</select></label>
+        <span style="flex:1"></span>
+        <button type="button" class="btn btn-ghost btn-sm lan-copyall">Copy all seat links</button>
+        <button type="button" class="btn btn-ghost btn-sm lan-autoseat" title="Put players back in the seat they used last time (empty seats only)">Seat returning players</button>
+        <button type="button" class="btn btn-secondary btn-sm lan-clear" title="Empty every seat for the next match (the links stay)">Next match: clear seats</button>
+      </div>
+      <div class="lan-auto">
+        <label class="qt-toggle" title="A small helper on each seat PC reads that PC's own Rocket League and tells this app who is playing there">
+          <span>Seat PCs report who is playing</span>
+          <span class="switch"><input type="checkbox" class="lan-agent-toggle"${ag.enabled ? ' checked' : ''}><span class="slider"></span></span>
+        </label>
+        <span class="lan-auto-note">${ag.enabled
+          ? (ls.agentError ? '<b class="lan-err">' + tlEsc(ls.agentError) + '</b>' : 'Listening on port ' + tlEsc(ag.port) + '. Run each seat\'s helper on that seat\'s PC (Rocket League Stats API on there too). Windows may ask to allow the app on your network the first time: allow it on private networks.')
+          : 'Off: you pick who sits where. Returning players are still seated automatically.'}</span>
+      </div>
+      <div class="lan-sides">${side('a')}${side('b')}</div>
+      <p class="lan-hint">Open each seat's camera link once on that seat's PC (it stays the same all event). <button type="button" class="lan-newlinks">New links</button></p>
+    </div>`;
+}
+// "Frost Esports" for an in-game team number, from the loaded teams.
+function _lanTeamName(team) {
+  const t = currentState && currentState.teams && currentState.teams[Number(team) === 1 ? 'orange' : 'blue'];
+  return (t && t.name) || (Number(team) === 1 ? 'Orange' : 'Blue');
+}
+function _pcamSeatClick(e) {
+  const t = e.target;
+  const ls = (currentState && currentState.lanSeats) || {};
+  const seatEl = t.closest('.lan-seat');
+  const seat = seatEl ? (ls.seats || []).find((s) => s.id === seatEl.dataset.seat) : null;
+  const copy = (txt, msg) => { if (navigator.clipboard) navigator.clipboard.writeText(txt).then(() => showToast(msg, '#22c55e', 2000)).catch(() => customPrompt('Copy link', 'Select the link and copy it.', txt, 'Done')); };
+  const mode = t.closest('[data-lanmode]');
+  if (mode) { send('lan_seats_set', { enabled: mode.dataset.lanmode === 'seat' }); return true; }
+  if (t.closest('.lan-copy') && seat) { copy(seat.joinUrl, `${_lanSideName(seat.side)} ${seat.label} link copied.`); return true; }
+  if (t.closest('.lan-helper-dl') && seat) {
+    fetch('http://127.0.0.1:3000/api/lan-seats/helper?seat=' + encodeURIComponent(seat.id))
+      .then((r) => r.ok ? r.blob() : Promise.reject(new Error('Turn on seat helpers first.')))
+      .then((b) => {
+        const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'seat-helper-' + seat.id + '.cmd';
+        document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+        showToast('Saved the helper for ' + seat.label + '. Copy it to that seat PC and double-click it.', '#22c55e', 4500);
+      })
+      .catch((err) => showToast(err.message, '#c53030', 3000));
+    return true;
+  }
+  if (t.closest('.lan-copyall')) { copy((ls.seats || []).map((s) => `${_lanSideName(s.side)}, ${s.label}: ${s.joinUrl}`).join('\n'), 'All seat links copied.'); return true; }
+  if (t.closest('.lan-clear')) { send('lan_seats_clear', {}); showToast('Seats cleared for the next match.', '#22c55e', 2000); return true; }
+  if (t.closest('.lan-autoseat')) { send('lan_seats_autoseat', {}); return true; }
+  if (t.closest('.lan-rename') && seat) {
+    customPrompt('Rename seat', `${_lanSideName(seat.side)}. For example: PC 4, Station B2.`, seat.label, 'Rename').then((v) => { if (v != null) send('lan_seats_set', { names: { [seat.id]: v } }); });
+    return true;
+  }
+  if (t.closest('.lan-custom') && seat) {
+    const ask = () => customPrompt('Seat camera link', `${_lanSideName(seat.side)}, ${seat.label}. Paste a link to use instead of the seat's own VDO.ninja link (a capture card page, another service).`, seat.custom ? seat.link : '', 'Save')
+      .then((v) => { if (v) send('lan_seat_link', { seatId: seat.id, link: v }); });
+    // The dialog treats an empty box as Cancel, so going back to the seat's own link is its own question.
+    if (seat.custom) appConfirm("Go back to this seat's own VDO.ninja link?", 'Use seat link', false).then((ok) => { if (ok) send('lan_seat_link', { seatId: seat.id, link: '' }); else ask(); });
+    else ask();
+    return true;
+  }
+  if (t.closest('.lan-newlinks')) {
+    appConfirm('Make new links for every seat? The old seat links stop working, so each seat PC needs its new link.', 'New links', true).then((ok) => { if (ok) send('lan_seats_new_rooms', {}); });
+    return true;
+  }
+  return false;
+}
+function _pcamSeatChange(e) {
+  const sel = e.target.closest('.lan-seat-sel');
+  if (sel) { send('lan_seat_assign', { seatId: sel.dataset.seat, name: sel.value }); return true; }
+  const ag = e.target.closest('.lan-agent-toggle');
+  if (ag) { send('lan_seats_agent', { enabled: ag.checked }); return true; }
+  const per = e.target.closest('.lan-per-sel');
+  if (per) { send('lan_seats_set', { perSide: Number(per.value) }); return true; }
+  return false;
+}
 // In-game names: live RL feed → live CS2 feed → match rosters as a fallback.
 function _pcamRows() {
   const st = currentState || {};
   const rl = Array.isArray(st.players) ? st.players : [];
   const cs = (st.csgo && Array.isArray(st.csgo.players)) ? st.csgo.players : [];
-  if (rl.length) return rl.map((p) => ({ name: p.name || '', pid: p.primaryid ? (String(p.primaryid).split('|')[1] || '') : '', live: true })).filter((r) => r.name);
-  if (cs.length) return cs.map((p) => ({ name: p.name || '', pid: p.steamid || '', live: true })).filter((r) => r.name);
+  if (rl.length) return rl.map((p) => ({ name: p.name || '', pid: _pcamId(p.primaryid ? String(p.primaryid).split('|')[1] : ''), team: Number(p.team) === 1 ? 1 : 0, live: true })).filter((r) => r.name && r.name !== '?');
+  if (cs.length) return cs.map((p) => ({ name: p.name || '', pid: _pcamId(p.steamid), team: /^t$/i.test(p.team || '') ? 1 : 0, live: true })).filter((r) => r.name);
   const rows = [];
-  ['blue', 'orange'].forEach((side) => ((st.teams?.[side]?.players) || []).forEach((p) => {
-    if (p.name) rows.push({ name: p.name, pid: '', live: false });
+  ['blue', 'orange'].forEach((side, ti) => ((st.teams?.[side]?.players) || []).forEach((p) => {
+    const n = p.gamertag || p.name;
+    if (n) rows.push({ name: n, pid: '', team: ti, live: false });
   }));
   return rows;
 }
@@ -1015,48 +1218,87 @@ async function renderPlayerCamMounts(forceVdo) {
   const sources = _pcamSources(vdo);
   const facecams = (currentState && currentState.facecams) || [];
   const rows = _pcamRows();
+  const st = currentState || {};
   const anyLive = rows.some((r) => r.live);
   const groups = {};
   sources.forEach((s) => { (groups[s.group] = groups[s.group] || []).push(s); });
-  const rowHtml = rows.map((r) => {
-    const fc = facecams.find((f) => f.name === r.name);
+  const linked = rows.filter((r) => { const fc = _pcamFind(facecams, r); return fc && fc.link; }).length;
+  const rowHtml = (r) => {
+    const fc = _pcamFind(facecams, r);
     const cur = (fc && fc.link) || '';
     const inSources = sources.some((s) => s.url === cur);
-    const opts = ['<option value="">— no cam —</option>'];
+    const opts = ['<option value="">No camera</option>'];
     Object.keys(groups).forEach((g) => {
       opts.push(`<optgroup label="${tlEsc(g)}">` + groups[g].map((s) =>
         `<option value="${tlEsc(s.url)}"${s.url === cur ? ' selected' : ''}>${tlEsc(s.label)}</option>`).join('') + '</optgroup>');
     });
-    if (cur && !inSources) opts.push(`<option value="${tlEsc(cur)}" selected>Current link (custom)</option>`);
-    opts.push('<option value="__custom__">Custom URL…</option>');
-    return `<div class="pcam-row" style="display:flex;align-items:center;gap:10px;padding:3px 0;">
-      <span style="flex:0 0 190px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:700;color:#e8eaf0;" title="${tlEsc(r.name)}">${tlEsc(r.name)}
-        ${r.live ? '<span style="margin-left:6px;font-size:9px;font-weight:800;letter-spacing:.1em;color:#22c55e;">LIVE</span>' : ''}
-        ${cur ? '<span style="margin-left:6px;font-size:9px;font-weight:800;letter-spacing:.1em;color:#8b5cf6;">CAM</span>' : ''}
-      </span>
-      <select class="input-select pcam-sel" data-pcam="${tlEsc(r.name)}" data-pid="${tlEsc(r.pid)}" style="flex:1;min-width:0;font-size:12px;">${opts.join('')}</select>
+    if (cur && !inSources) opts.push(`<option value="${tlEsc(cur)}" selected>Pasted link</option>`);
+    opts.push('<option value="__custom__">Paste a camera link…</option>');
+    return `<div class="pcam-row${cur ? ' has-cam' : ''}">
+      <span class="pcam-dot" title="${cur ? 'Has a camera' : 'No camera yet'}"></span>
+      <span class="pcam-name" title="${tlEsc(r.name)}">${tlEsc(r.name)}</span>
+      <select class="input-select pcam-sel" data-pcam="${tlEsc(r.name)}" data-pid="${tlEsc(r.pid)}">${opts.join('')}</select>
     </div>`;
-  }).join('');
-  const statusText = !rows.length
-    ? 'No players found — load a match (Match — Teams) or start the game feed, then hit Refresh.'
-    : (anyLive ? 'Names pulled live from the game feed.' : 'No live game feed — names from the match rosters. Start the game and hit Refresh to pull exact in-game names.');
+  };
+  const teamName = (i) => { const t = st.teams && st.teams[i ? 'orange' : 'blue']; return (t && t.name) || (i ? 'Orange' : 'Blue'); };
+  const html = rows.length ? [0, 1].map((ti) => {
+    const list = rows.filter((r) => r.team === ti);
+    if (!list.length) return '';
+    return `<div class="pcam-team pcam-team-${ti ? 'orange' : 'blue'}"><div class="pcam-team-head">${tlEsc(teamName(ti))}</div>${list.map(rowHtml).join('')}</div>`;
+  }).join('') : '';
+  // In-game players who aren't on their team's roster have no Talent Rooms camera link of their own.
+  const missing = _pcamMissingFromRoster(rows);
+  const callout = missing.length
+    ? `<div class="pcam-callout"><span>${missing.length === 1 ? tlEsc(missing[0].name) + ' is' : missing.length + ' players are'} not on the team roster yet, so Talent Rooms has no camera link for ${missing.length === 1 ? 'them' : 'them'}. Add them and each player gets their own link, already linked here.</span><button type="button" class="btn btn-primary btn-sm pcam-addroster">Add to rosters</button></div>`
+    : '';
+  const isRL = (st.activeGame || '') === 'rocket-league' || st.rlConnected;
+  let statusText;
+  if (!rows.length) {
+    statusText = isRL && st.rlConnected
+      ? 'Rocket League is connected. Join or spectate the match and the players show up here.'
+      : 'No players yet. Open the game and spectate the match (or load the two teams on the Match page), then press Refresh.';
+  } else if (anyLive) {
+    statusText = `${linked} of ${rows.length} players have a camera. Names come straight from the game, so the HUD will find them.`;
+  } else {
+    statusText = `Showing roster names: ${isRL ? 'Rocket League' : 'the game'} isn't sending player data yet, and in-game names can differ. Spectate the match and press Refresh to get the exact names.`;
+  }
+  const off = st.facecamsEnabled === false;
+  if (off) statusText = 'Player cams are switched off, so the HUD shows no cameras. Turn on Show on HUD. ' + statusText;
   mounts.forEach((m) => {
     // Don't rebuild a grid the user is actively picking in — a state-driven re-render would
     // otherwise reset the open dropdown mid-selection (why the DCC "wouldn't let me assign").
     if (m.rows.contains(document.activeElement)) return;
-    m.rows.innerHTML = rowHtml || '';
-    if (m.status) m.status.textContent = statusText;
+    m.rows.innerHTML = _pcamSeatsHtml(rows) + ((st.lanSeats && st.lanSeats.enabled) ? '' : callout) + html;
+    m.rows.classList.add('pcam-list');
+    if (m.status) { m.status.textContent = statusText; m.status.classList.toggle('pcam-warn', off || (!!rows.length && !anyLive)); }
   });
 }
-function _pcamAutoMatch() {
+// Live in-game players with no roster entry (by in-game name or gamertag) on their side's team.
+function _pcamMissingFromRoster(rows) {
+  const st = currentState || {};
+  return rows.filter((r) => r.live).filter((r) => {
+    const roster = (st.teams && st.teams[r.team ? 'orange' : 'blue'] && st.teams[r.team ? 'orange' : 'blue'].players) || [];
+    return !roster.some((p) => _pcamKey(p.gamertag || '') === _pcamKey(r.name) || _pcamKey(p.name) === _pcamKey(r.name));
+  });
+}
+// Put the missing in-game players on their team's roster (exact in-game name, account id), then link
+// each one to the Talent Rooms camera link that creates for them.
+function _pcamAddToRosters() {
+  const missing = _pcamMissingFromRoster(_pcamRows());
+  if (!missing.length) return;
+  missing.forEach((r) => send('add_player', { side: r.team ? 'orange' : 'blue', player: { name: r.name, primaryid: r.pid || '' } }));
+  showToast(`Added ${missing.length} player${missing.length === 1 ? '' : 's'} to the rosters. Send each one their invite link from Talent Rooms.`, '#22c55e', 4500);
+  setTimeout(() => _pcamAutoMatch(true), 900);
+}
+function _pcamAutoMatch(forceVdo) {
   (async () => {
-    const vdo = await _pcamVdoLinks();
+    const vdo = await _pcamVdoLinks(forceVdo === true);
     const sources = _pcamSources(vdo);
     const facecams = (currentState && currentState.facecams) || [];
     let linked = 0;
     _pcamRows().forEach((r) => {
-      if (facecams.find((f) => f.name === r.name && f.link)) return;   // already mapped
-      const hit = sources.find((s) => s.person === r.name.toLowerCase());
+      const have = _pcamFind(facecams, r); if (have && have.link) return;   // already mapped
+      const hit = sources.find((s) => _pcamKey(s.person) === _pcamKey(r.name));
       if (hit) { send('save_facecam', { name: r.name, platformId: r.pid, link: hit.url }); linked++; }
     });
     showToast(linked ? `Auto-linked ${linked} player cam${linked !== 1 ? 's' : ''}` : 'No name matches found — link them with the dropdowns', linked ? '#22c55e' : '#fbbf24');
@@ -1066,19 +1308,34 @@ function _pcamAutoMatch() {
 ;(function wirePlayerCams() {
   _PCAM_MOUNTS.forEach((m) => {
     const rowsEl = el(m.rows); if (!rowsEl) return;
-    rowsEl.addEventListener('change', (e) => {
+    rowsEl.addEventListener('click', (e) => { if (_pcamSeatClick(e)) return; if (e.target.closest('.pcam-addroster')) _pcamAddToRosters(); });
+    rowsEl.addEventListener('change', async (e) => {
+      if (_pcamSeatChange(e)) return;
       const sel = e.target.closest('[data-pcam]'); if (!sel) return;
       const name = sel.dataset.pcam, pid = sel.dataset.pid || '';
       let link = sel.value;
       if (link === '__custom__') {
-        link = prompt(`Cam URL for ${name} (any embeddable URL — VDO view link, Twitch embed, …)`) || '';
+        // window.prompt() does nothing in Electron, so this used to silently drop the link.
+        link = (await customPrompt(`Camera for ${name}`, 'Paste the camera link: a VDO.ninja view link, or any page that shows the camera.', '', 'Link camera')) || '';
         if (!link.trim()) { renderPlayerCamMounts(); return; }
       }
-      if (!link) { send('delete_facecam', { name }); showToast(`Cam cleared for ${name}`, '#fbbf24'); }
-      else { send('save_facecam', { name, platformId: pid, link: link.trim() }); showToast(`Cam linked for ${name}`, '#22c55e'); }
+      // A cam saved under another spelling of this name ("zen" for "Zen") is replaced, not kept as a duplicate.
+      const old = _pcamFind((currentState && currentState.facecams) || [], { name, pid });
+      if (old && old.name !== name) send('delete_facecam', { name: old.name });
+      if (!link) { send('delete_facecam', { name }); showToast(`Camera removed for ${name}`, '#fbbf24'); }
+      else { send('save_facecam', { name, platformId: pid, link: link.trim() }); showToast(`Camera linked to ${name}`, '#22c55e'); }
       setTimeout(() => renderPlayerCamMounts(), 400);
     });
   });
+  // Players join the lobby through the game feed, not through full_state: re-render a visible
+  // panel when the names, teams, cams or the RL connection change.
+  let sig = '';
+  setInterval(() => {
+    if (!_PCAM_MOUNTS.some((m) => { const e = el(m.rows); return e && e.offsetParent; })) return;
+    const st = currentState || {};
+    const next = JSON.stringify([_pcamRows(), (st.facecams || []).map((f) => f.name + '|' + f.link), !!st.rlConnected, st.facecamsEnabled !== false, st.lanSeats && [st.lanSeats.enabled, st.lanSeats.perSide, (st.lanSeats.seats || []).map((x) => x.id + x.label + x.player + x.link), st.lanSeats.agent, st.lanSeats.agentError, st.lanSeats.seen], st.teams && [st.teams.blue && st.teams.blue.name, st.teams.orange && st.teams.orange.name]]);
+    if (next !== sig) { sig = next; renderPlayerCamMounts(); }
+  }, 1500);
   [['btn-playercams-automatch', _pcamAutoMatch], ['dcc-playercams-automatch', _pcamAutoMatch], ['cfp-playercams-automatch', _pcamAutoMatch],
    ['btn-playercams-refresh', () => renderPlayerCamMounts(true)], ['dcc-playercams-refresh', () => renderPlayerCamMounts(true)], ['cfp-playercams-refresh', () => renderPlayerCamMounts(true)]]
     .forEach(([id, fn]) => { const b = el(id); if (b) b.addEventListener('click', fn); });
@@ -2075,7 +2332,13 @@ function renderDccHostsGrid() {
     const regenBtn   = el(`dcc-regen-team-${side}`);
     const roster     = el(`dcc-roster-team-${side}`);
     const refreshSide = () => { if (typeof cfLoadGroups === 'function') cfLoadGroups().then(() => renderDccTeamSection(side)); else renderDccTeamSection(side); };
-    if (regenBtn) regenBtn.addEventListener('click', () => { send('generate_team_vdo', { side }); setTimeout(refreshSide, 700); });
+    if (regenBtn) regenBtn.addEventListener('click', async () => {
+      // The tooltip promised a refresh; without `regenerate` the server did nothing once a room existed.
+      const has = !!(currentState && currentState.teams && currentState.teams[side] && currentState.teams[side].vdo && currentState.teams[side].vdo.room);
+      if (has && !(await appConfirm('Make a new room for this team? Everyone in the old room has to rejoin with the new link.', 'New room'))) return;
+      send('generate_team_vdo', { side, regenerate: has });
+      setTimeout(refreshSide, 700);
+    });
     if (roster) {
       roster.addEventListener('click', (e) => {
         const copy = e.target.closest('[data-copy-url]');
@@ -2493,7 +2756,7 @@ function _borrowGraphicsToDash() {
     draft:     { name: 'Pick / Ban',            link: 'draft.html',           hasClear: true,  hasQueue: false, hasPush: true,  popout: true },
     spotlight: { name: 'Spotlight',             link: 'watchlist.html',       hasClear: true,  hasQueue: false, hasPush: true,  popout: true },
     standings: { name: 'Standings',             link: 'standings.html',       hasClear: true,  hasQueue: false, hasPush: true,  hasApply: true,  pushId: 'btn-gfx-standings-push', clearId: 'btn-gfx-standings-clear', popout: true },
-    schedule:  { name: 'Schedule',              link: 'schedule.html',        hasClear: true,  hasQueue: false, hasPush: true,  hasApply: true,  pushId: 'btn-gfx-schedule-push', clearId: 'btn-gfx-schedule-clear', popout: true },
+    schedule:  { name: 'Schedule',              link: 'schedule.html',        hasClear: true,  hasQueue: false, hasPush: true,  hasApply: true,  pushId: 'btn-gfx-schedule-push', clearId: 'btn-hide-schedule-gfx', popout: true },
     bracket:   { name: 'Bracket',               link: 'bracket.html',         hasClear: true,  hasQueue: false, hasPush: true,  popout: true },
     credits:   { name: 'Stream Credits',        link: 'stream-credits.html',  hasClear: true,  hasQueue: false, hasPush: true  },
     // Battle-royale scenes. Their CONTENT is driven from Match — Lobby (that's where the field
@@ -2839,6 +3102,21 @@ function _borrowGraphicsToDash() {
         b.style.setProperty('--seg-c', side === 'b' ? orangeColor : blueColor);
         b.classList.toggle('is-on', side === ts);
       });
+      // Overwatch: say which map the bans are being saved to. Pick / Ban follows the scoreboard's game
+      // number, which is the easy thing to get out of step with; any map's bans can also be set
+      // straight on its Map Pool card.
+      const owNote = el('draft-front-ow-map');
+      if (owNote) {
+        const isOw = data.activeGame === 'overwatch' || d.game === 'overwatch';
+        owNote.hidden = !isOw;
+        if (isOw) {
+          const n = Math.max(1, (data.game && data.game.number) || 1);
+          const played = ((data.veto && data.veto.maps) || []).filter((m) => m && (m.action === 'pick' || m.action === 'decider'));
+          const m = played[n - 1];
+          const txt = `Bans save to map ${n}${m && m.name ? ': ' + m.name : ''} (the scoreboard's game ${n}). For any other map, set its bans on its Map Pool card.`;
+          if (owNote.textContent !== txt) owNote.textContent = txt;
+        }
+      }
       // Status readout — hidden while the Overwatch board is up (the board IS the status).
       body.style.display = isOwActive ? 'none' : '';
       const sig = isOwActive ? 'ow' : started
@@ -2901,6 +3179,15 @@ function _borrowGraphicsToDash() {
   });
   _segPick('draft-front-first-seg', 'draft-front-start');
   _segPick('draft-front-owbans-seg', 'draft-front-owbans');
+  // Board look (layout / strip edge / shot clock): presentation only, so each change goes straight to air.
+  const _draftLookSeg = (segId, key) => el(segId)?.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-v]'); if (!b) return;
+    el(segId).querySelectorAll('button[data-v]').forEach((x) => x.classList.toggle('is-on', x === b));
+    send('set_draft_meta', { [key]: b.dataset.v });
+  });
+  _draftLookSeg('draft-front-layout-seg', 'layout');
+  _draftLookSeg('draft-front-pos-seg', 'stripPos');
+  el('draft-front-clock')?.addEventListener('change', (e) => send('set_draft_meta', { turnSeconds: Number(e.target.value) || 0 }));
   // Persist the front-card "which side starts" pick so it survives re-renders and the full board mirrors it.
   el('gfx-popout-summary')?.addEventListener('change', (e) => {
     const s = e.target.closest('#draft-front-start');
@@ -3019,6 +3306,11 @@ function _borrowGraphicsToDash() {
     const key = keys.includes(which) ? which : (SCENE_META[which] ? which : (ALIAS[which] && keys.includes(ALIAS[which]) ? ALIAS[which] : keys[0]));
     currentKey = key;
     const navHighlightKey = (key === 'series') ? 'veto' : key;
+    // Map Pool's map cards need the full width: the preview moves above the editor for it.
+    const setCol = el('gfx-settings-col');
+    setCol?.classList.toggle('gfx-wide-editor', key === 'veto' || key === 'series');
+    // Switching graphics while scrolled down a long editor: open the next one at its top.
+    if (setCol && setCol.offsetParent && setCol.getBoundingClientRect().top < 0) setCol.scrollIntoView({ block: 'start' });
     btns.forEach((b) => b.classList.toggle('active', b.dataset.gfxscene === navHighlightKey));
     // Keep the floating OBS Program panel's GFX mode pointed at this scene, in case it's open.
     gfxApplyPreview(key);
@@ -3111,6 +3403,13 @@ function _borrowGraphicsToDash() {
   window._gfxCfgShow = (which) => show(which);
   window._gfxSceneMeta = SCENE_META;  // expose for on-air board auto-clear
   window._gfxDoPush = doPush;         // expose for external callers (hotkeys, rundown)
+  // Take ONE scene off air (its own hide button), and drop gfxActive if it was the live layer.
+  window._gfxDoClear = (key) => {
+    const meta = SCENE_META[key]; if (!meta) return;
+    if (meta.hasClear) el(meta.clearId || ('btn-hide-' + key))?.click();
+    if (currentState && currentState.gfxActive === key) { send('set_gfx_active', { scene: null }); currentState.gfxActive = null; }
+    refreshTopBar(currentKey);
+  };
 
   // ── Battle-royale scenes ────────────────────────────────────────────────────
   // doPush()/clearAllGfxScenes() drive scenes through hidden btn-show-*/btn-hide-* buttons, so
@@ -3440,108 +3739,310 @@ function _borrowGraphicsToDash() {
   // Inline icons, NOT svgIcon(): this IIFE renders at startup, before app.js reaches its ICON_SVG
   // table further down, and touching that const here throws a TDZ error that halts the whole panel.
   const MP_ICON_RESET = '<svg class="svg-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>';
+  const MP_ICON_GRIP = '<svg class="svg-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>';
   const MP_ICON_REMOVE = '<svg class="svg-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
+  // One card per map, two lines:
+  //   top    = number · map picture · map search · mode · remove
+  //   bottom = who picked it (segmented) · score steppers per team · Draw · reset · result in words
+  // The native <select>/<input> value stores keep their class names (mp-map-select, mp-mode-select,
+  // mp-pick-by, mp-score-a/-b, mp-draw), so mpBuildMapsPayload and Clear scores read them as before.
   function mpRenderSlots(prefill, count) {
     const wrap = el('mp-slots'); if (!wrap) return;
     const bo = parseInt(el('mp-bestof')?.value, 10) || 5;
     const existing = prefill || [];
     const n = Math.max(1, Math.min(mpMaxSlots(bo), count != null ? count : Math.max(existing.length, mpMinSlots(bo))));
     const pool = mpMapPool();
-    // Key the two score columns to the REAL teams — name + team-color underline —
-    // so it's obvious which side is being marked with what score.
     const _tms = (currentState && currentState.teams) || {};
     const _tA = (_tms.blue && _tms.blue.name) || 'Blue';
     const _tB = (_tms.orange && _tms.orange.name) || 'Orange';
     const _cA = (_tms.blue && _tms.blue.color) || '#3b82f6';
     const _cB = (_tms.orange && _tms.orange.color) || '#e97139';
-    // Column header on the same grid as the rows; each score column is keyed by its team's tag in
-    // the team colour (replaces the old "Scores: X left · Y right" sentence).
-    const tagA = ((_tms.blue && _tms.blue.abbr) || _tA).toUpperCase();   // full name ellipsizes in CSS (hover = title)
-    const tagB = ((_tms.orange && _tms.orange.abbr) || _tB).toUpperCase();
-    const headEl = el('mp-head');
-    if (headEl) headEl.innerHTML = '<span></span><span>Map</span><span>Mode</span><span>Picked by</span>'
-      + '<span class="mp-head-team" style="color:' + _cA + ';" title="' + dEsc(_tA) + '">' + dEsc(tagA) + '</span><span></span>'
-      + '<span class="mp-head-team" style="color:' + _cB + ';" title="' + dEsc(_tB) + '">' + dEsc(tagB) + '</span><span></span><span></span>';
+    // No abbreviation set: initials for a multi-word name (Rocket Rush → RR), else the first letters.
+    const autoTag = (n) => { const w = String(n || '').trim().split(/\s+/).filter(Boolean); return (w.length > 1 ? w.map((x) => x[0]).join('').slice(0, 4) : (w[0] || '').slice(0, 5)).toUpperCase(); };
+    const tagA = ((_tms.blue && _tms.blue.abbr) || autoTag(_tA)).toUpperCase().slice(0, 6);
+    const tagB = ((_tms.orange && _tms.orange.abbr) || autoTag(_tB)).toUpperCase().slice(0, 6);
+    // Cards label themselves; the old column-heading row is not used.
+    const headEl = el('mp-head'); if (headEl) { headEl.innerHTML = ''; headEl.hidden = true; }
     const modeOpts = mpModeOptions();
     const auto = mpAutoOn();
+    const imgUrl = (p) => (p && p.startsWith('/') && location.protocol === 'file:' ? 'http://127.0.0.1:3000' + p : p || '');
     wrap.classList.toggle('is-auto', auto);
     wrap.innerHTML = '';
     for (let i = 0; i < n; i++) {
       const m = existing[i] || {};
-      const row = document.createElement('div'); row.className = 'mp-slot';
+      const card = document.createElement('div'); card.className = 'mp-slot mp-card';
+      card.style.setProperty('--mp-a', _cA); card.style.setProperty('--mp-b', _cB);
+
+      // ── Top line ──
+      const top = document.createElement('div'); top.className = 'mp-card-top';
+      const grip = document.createElement('span'); grip.className = 'mp-drag'; grip.innerHTML = MP_ICON_GRIP;
+      grip.title = 'Drag to change the order';
       const num = document.createElement('span'); num.className = 'mp-slot-num'; num.textContent = i + 1;
+      const thumb = document.createElement('div'); thumb.className = 'mp-thumb';
       const sel = document.createElement('select'); sel.className = 'input-select mp-map-select';
       const curPool = mpFindPool(pool, m.name);
-      sel.innerHTML = '<option value="">— Select map —</option>' +
+      sel.innerHTML = '<option value="">Select map</option>' +
         pool.map((p) => `<option value="${p.id}"${curPool && p.id === curPool.id ? ' selected' : ''}>${p.name}</option>`).join('');
       // A name that matches nothing in the pool (a series/start.gg map name, a custom stage) stays
-      // on the row as its own option instead of silently blanking and being dropped on save.
+      // on the card as its own option instead of silently blanking and being dropped on save.
       if (!curPool && m.name) {
         const o = document.createElement('option'); o.value = MP_CUSTOM + m.name; o.textContent = m.name + ' (custom)'; o.selected = true;
         sel.appendChild(o);
       }
-      // Game mode — defaults to the selected map's pool type but is fully overridable per row
-      // (RL picks the mode per game; some games' maps rotate modes across a season/patch).
       const modeSel = document.createElement('select'); modeSel.className = 'input-select mp-mode-select';
       modeSel.title = 'Game mode for this map';
-      modeSel.style.cssText = 'font-size:11px;';
       const modeVal = m.mode || (curPool && curPool.type) || '';
-      modeSel.innerHTML = '<option value="">Mode: —</option>' +
+      modeSel.innerHTML = '<option value="">No mode</option>' +
         modeOpts.map((md) => `<option value="${md}"${md === modeVal ? ' selected' : ''}>${md}</option>`).join('');
       if (!modeSel.value && modeVal) { const o = document.createElement('option'); o.value = modeVal; o.textContent = modeVal; o.selected = true; modeSel.appendChild(o); }
-      // The mode's own logo in the picker and its list, so Control/Escort or Dropshot/Hoops read at a
-      // glance and the producer sees exactly what the overlay will badge the card with.
       const modePick = mpModePick(modeSel);
-      // No modes for this game and nothing already set → don't show a dead dropdown.
-      if (!modeOpts.length && !modeVal) modePick.box.style.visibility = 'hidden';   // keep the grid column
-      const syncModeIcon = () => modePick.paint();
-      modeSel.addEventListener('change', syncModeIcon);
-      // Picking a map re-defaults its mode (unless the row already has an explicit override).
+      if (!modeOpts.length && !modeVal) modePick.box.hidden = true;   // this game has no modes
+      const paintThumb = () => {
+        const p = pool.find((x) => x.id === sel.value);
+        const src = p && p.image ? imgUrl(p.image) : '';
+        thumb.innerHTML = src ? `<img src="${dEsc(src)}" alt="" onerror="this.remove()">` : '';
+        thumb.classList.toggle('is-empty', !src);
+        if (!src) thumb.textContent = sel.value ? '' : 'Map';
+      };
+      modeSel.addEventListener('change', () => modePick.paint());
       sel.addEventListener('change', () => {
         const p = pool.find((x) => x.id === sel.value);
-        if (p && p.type) { modeSel.value = p.type; syncModeIcon(); }
+        if (p && p.type) { modeSel.value = p.type; modePick.paint(); }
+        paintThumb();
       });
-      syncModeIcon();
-      const pick = document.createElement('select'); pick.className = 'input-select mp-pick-by';
-      pick.title = 'Who picked this map';
-      pick.style.cssText = 'font-size:11px;';
-      pick.innerHTML = '<option value="">—</option>'
-        + '<option value="a"' + (m.by === 'a' && m.action !== 'decider' ? ' selected' : '') + '>' + dEsc(_tA.slice(0, 12)) + ' pick</option>'
-        + '<option value="b"' + (m.by === 'b' && m.action !== 'decider' ? ' selected' : '') + '>' + dEsc(_tB.slice(0, 12)) + ' pick</option>'
-        + '<option value="decider"' + (m.action === 'decider' ? ' selected' : '') + '>Decider</option>';
-      const scA = document.createElement('input'); scA.type = 'number'; scA.className = 'input-text mp-score-a';
-      scA.min = '0'; scA.placeholder = '–'; scA.title = _tA + ' score';
-      scA.style.borderBottom = '2px solid ' + _cA;
-      scA.value = (m.score && m.score.a) || '';
+      paintThumb();
+      const main = document.createElement('div'); main.className = 'mp-card-main';
+      main.appendChild(mpMapCombo(sel, pool)); main.appendChild(modePick.box);
+      const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'btn btn-ghost btn-xs mp-slot-rm';
+      rm.innerHTML = MP_ICON_REMOVE; rm.title = 'Remove this map'; rm.disabled = n <= 1;
+      rm.addEventListener('click', () => {
+        const rows = mpBuildMapsPayload(true); rows.splice(i, 1);
+        if (mpOwOn()) send('ow_remove_map', { idx: i });   // its bans go with it, later maps' bans shift up
+        mpRenderSlots(rows, n - 1); mpSendDebounced();
+      });
+      top.appendChild(grip); top.appendChild(num); top.appendChild(thumb); top.appendChild(main); top.appendChild(rm);
+
+      // ── Bottom line: picked by ──
+      const bottom = document.createElement('div'); bottom.className = 'mp-card-bottom';
+      const pick = document.createElement('select'); pick.className = 'mp-pick-by'; pick.hidden = true;
+      pick.innerHTML = '<option value=""></option><option value="a"></option><option value="b"></option><option value="decider"></option>';
+      pick.value = m.action === 'decider' ? 'decider' : (m.by === 'a' || m.by === 'b') ? m.by : '';
+      const pickSeg = document.createElement('div'); pickSeg.className = 'mp-seg'; pickSeg.setAttribute('role', 'group');
+      pickSeg.setAttribute('aria-label', 'Picked by');
+      const pickLbl = document.createElement('span'); pickLbl.className = 'mp-lbl'; pickLbl.textContent = 'Picked by';
+      [['a', tagA, _cA, _tA + ' picked this map'], ['b', tagB, _cB, _tB + ' picked this map'], ['decider', 'Decider', '', 'Decider map (nobody picked it)']].forEach(([v, txt, col, tip]) => {
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'mp-seg-btn'; b.dataset.v = v;
+        b.textContent = txt; b.title = tip; if (col) b.style.setProperty('--seg', col);
+        b.addEventListener('click', () => {
+          pick.value = pick.value === v ? '' : v;   // clicking the active choice clears it
+          paintPick(); pick.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        pickSeg.appendChild(b);
+      });
+      const paintPick = () => pickSeg.querySelectorAll('.mp-seg-btn').forEach((b) => b.classList.toggle('is-on', b.dataset.v === pick.value));
+      paintPick();
+      const pickBox = document.createElement('div'); pickBox.className = 'mp-pickbox';
+      pickBox.appendChild(pickLbl); pickBox.appendChild(pickSeg); pickBox.appendChild(pick);
+
+      // ── Bottom line: result ──
+      const mkScore = (cls, val, team, color) => {
+        const box = document.createElement('div'); box.className = 'mp-step';
+        box.style.setProperty('--team', color);
+        const tag = document.createElement('span'); tag.className = 'mp-step-tag'; tag.textContent = team;
+        const minus = document.createElement('button'); minus.type = 'button'; minus.className = 'mp-step-btn'; minus.textContent = '−'; minus.title = 'One less';
+        const inp = document.createElement('input'); inp.type = 'number'; inp.min = '0'; inp.className = 'input-text ' + cls;
+        inp.placeholder = '–'; inp.value = val || ''; inp.title = team + ' score';
+        const plus = document.createElement('button'); plus.type = 'button'; plus.className = 'mp-step-btn'; plus.textContent = '+'; plus.title = 'One more';
+        const bump = (d) => {
+          if (inp.readOnly) return;
+          const cur = parseInt(inp.value, 10);
+          const next = Math.max(0, (isNaN(cur) ? 0 : cur) + d);
+          inp.value = String(next);
+          inp.dispatchEvent(new Event('input', { bubbles: true }));
+          inp.dispatchEvent(new Event('change', { bubbles: true }));
+        };
+        minus.addEventListener('click', () => bump(-1)); plus.addEventListener('click', () => bump(1));
+        if (auto) { inp.readOnly = true; minus.disabled = true; plus.disabled = true; inp.title += ' (from the series editor)'; }
+        const ctl = document.createElement('div'); ctl.className = 'mp-step-ctl';
+        ctl.appendChild(minus); ctl.appendChild(inp); ctl.appendChild(plus);
+        box.appendChild(tag); box.appendChild(ctl);
+        return { box, inp };
+      };
+      const A = mkScore('mp-score-a', m.score && m.score.a, tagA, _cA);
+      const B = mkScore('mp-score-b', m.score && m.score.b, tagB, _cB);
       const sep = document.createElement('span'); sep.className = 'mp-sep'; sep.textContent = '–';
-      const scB = document.createElement('input'); scB.type = 'number'; scB.className = 'input-text mp-score-b';
-      scB.min = '0'; scB.placeholder = '–'; scB.title = _tB + ' score';
-      scB.style.borderBottom = '2px solid ' + _cB;
-      scB.value = (m.score && m.score.b) || '';
-      // While Auto is on the series editor owns the numbers — don't let a producer type into a
-      // field the next broadcast will overwrite.
-      if (auto) { scA.readOnly = true; scB.readOnly = true; scA.title += ' (from the series editor)'; scB.title += ' (from the series editor)'; }
-      // Clear just this map's score — back to "not played yet" (chip instead of a result on the
-      // overlay). With Auto on it clears the series editor's row too, or it would come straight back.
+      // A drawn map (Overwatch escort/hybrid can end level, 0-0 included) — scores alone can't say
+      // "played, nobody won", so it's an explicit toggle. It wins over the scores when on.
+      const draw = document.createElement('button'); draw.type = 'button'; draw.className = 'btn btn-ghost btn-xs mp-draw';
+      draw.textContent = 'Draw'; draw.title = 'Mark this map as a draw';
+      const setDraw = (on) => { draw.classList.toggle('is-on', on); draw.setAttribute('aria-pressed', on ? 'true' : 'false'); };
+      setDraw(m.winner === 'draw');
       const clr = document.createElement('button'); clr.type = 'button'; clr.className = 'btn btn-ghost btn-xs mp-score-clr';
-      clr.innerHTML = MP_ICON_RESET; clr.title = 'Reset this map\'s score';
-      clr.disabled = !(scA.value || scB.value);
+      clr.innerHTML = MP_ICON_RESET; clr.title = 'Back to not played (clears the score and draw)';
+      const result = document.createElement('span'); result.className = 'mp-result-txt';
+      // The card says in words what the overlay will show, and its edge takes the winner's colour.
+      const paintResult = () => {
+        const a = parseInt(A.inp.value, 10), b = parseInt(B.inp.value, 10);
+        const has = !isNaN(a) || !isNaN(b);
+        const sa = isNaN(a) ? 0 : a, sb = isNaN(b) ? 0 : b;
+        let state = 'none', txt = 'Not played yet';
+        if (draw.classList.contains('is-on')) { state = 'draw'; txt = `Draw ${sa}–${sb}`; }
+        else if (has && sa !== sb) { state = sa > sb ? 'a' : 'b'; txt = `${sa > sb ? tagA : tagB} won ${Math.max(sa, sb)}–${Math.min(sa, sb)}`; }
+        else if (has) { txt = `Level ${sa}–${sb}: press Draw if it ended that way`; }
+        card.dataset.result = state;
+        result.textContent = txt;
+        clr.disabled = !(has || state === 'draw');
+      };
       clr.addEventListener('click', () => {
-        scA.value = ''; scB.value = ''; clr.disabled = true;
+        A.inp.value = ''; B.inp.value = ''; setDraw(false); paintResult();
         if (mpAutoOn()) mpClearSeriesScores(i);
         mpSendDebounced();
       });
-      const refreshClr = () => { clr.disabled = !(scA.value || scB.value); };
-      scA.addEventListener('input', refreshClr); scB.addEventListener('input', refreshClr);
-      const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'btn btn-ghost btn-xs mp-slot-rm';
-      rm.innerHTML = MP_ICON_REMOVE; rm.title = 'Remove this map'; rm.disabled = n <= 1;
-      rm.addEventListener('click', () => { mpRenderSlots(mpBuildMapsPayload(true), n - 1); mpSendDebounced(); });
-      [sel, modeSel, pick, scA, scB].forEach((inp) => { inp.addEventListener('input', mpSendDebounced); inp.addEventListener('change', mpSendDebounced); });
-      row.appendChild(num); row.appendChild(mpMapCombo(sel, pool)); row.appendChild(modePick.box); row.appendChild(pick);
-      row.appendChild(scA); row.appendChild(sep); row.appendChild(scB); row.appendChild(clr); row.appendChild(rm);
-      wrap.appendChild(row);
+      draw.addEventListener('click', () => { setDraw(!draw.classList.contains('is-on')); paintResult(); mpSendDebounced(); });
+      [A.inp, B.inp].forEach((inp) => inp.addEventListener('input', paintResult));
+      paintResult();
+      const res = document.createElement('div'); res.className = 'mp-resultbox';
+      res.appendChild(A.box); res.appendChild(sep); res.appendChild(B.box); res.appendChild(draw); res.appendChild(clr);
+      bottom.appendChild(pickBox); bottom.appendChild(res);
+
+      [sel, modeSel, pick, A.inp, B.inp].forEach((inp) => { inp.addEventListener('input', mpSendDebounced); inp.addEventListener('change', mpSendDebounced); });
+      card.appendChild(top); card.appendChild(bottom);
+      const bans = mpBansRow(i, { tagA, tagB, _cA, _cB, imgUrl });
+      if (bans) card.appendChild(bans);
+      card.appendChild(result);
+      wrap.appendChild(card);
     }
-    const addBtn = el('mp-add-slot'); if (addBtn) addBtn.style.display = n >= mpMaxSlots(bo) ? 'none' : '';
+    const max = mpMaxSlots(bo);
+    const addBtn = el('mp-add-slot');
+    if (addBtn) {
+      addBtn.style.display = '';
+      addBtn.disabled = n >= max;
+      addBtn.title = n >= max ? `A best of ${bo} has at most ${max} map${max === 1 ? '' : 's'}` : 'Add another map at the end';
+    }
+    const cnt = el('mp-count'); if (cnt) cnt.textContent = `${n} of ${max}`;
+    const hint = el('mp-drag-hint'); if (hint) hint.hidden = n < 2;
+    // Drag a card by its handle to reorder. The list element survives re-renders (only its
+    // children are replaced), so the Sortable is created once and kept.
+    if (typeof Sortable !== 'undefined' && !wrap._mpSortable) {
+      wrap._mpSortable = Sortable.create(wrap, {
+        animation: 150, draggable: '.mp-card', handle: '.mp-drag', ghostClass: 'mp-card-ghost', chosenClass: 'mp-card-chosen',
+        onStart: () => { wrap._mpDragging = true; },
+        onEnd: (e) => {
+          wrap._mpDragging = false;
+          if (e.oldIndex === e.newIndex) return;
+          const rows = mpBuildMapsPayload(true);   // DOM order = the new order
+          if (mpAutoOn()) mpReorderSeries(e.oldIndex, e.newIndex);
+          if (mpOwOn()) send('ow_move_map', { from: e.oldIndex, to: e.newIndex });   // bans travel with their map
+          mpRenderSlots(rows, rows.length);
+          mpSendDebounced();
+        }
+      });
+    }
+    if (wrap._mpSortable) wrap._mpSortable.option('disabled', n < 2);
+    // Compact cards when the list is narrow (Modern puts the editor beside the preview, and the Live
+    // dock narrows it further). Container queries are not available in this Chromium, so measure.
+    if (!wrap._mpRO && typeof ResizeObserver === 'function') {
+      wrap._mpRO = new ResizeObserver(() => wrap.classList.toggle('is-narrow', wrap.clientWidth > 0 && wrap.clientWidth < 520));
+      wrap._mpRO.observe(wrap);
+    }
+    wrap.classList.toggle('is-narrow', wrap.clientWidth > 0 && wrap.clientWidth < 520);
+  }
+  // ── Overwatch hero bans, per map card ──
+  // Bans live in owMatch.bansByMap[mapIndex] ({a:[{hero,role},…], b:[…]}). Pick / Ban writes them
+  // to the map the scoreboard's game number points at; here they are set on the map itself, so the
+  // order you do things in no longer matters. The card Pick / Ban is writing to is labelled.
+  function mpOwOn() { return !!(currentState && currentState.activeGame === 'overwatch'); }
+  function mpBanArr(entry, side) {
+    const v = entry && entry[side];
+    return Array.isArray(v) ? v : (v && v.hero ? [v] : []);
+  }
+  function mpBansRow(i, t) {
+    if (!mpOwOn()) return null;
+    const heroes = ((currentState.draftRosters || {}).overwatch || []).slice().sort((x, y) => String(x.name).localeCompare(String(y.name)));
+    const entry = (((currentState.owMatch || {}).bansByMap) || [])[i] || {};
+    const perTeam = (((currentState.draft || {}).owBanCount) || 2) >= 4 ? 2 : 1;
+    const liveIdx = Math.max(0, (((currentState.game || {}).number) || 1) - 1);
+    const row = document.createElement('div'); row.className = 'mp-bans';
+    const lbl = document.createElement('span'); lbl.className = 'mp-lbl'; lbl.textContent = 'Hero bans';
+    row.appendChild(lbl);
+    const heroByName = (n) => heroes.find((h) => String(h.name).toLowerCase() === String(n || '').toLowerCase());
+    [['a', t.tagA, t._cA], ['b', t.tagB, t._cB]].forEach(([side, tag, col]) => {
+      const team = document.createElement('div'); team.className = 'mp-ban-team'; team.style.setProperty('--team', col);
+      const tg = document.createElement('span'); tg.className = 'mp-ban-tag'; tg.textContent = tag;
+      team.appendChild(tg);
+      const cur = mpBanArr(entry, side);
+      const slots = Math.max(perTeam, cur.filter((b) => b && b.hero).length);
+      for (let s = 0; s < slots; s++) {
+        const ban = cur[s] && cur[s].hero ? cur[s] : null;
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'mp-ban' + (ban ? ' is-set' : '');
+        if (ban) {
+          const h = heroByName(ban.hero);
+          b.innerHTML = (h && h.image ? `<img src="${dEsc(t.imgUrl(h.image))}" alt="" onerror="this.remove()">` : '')
+            + `<span>${dEsc(ban.hero)}</span><i class="mp-ban-x" title="Remove this ban">×</i>`;
+          b.title = `${tag} banned ${ban.hero}. Click to change it.`;
+        } else {
+          b.innerHTML = '<span>+ Ban</span>'; b.title = `Add a ${tag} hero ban for this map`;
+        }
+        b.addEventListener('click', (e) => {
+          if (e.target.closest('.mp-ban-x')) { send('ow_ban_hero', { mapIdx: i, side, slot: s, hero: '' }); return; }
+          mpOpenBanPicker(row, heroes, t.imgUrl, (h) => send('ow_ban_hero', { mapIdx: i, side, slot: s, hero: h.name, role: h.role || '' }));
+        });
+        team.appendChild(b);
+      }
+      row.appendChild(team);
+    });
+    if (i === liveIdx) {
+      const live = document.createElement('span'); live.className = 'mp-ban-live';
+      live.textContent = 'Pick / Ban is on this map';
+      live.title = 'Pick / Ban records bans on the map matching the scoreboard\'s game number (game ' + (liveIdx + 1) + ').';
+      row.appendChild(live);
+    }
+    return row;
+  }
+  // Inline hero search under a card's bans line. It lives INSIDE the card, so while its search box
+  // has focus the editor does not re-render under it (mpSyncFromState skips while #mp-slots has focus).
+  function mpOpenBanPicker(row, heroes, imgUrl, onPick) {
+    document.querySelectorAll('.mp-ban-picker').forEach((p) => p.remove());
+    const box = document.createElement('div'); box.className = 'mp-ban-picker';
+    const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'input-text'; inp.placeholder = 'Search heroes';
+    inp.autocomplete = 'off'; inp.spellcheck = false;
+    const grid = document.createElement('div'); grid.className = 'mp-ban-grid';
+    const fold = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    const draw = () => {
+      const q = fold(inp.value.trim());
+      const hits = heroes.filter((h) => !q || fold(h.name).includes(q) || fold(h.role).includes(q));
+      grid.innerHTML = hits.length ? hits.map((h, k) => `<button type="button" class="mp-ban-hero" data-k="${heroes.indexOf(h)}" title="${dEsc(h.name)}${h.role ? ' · ' + dEsc(h.role) : ''}">`
+        + (h.image ? `<img src="${dEsc(imgUrl(h.image))}" alt="" loading="lazy">` : '') + `<span>${dEsc(h.name)}</span></button>`).join('')
+        : '<div class="mp-ban-none">No hero matches</div>';
+    };
+    const close = () => box.remove();
+    grid.addEventListener('mousedown', (e) => {
+      const b = e.target.closest('.mp-ban-hero'); if (!b) return;
+      e.preventDefault();
+      const h = heroes[Number(b.dataset.k)]; close(); if (h) onPick(h);
+    });
+    inp.addEventListener('input', draw);
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') close();
+      if (e.key === 'Enter') { const first = grid.querySelector('.mp-ban-hero'); if (first) { const h = heroes[Number(first.dataset.k)]; close(); if (h) onPick(h); } }
+    });
+    inp.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== inp) close(); }, 150));
+    const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'btn btn-ghost btn-xs'; cancel.textContent = 'Cancel';
+    cancel.addEventListener('mousedown', (e) => { e.preventDefault(); close(); });
+    const head = document.createElement('div'); head.className = 'mp-ban-picker-head'; head.appendChild(inp); head.appendChild(cancel);
+    box.appendChild(head); box.appendChild(grid);
+    row.after(box);
+    draw();
+    inp.focus();
+  }
+  // With Auto from Series on, the pool mirrors the series editor BY POSITION, so a reorder here has
+  // to move the series editor's maps too, or the next sync would put the scores back on the wrong maps.
+  function mpReorderSeries(from, to) {
+    const src = ((currentState && currentState.match && currentState.match.maps) || []).slice();
+    if (from >= src.length) return;
+    const [moved] = src.splice(from, 1);
+    src.splice(Math.min(to, src.length), 0, moved);
+    send('set_match', { maps: src.map((m) => ({ name: (m && m.name) || '', scoreA: (m && m.scoreA) || 0, scoreB: (m && m.scoreB) || 0, played: !!(m && m.played) })) });
   }
   // keepBlanks=true preserves unselected slots (needed so Add/Remove/BO-change re-render at the
   // exact right index) — the version actually SENT to the server always filters them out.
@@ -3559,6 +4060,8 @@ function _borrowGraphicsToDash() {
       // mapscreen overlay shows its "TEAM PICK" / "DECIDER" chips.
       const pk = (row.querySelector('.mp-pick-by') || {}).value || '';
       const modeOverride = (row.querySelector('.mp-mode-select') || {}).value || '';
+      const drawBtn = row.querySelector('.mp-draw');
+      const isDraw = !!(drawBtn && drawBtn.classList.contains('is-on'));
       // Free-text row (a map name with no pool entry) — keep the name, no art.
       const custom = sel.value.startsWith(MP_CUSTOM) ? sel.value.slice(MP_CUSTOM.length) : '';
       if (!p && custom) {
@@ -3566,7 +4069,7 @@ function _borrowGraphicsToDash() {
           name: custom, image: '', mode: modeOverride,
           action: pk === 'decider' ? 'decider' : 'pick',
           by: (pk === 'a' || pk === 'b') ? pk : '',
-          winner: (hasScore && sa !== sb) ? (sa > sb ? 'a' : 'b') : '',
+          winner: isDraw ? 'draw' : (hasScore && sa !== sb) ? (sa > sb ? 'a' : 'b') : '',
           score: { a: sa, b: sb }
         };
       }
@@ -3576,7 +4079,7 @@ function _borrowGraphicsToDash() {
         name: p ? p.name : '', image: p ? (p.image || '') : '', mode: modeOverride || (p ? (p.type || '') : ''),
         action: pk === 'decider' ? 'decider' : 'pick',
         by: (pk === 'a' || pk === 'b') ? pk : '',
-        winner: (hasScore && sa !== sb) ? (sa > sb ? 'a' : 'b') : '',
+        winner: isDraw ? 'draw' : (hasScore && sa !== sb) ? (sa > sb ? 'a' : 'b') : '',
         score: { a: sa, b: sb }
       };
     });
@@ -3626,7 +4129,7 @@ function _borrowGraphicsToDash() {
       return {
         name: m.name || keep.name || '', mode: keep.mode || '',
         action: keep.action || 'pick', by: keep.by || '',
-        winner: (a !== b && (a || b)) ? (a > b ? 'a' : 'b') : '',
+        winner: keep.winner === 'draw' ? 'draw' : (a !== b && (a || b)) ? (a > b ? 'a' : 'b') : '',
         score: { a, b }
       };
     });
@@ -3672,7 +4175,7 @@ function _borrowGraphicsToDash() {
       const a = Math.max(0, Number(s.scoreA) || 0), b = Math.max(0, Number(s.scoreB) || 0);
       if (!cur.name && s.name) { cur.name = s.name; changed = true; }
       if (cur.score.a !== a || cur.score.b !== b) { cur.score = { a, b }; changed = true; }
-      const win = (a !== b && (a || b)) ? (a > b ? 'a' : 'b') : '';
+      const win = cur.winner === 'draw' ? 'draw' : (a !== b && (a || b)) ? (a > b ? 'a' : 'b') : '';   // a draw is set by hand, the series editor has no draw
       if ((cur.winner || '') !== win) { cur.winner = win; changed = true; }
     });
     return { maps: out, changed };
@@ -3690,13 +4193,11 @@ function _borrowGraphicsToDash() {
   // Blank every map's score, keeping the maps, modes and pick attribution.
   el('mp-clear-scores')?.addEventListener('click', () => {
     const rows = [...(el('mp-slots')?.querySelectorAll('.mp-slot') || [])];
-    if (!rows.some((r) => r.querySelector('.mp-score-a').value || r.querySelector('.mp-score-b').value)) {
+    if (!rows.some((r) => r.querySelector('.mp-score-a').value || r.querySelector('.mp-score-b').value || r.querySelector('.mp-draw.is-on'))) {
       showToast('No scores to clear', '#fbbf24'); return;
     }
-    rows.forEach((r) => {
-      r.querySelector('.mp-score-a').value = ''; r.querySelector('.mp-score-b').value = '';
-      const c = r.querySelector('.mp-score-clr'); if (c) c.disabled = true;
-    });
+    // Each card's own reset clears its score AND draw and repaints its result line.
+    rows.forEach((r) => { const c = r.querySelector('.mp-score-clr'); if (c && !c.disabled) c.click(); });
     if (mpAutoOn()) mpClearSeriesScores(null);
     mpSendDebounced();
     showToast('Cleared every map score', '#22c55e');
@@ -3722,7 +4223,7 @@ function _borrowGraphicsToDash() {
     const maps = Array.isArray(v.maps) ? v.maps : [];
     const boSel = el('mp-bestof');
     if (boSel && document.activeElement !== boSel) boSel.value = String((data && data.bestOf) || 5);
-    if (document.activeElement?.closest('#mp-slots') == null) {
+    if (document.activeElement?.closest('#mp-slots') == null && !el('mp-slots')?._mpDragging) {
       // Blank slots aren't in the saved payload, so a plain broadcast would otherwise wipe the
       // empty slot the producer just added with "+ Add map". Never shrink below the current count.
       const bo = parseInt(boSel?.value, 10) || 5;
@@ -3766,15 +4267,6 @@ function _borrowGraphicsToDash() {
     send('set_team_spotlight', { visible: false });
   });
 
-  // Schedule — clear (push uses the existing btn-gfx-schedule-push).
-  el('btn-gfx-schedule-clear')?.addEventListener('click', () => {
-  // Full reset — hide the overlay, empty the board, AND detach from start.gg so the
-  // next poll can't refill it (that refill made a linked event impossible to clear).
-  send('set_upcoming', { visible: false, matches: [] });
-  send('startgg_set_upcoming_mode', { mode: 'manual' });
-  if (typeof window._schClearLocal === 'function') window._schClearLocal();
-  showToast('Schedule cleared — start.gg auto-fill off (pull or Event mode re-enables it)', '#22c55e');
-});
 
   // Bracket — show/hide the bracket overlay.
   el('btn-show-bracket')?.addEventListener('click', () => send('set_bracket_settings', { visible: true }));
@@ -4840,9 +5332,13 @@ function _borrowGraphicsToDash() {
     const st = el('gfx-sch-status');
     if (st) { st.textContent = `Pushed ${payload.matches.length} match${payload.matches.length !== 1 ? 'es' : ''} live.`; setTimeout(() => { st.textContent = ''; }, 2500); }
   });
-  el('btn-gfx-schedule-clear')?.addEventListener('click', () => {
+  // Taking the Schedule graphic off air (Hide, Hide all, or showing another graphic) only hides it.
+  el('btn-hide-schedule-gfx')?.addEventListener('click', () => { send('set_upcoming', { visible: false }); });
+  el('btn-gfx-schedule-clear')?.addEventListener('click', async () => {
   // Full reset — hide the overlay, empty the board, AND detach from start.gg so the
   // next poll can't refill it (that refill made a linked event impossible to clear).
+  const has = ((currentState && currentState.upcoming && currentState.upcoming.matches) || []).length || (typeof _schMatches !== 'undefined' && _schMatches.length);
+  if (has && !(await appConfirm('Clear the schedule? This empties the board and stops start.gg filling it until you pull again.', 'Clear schedule'))) return;
   send('set_upcoming', { visible: false, matches: [] });
   send('startgg_set_upcoming_mode', { mode: 'manual' });
   if (typeof window._schClearLocal === 'function') window._schClearLocal();
@@ -4920,7 +5416,7 @@ function _borrowGraphicsToDash() {
     const queue = (sg.queue || []);
     const rows = [...queue.filter((q) => q.live), ...queue.filter((q) => !q.live).slice(0, 5)];
     const st = el('gfx-sch-status');
-    if (!rows.length) { if (st) { st.textContent = 'No start.gg queue — connect & load an event in Settings.'; setTimeout(() => { st.textContent = ''; }, 3000); } return; }
+    if (!rows.length) { if (st) { st.textContent = 'No start.gg queue. Load an event on the Event page first.'; setTimeout(() => { st.textContent = ''; }, 3000); } return; }
     rows.forEach((q) => _schMatches.push({ setId: String(q.setId || ''), round: q.round || '', teamA: q.teamA || '', teamB: q.teamB || '', date: '', time: '', stream: !!q.live }));
     schRenderList(); schAutoSave();
     if (st) { st.textContent = `Added ${rows.length} match${rows.length > 1 ? 'es' : ''} from queue.`; setTimeout(() => { st.textContent = ''; }, 2500); }
@@ -5577,6 +6073,8 @@ function _borrowGraphicsToDash() {
   //   Replay     — replay buffer, clips, playlists
   //   Chat       — chat, activity, Q&A, predictions, channel tools
   //   Automation — flows, AI shield, auto-director, auto-clipping
+  setLabel('controls', 'Controls', 'Controls — score, break timer, graphics, scenes and automation in one place');
+  setLabel('show',   'Show',       'Show — next matches, run of show, replay and the stream title');
   setLabel('quick',  'On Air',     'On Air — what viewers see: stream status and title, put graphics on air, program feed');
   setLabel('ros',    'Up Next',    'Up Next — the run of show and the match queue');
   setLabel('talent', 'Talent',     'Talent — casters and players: cams, mics and listen-in');
@@ -5604,6 +6102,15 @@ function _borrowGraphicsToDash() {
   const nTab = qtab('notes'), tabsEl = document.getElementById('qrail-tabs'), popBtn = document.getElementById('qrail-popout-btn');
   if (nTab && tabsEl && popBtn) tabsEl.insertBefore(nTab, popBtn);
 })();
+
+// Empty states offer the next step as a button that presses the page's real control
+// (data-empty-click="<id>"), so they keep working however that control is wired.
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('[data-empty-click]');
+  if (!b) return;
+  const target = document.getElementById(b.getAttribute('data-empty-click'));
+  if (target && !target.disabled) target.click();
+});
 
 // ── Sidebar collapse ────────────────────────────────────────────────────────
 function toggleSidebar() {
@@ -5839,7 +6346,7 @@ function qrailExpand(tab) {
 const QRAIL_TAB_TITLES = {
   // Match the tab captions (On Air·Up Next·Talent·Replay·Chat·Automation·Notes). Keys stay the
   // panels' data-qpanel names.
-  quick: 'On Air', ros: 'Up Next', flows: 'Automation', talent: 'Talent',
+  controls: 'Controls', show: 'Show', quick: 'On Air', ros: 'Up Next', flows: 'Automation', talent: 'Talent',
   replay: 'Replay', twitch: 'Chat', notes: 'Notes',
   // legacy keys — their panels are merged away, kept so any direct caller still titles correctly.
   startgg: 'Up Next', graphics: 'On Air', golive: 'On Air', ai: 'Automation',
@@ -5852,6 +6359,7 @@ function qrailShowTab(tab) {
   const title = el('qrail-paneltitle'); if (title) title.textContent = titleText;
   // Live sections refresh as their tab opens (queue now lives under NEXT, AI under AUTO).
   if ((tab === 'ros' || tab === 'flows' || tab === 'talent') && typeof renderQrailLive === 'function') renderQrailLive();
+  if (tab === 'show') { if (typeof renderQrailReplay === 'function') renderQrailReplay(currentState); if (typeof qrScanFolder === 'function') qrScanFolder(); if (typeof window._dockShowRender === 'function') window._dockShowRender(); }
   if (tab === 'replay' && typeof renderQrailReplay === 'function') { renderQrailReplay(currentState); if (typeof qrScanFolder === 'function') qrScanFolder(); }
   if (tab === 'talent' && typeof cfTalentAutoOpen === 'function') cfTalentAutoOpen();
   if (tab === 'twitch') setTimeout(() => { const c = el('twitch-chat'); if (c) c.scrollTop = c.scrollHeight; }, 100);
@@ -5864,7 +6372,8 @@ document.querySelectorAll('#qrail-tabs .qrail-tab').forEach((b) => {
   b.addEventListener('click', () => {
     const shell = el('app-shell');
     const collapsed = shell.classList.contains('qrail-collapsed');
-    if (!collapsed && b.classList.contains('active')) {
+    // A popped-out dock window IS the dock: collapsing it would leave an empty window.
+    if (!collapsed && b.classList.contains('active') && !document.body.classList.contains('popout-qrail')) {
       qrailCollapse();   // toggle off
     } else {
       qrailShowTab(b.dataset.qtab);
@@ -5960,8 +6469,13 @@ if (_qrailPopoutMode) {
   const popBtn = el('qrail-popout-btn'); if (popBtn) popBtn.style.display = 'none';
   // Make sure first tab is open.
   requestAnimationFrame(() => {
-    const firstTab = document.querySelector('#qrail-tabs .qrail-tab[data-qtab]');
-    if (firstTab) firstTab.click();
+    // The strip's first button is the hidden Graphics storage tab; open On Air (or the last-used tab).
+    let last = null; try { last = localStorage.getItem('ne_mx_dock'); } catch (e) {}
+    const firstTab = (last && document.querySelector('#qrail-tabs .qrail-tab[data-qtab="' + last + '"]'))
+      || document.querySelector('#qrail-tabs .qrail-tab[data-qtab="controls"]')
+      || document.querySelector('#qrail-tabs .qrail-tab[data-qtab]');
+    if (firstTab && !firstTab.classList.contains('active')) firstTab.click();
+    else if (firstTab && typeof qrailShowTab === 'function') qrailShowTab(firstTab.dataset.qtab);
   });
 }
 // Return button (inside popout window) closes the popup.
@@ -7070,7 +7584,7 @@ function bbRenderCustomizeList() {
   const ico = { casters: 'mic', break: 'clock', winner: 'trophy', intro: 'users', veto: 'flag', bracket: 'trending', upcoming: 'clock', standings: 'trending', ticker: 'chat', spotlight: 'star', watchlist: 'star', banner: 'handshake' };
   const chip = (t, k, label, icon, opt) => {
     opt = opt || {}; const pinned = !!opt.pinned, locked = !!opt.locked;
-    return `<button type="button" class="bb-cz-chip${pinned ? ' is-pinned' : ''}${locked ? ' is-locked' : ''}" data-t="${t}" data-k="${esc(k).replace(/"/g, '&quot;')}"${locked ? ' disabled title="Mapped in Settings → OBS — always on the bar"' : ''} aria-pressed="${pinned}">`
+    return `<button type="button" class="bb-cz-chip${pinned ? ' is-pinned' : ''}${locked ? ' is-locked' : ''}" data-t="${t}" data-k="${esc(k).replace(/"/g, '&quot;')}"${locked ? ' disabled title="Mapped under Apps > Streaming software. Always on the bar"' : ''} aria-pressed="${pinned}">`
       + svgIcon(icon || 'film') + `<span class="bb-cz-cname">${esc(label)}</span>`
       + (opt.live ? '<span class="bb-cz-live" title="On air"></span>' : '')
       + (locked ? '<span class="bb-cz-ctag">auto</span>' : `<span class="bb-cz-pin">${svgIcon(pinned ? 'check' : 'plus')}</span>`)
@@ -7102,6 +7616,7 @@ el('btn-bb-clip')?.addEventListener('click', () => {
   const btn = el('btn-bb-clip');
   if (btn.disabled) return;
   if (btn.dataset.mode === 'startbuf') {
+    if (typeof rbOffInObs === 'function' && rbOffInObs(currentState && currentState.obs)) { showToast(RB_OFF_HINT, '#fbbf24', 9000); return; }
     send('obs_toggle_replay_buffer');
     showToast('Starting the OBS replay buffer…', '#fbbf24');
     return;
@@ -7123,6 +7638,7 @@ el('btn-bb-clip')?.addEventListener('click', () => {
       if (data.twitch) parts.push('Twitch ✓');
       btn.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;vertical-align:middle;"><polyline points="20 6 9 17 4 12"/></svg> ${parts.join(' · ')}`;
       if (data.editUrl) showToast(`Twitch clip ready — <a href="${data.editUrl}" target="_blank" style="color:#9146ff;text-decoration:underline;">Edit clip</a>`, '#22c55e', 7000);
+      if (Array.isArray(data.errors) && data.errors.length) showToast('Partly saved: ' + data.errors.join(' / '), '#fbbf24', 7000);
     } else {
       const err = data.errors?.[0] || 'Failed';
       btn.innerHTML = `✗ ${err}`;
@@ -7143,6 +7659,13 @@ el('btn-bottom-customize')?.addEventListener('click', () => {
   if (_bbCzOpen) { bbRenderCustomizeList(); const s = el('bb-cz-search'); if (s) { s.value = ''; setTimeout(() => s.focus(), 30); } }
 });
 el('bb-cz-close')?.addEventListener('click', () => { _bbCzOpen = false; const p = el('bb-customize-pop'); if (p) p.style.display = 'none'; });
+function bbCloseCustomize() { const p = el('bb-customize-pop'); if (p && p.style.display !== 'none') { p.style.display = 'none'; _bbCzOpen = false; } }
+document.addEventListener('mousedown', (e) => {
+  if (!_bbCzOpen) return;
+  if (e.target.closest('#bb-customize-pop, #btn-bottom-customize')) return;
+  bbCloseCustomize();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && _bbCzOpen) bbCloseCustomize(); });
 // Live search + auto-refresh: as OBS scenes / overlay states change, the open panel restays current.
 el('bb-cz-search')?.addEventListener('input', () => { if (_bbCzOpen) bbRenderCustomizeList(); });
 
@@ -7653,7 +8176,7 @@ function applyState(data) {
   // UI always sees a complete state. Mutating `data` in place also feeds the render functions
   // that run after applyState() in the message handler.
   if (data && currentState) {
-    for (const k of ['savedTeams', 'playerProfiles', 'brandKits', 'brandKitsVer', 'draftRosters', 'brand', 'banner', 'mainBanner', 'playouts', 'bracket', 'replay', 'crew', 'leagues', 'clips', 'eventOps', 'myEvents', 'questions', 'questionSources']) {
+    for (const k of ['savedTeams', 'playerProfiles', 'brandKits', 'brandKitsVer', 'draftRosters', 'brand', 'banner', 'mainBanner', 'playouts', 'bracket', 'replay', 'crew', 'leagues', 'clips', 'eventOps', 'myEvents', 'questions', 'questionSources', 'cloudCompetitions', 'gameConfigVersions']) {
       if (data[k] === undefined && currentState[k] !== undefined) data[k] = currentState[k];
     }
   }
@@ -7744,6 +8267,7 @@ function applyState(data) {
     [el('dcc-show-country'), el('crew-show-country')].forEach((scc) => {
       if (scc && document.activeElement !== scc) scc.checked = !!data.casters.showCountry;
     });
+    if (typeof tdOptSync === 'function') tdOptSync();
   }
   // DCC database sections — re-render when visible (any non-monitor tab is open)
   if ((data.showRoster || data.crew || data.teams || data.casters) && typeof renderDccAll === 'function' && el('dcc-database-view') && el('dcc-database-view').style.display !== 'none') {
@@ -8342,8 +8866,20 @@ function findTeam(name) {
 // Producers type it constantly while a bracket is still resolving.
 function isTbdName(name) { return /^(tbd|tba)$/i.test((name || '').trim()); }
 
+let _savedTeamsSig = null;
 function populateSavedTeamsDropdowns() {
   const teams = allMatchTeams();
+  // Rebuilding two selects + the datalist for every saved/event team on EVERY state broadcast was
+  // one of the heaviest parts of applyState (~40ms each with a big library). Only rebuild when the
+  // list itself changed; the badges and stream-queue picker below still refresh every time.
+  const sig = teams.map(t => t.name + '|' + t.source).join('\n');
+  if (sig === _savedTeamsSig && el('select-saved-blue') && el('select-saved-blue').options.length > 1) {
+    updateTeamSavedBadge('blue');
+    updateTeamSavedBadge('orange');
+    if (typeof refreshSggTeamPicker === 'function') refreshSggTeamPicker();
+    return;
+  }
+  _savedTeamsSig = sig;
   ['blue', 'orange'].forEach(side => {
     const sel = el(`select-saved-${side}`);
     if (!sel) return;
@@ -9283,7 +9819,11 @@ function _assetsShow(which) {
   if (mp) mp.style.display = _assetsTab === 'media' ? '' : 'none';
   if (op) op.style.display = _assetsTab === 'overlays' ? '' : 'none';
   if (pp) pp.style.display = _assetsTab === 'profiles' ? '' : 'none';
-  if (_assetsTab === 'overlays') { if (typeof loadScenePreviews === 'function') loadScenePreviews(); }
+  if (_assetsTab === 'overlays') {
+    if (typeof loadScenePreviews === 'function') loadScenePreviews();
+    // The list can be built before state arrives; filter for the game that is active now.
+    if (el('scene-source-list')?.dataset.built && typeof applySceneFilter === 'function') applySceneFilter();
+  }
   else { if (typeof unloadScenePreviews === 'function') unloadScenePreviews(); if (_assetsTab === 'media' && typeof mdLoad === 'function') mdLoad(); }
   try { localStorage.setItem('assets_active_tab', _assetsTab); } catch (_) {}
 }
@@ -9925,7 +10465,7 @@ async function tvJson(r, what) {
   if (data === null) {
     if (r.status === 404) {
       throw new Error('The Team Vault API isn\'t in the running app yet — fully quit and relaunch '
-        + 'NE Broadcast Suite so it picks up the new server.');
+        + 'Broadcast Studio so it picks up the new server.');
     }
     throw new Error((what || 'Request') + ' failed: the server replied with '
       + (r.status || '?') + ' ' + (r.statusText || '') + ' instead of data.');
@@ -12573,6 +13113,9 @@ el('settings-default-bo')?.addEventListener('change', function () {
 el('settings-clock-24h')?.addEventListener('change', function () {
   send('set_clock_format', { clock24h: this.checked });
 });
+el('settings-follow-set-game')?.addEventListener('change', function () {
+  send('set_follow_set_game', { enabled: this.checked });
+});
 el('settings-show-series')?.addEventListener('change', function () {
   send('set_show_series', { show: this.checked });
 });
@@ -12613,8 +13156,96 @@ function syncGridMultiview() {
   }
 }
 
+// ── Match titles (Twitch auto-title + VOD naming) ─────────────────────────
+// Templates save on change (blur/Enter), toggles immediately; the server returns live previews.
+function sendMatchTitles() {
+  send('set_match_titles', {
+    twitch: { auto: !!el('mtt-twitch-auto')?.checked, template: el('mtt-twitch-tpl')?.value || '' },
+    vod: {
+      rename: !!el('mtt-vod-rename')?.checked, template: el('mtt-vod-tpl')?.value || '',
+      eventFolder: !!el('mtt-vod-folder')?.checked, datePrefix: !!el('mtt-vod-date')?.checked, csv: !!el('mtt-vod-csv')?.checked
+    },
+    stripSponsors: !!el('mtt-strip-sponsors')?.checked
+  });
+}
+['mtt-twitch-auto', 'mtt-twitch-tpl', 'mtt-vod-rename', 'mtt-vod-tpl', 'mtt-vod-folder', 'mtt-vod-date', 'mtt-vod-csv', 'mtt-strip-sponsors'].forEach(function (id) {
+  el(id)?.addEventListener('change', sendMatchTitles);
+});
+['mtt-twitch-tpl', 'mtt-vod-tpl'].forEach(function (id) {
+  el(id)?.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); this.blur(); } });
+});
+el('mtt-twitch-push')?.addEventListener('click', function () {
+  send('match_titles_push_twitch', {});
+  showToast('Sending the title to Twitch.', '#22c55e', 2000);
+});
+el('mtt-vod-clear')?.addEventListener('click', function () { send('vod_clear_log', {}); });
+el('mtt-vod-log')?.addEventListener('click', function (e) {
+  const btn = e.target.closest('[data-vod-act]');
+  if (!btn) return;
+  const id = btn.dataset.id, act = btn.dataset.vodAct;
+  if (act === 'retry') send('vod_retry', { id });
+  else if (act === 'reveal') send('vod_reveal', { id });
+  else if (act === 'copy') {
+    const entry = ((currentState.matchTitles || {}).vodLog || []).find((x) => x.id === id);
+    if (entry && entry.row && navigator.clipboard) navigator.clipboard.writeText(entry.row).then(() => showToast('Row copied. Paste it into your sheet.', '#22c55e', 2000));
+  }
+});
+function syncMatchTitles() {
+  const mt = currentState.matchTitles;
+  if (!mt) return;
+  const setChk = (id, v) => { const n = el(id); if (n && document.activeElement !== n) n.checked = !!v; };
+  const setVal = (id, v) => { const n = el(id); if (n && document.activeElement !== n) n.value = v || ''; };
+  setChk('mtt-twitch-auto', mt.twitch && mt.twitch.auto);
+  setVal('mtt-twitch-tpl', mt.twitch && mt.twitch.template);
+  setChk('mtt-vod-rename', mt.vod && mt.vod.rename);
+  setVal('mtt-vod-tpl', mt.vod && mt.vod.template);
+  setChk('mtt-vod-folder', mt.vod && mt.vod.eventFolder);
+  setChk('mtt-vod-date', mt.vod && mt.vod.datePrefix);
+  setChk('mtt-vod-csv', mt.vod && mt.vod.csv);
+  setChk('mtt-strip-sponsors', mt.stripSponsors !== false);
+  const pv = mt.preview || {};
+  const tp = el('mtt-twitch-preview'); if (tp) tp.textContent = pv.twitch || '(nothing on air yet)';
+  const vp = el('mtt-vod-preview'); if (vp) vp.textContent = pv.vod || '(nothing on air yet)';
+  const st = el('mtt-twitch-status');
+  if (st) {
+    const s = mt.status || {};
+    const tw = currentState.twitch || {};
+    let txt = '', bad = false;
+    if (!mt.twitch || !mt.twitch.auto) txt = 'Off. The title is only changed by hand.';
+    else if (s.twitchError) { txt = s.twitchError; bad = true; }
+    else if (!tw.connected) { txt = 'Waiting for Twitch. Connect it on the Twitch page.'; bad = true; }
+    else if (s.twitchAt) txt = 'Last sent ' + new Date(s.twitchAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '.';
+    else txt = 'On. The title is sent a few seconds after the match changes.';
+    st.textContent = txt;
+    st.style.color = bad ? '#f87171' : '';
+  }
+  const log = Array.isArray(mt.vodLog) ? mt.vodLog : [];
+  const wrap = el('mtt-vod-log-wrap');
+  if (wrap) wrap.style.display = log.length ? '' : 'none';
+  const box = el('mtt-vod-log');
+  if (box) {
+    const key = JSON.stringify(log.map((x) => [x.id, x.status, x.filename, x.error, x.csvError]));
+    if (box.dataset.key !== key) {
+      box.dataset.key = key;
+      box.innerHTML = log.slice(0, 10).map(function (x) {
+        const when = new Date(x.ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        const badge = x.status === 'saved' ? (x.csvError ? 'warn' : 'ok') : x.status === 'error' ? 'err' : 'wait';
+        const label = { ok: 'Saved', warn: 'Saved, not logged', err: 'Error', wait: 'Saving' }[badge];
+        const note = x.status === 'error' ? x.error : (x.csvError || x.filename || 'Waiting for OBS to release the file');
+        const acts = (x.status === 'error' || x.csvError ? `<button type="button" class="btn btn-sm" data-vod-act="retry" data-id="${esc(x.id)}">Retry</button>` : '')
+          + (x.row ? `<button type="button" class="btn btn-ghost btn-sm" data-vod-act="copy" data-id="${esc(x.id)}">Copy row</button>` : '')
+          + `<button type="button" class="btn btn-ghost btn-sm" data-vod-act="reveal" data-id="${esc(x.id)}">Show file</button>`;
+        return `<div class="mtt-log-row"><span class="mtt-badge mtt-badge-${badge}">${label}</span>`
+          + `<div class="mtt-log-main"><div class="mtt-log-title">${esc(x.title)}</div><div class="mtt-log-note" title="${esc(note)}">${esc(when)} · ${esc(note)}</div></div>`
+          + `<div class="mtt-log-acts">${acts}</div></div>`;
+      }).join('');
+    }
+  }
+}
+
 function syncSettingsFromState() {
   syncGridMultiview();
+  syncMatchTitles();
   const th = el('select-theme');
   if (th && currentState.theme && document.activeElement !== th) th.value = currentState.theme;
   const bo = el('settings-default-bo');
@@ -12623,6 +13254,8 @@ function syncSettingsFromState() {
   if (cl && currentState.clock24h !== undefined) cl.checked = !!currentState.clock24h;
   const ss = el('settings-show-series');
   if (ss && currentState.showSeries !== undefined) ss.checked = currentState.showSeries !== false;
+  const fg = el('settings-follow-set-game');
+  if (fg && document.activeElement !== fg) fg.checked = !!currentState.followSetGame;
   const acPick = el('settings-accent'); const acHex = el('settings-accent-hex');
   const acColor = (currentState.brand && currentState.brand.color) || '#055fdb';
   if (acPick && document.activeElement !== acPick) { acPick.value = acColor; }
@@ -12721,6 +13354,7 @@ function applyCloudStatus(s) {
       ? (isOrg ? `Workspace: ${s.orgName || s.workspaceId} · Role: ${s.role}` : 'Personal workspace (not in an organization)')
       : '';
   }
+  renderCloudPlan(s);
   const seatsBlock = el('org-seats-block');
   const canManage = isOrg && (s.role === 'owner' || s.role === 'admin');
   if (seatsBlock) seatsBlock.style.display = canManage ? '' : 'none';
@@ -12768,6 +13402,32 @@ function applyCloudStatus(s) {
     // lives in its own inner span so the CSS ellipsis-truncation has a box to apply to.
     if (isOrg) orgChip.innerHTML = 'ORG: <span class="ck-org-name">' + esc(s.orgName || (s.workspaceId || '').slice(0, 18)) + '</span>';
   }
+}
+// Studio plan line under the workspace line in Settings, from the website's /api/broadcast/me
+// (cloud-client getPlan). Display only: no feature is locked on it. Older websites send no plan,
+// and then nothing is shown, exactly as before.
+function renderCloudPlan(s) {
+  const wsLine = el('cloud-workspace-line');
+  if (!wsLine) return;
+  let line = el('cloud-plan-line');
+  if (!line) {
+    line = document.createElement('p');
+    line.id = 'cloud-plan-line';
+    line.className = 'section-desc';
+    line.style.marginTop = '4px';
+    wsLine.insertAdjacentElement('afterend', line);
+  }
+  const p = s && s.authed ? s.plan : null;
+  if (!p || (!p.tierName && !p.founding)) { line.style.display = 'none'; line.innerHTML = ''; return; }
+  const ends = p.currentPeriodEnd ? new Date(p.currentPeriodEnd) : null;
+  const endTxt = ends && !isNaN(ends.getTime())
+    ? (p.source === 'stripe' ? ' · Renews ' : ' · Until ') + ends.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })
+    : '';
+  const badge = p.founding
+    ? ' <span class="stat-pill ok" style="margin-left:6px;" title="Thank you for producing with us during the beta.">Founding producer</span>'
+    : '';
+  line.innerHTML = 'Plan: <strong>' + esc(p.tierName || 'Broadcast Studio') + '</strong>' + esc(endTxt) + badge;
+  line.style.display = '';
 }
 el('ck-chip-org')?.addEventListener('click', () => {
   document.getElementById('tab-ajustes')?.click();
@@ -14344,7 +15004,7 @@ el('btn-search-startgg-teams')?.addEventListener('click', async () => {
   }
 
   if (!currentState.startgg?.hasToken) {
-    showToast('Add your Start.gg API token in Settings first', '#f59e0b');
+    showToast('Add your start.gg API token under Apps > start.gg first', '#f59e0b');
     return;
   }
 
@@ -14406,7 +15066,7 @@ el('btn-search-startgg-tournaments')?.addEventListener('click', async () => {
   }
 
   if (!currentState.startgg?.hasToken) {
-    showToast('Add your Start.gg API token in Settings first', '#f59e0b');
+    showToast('Add your start.gg API token under Apps > start.gg first', '#f59e0b');
     return;
   }
 
@@ -14614,7 +15274,7 @@ function renderBracketEventPicker(data) {
 
 async function loadStartggTeamsForSelection(tournamentSlug, eventSlug) {
   if (!currentState.startgg?.hasToken) {
-    showToast('Add your Start.gg API token in Settings first', '#f59e0b');
+    showToast('Add your start.gg API token under Apps > start.gg first', '#f59e0b');
     return;
   }
   const statusTarget = el('dash-selected-sgg-event') || el('startgg-import-status');
@@ -15161,7 +15821,7 @@ function evRenderDropdown() {
 async function showMyTournaments(container) {
   if (!container) return;
   if (!currentState.startgg?.hasToken) {
-    container.innerHTML = '<div style="color:#ef4444;font-size:12px">Add API token in Settings first.</div>';
+    container.innerHTML = '<div style="color:#ef4444;font-size:12px">Add your start.gg API token under Apps > start.gg first.</div>';
     return;
   }
   container.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--muted)">Loading your tournaments…</div>';
@@ -15372,7 +16032,7 @@ function evCmHint() {
   if (!hint) return;
   const cm = currentState.challengermode || {};
   if (!cm.hasKey) {
-    hint.textContent = 'Add your Challengermode refresh key in Settings ▸ Integrations first.';
+    hint.textContent = 'Add your Challengermode refresh key under Apps > Challengermode first.';
   } else if (!cm.spaceId) {
     hint.textContent = 'Paste a tournament link to load it. To browse instead, set your Space id in Settings.';
   } else {
@@ -15473,7 +16133,7 @@ el('ev-cm-search')?.addEventListener('focus', () => {
   const box = el('ev-cm-results');
   if (!box) return;
   if (!cm.hasKey) {
-    box.innerHTML = '<div class="ev-dropdown-msg" style="color:#f59e0b;">Add a Challengermode refresh key in Integrations first.</div>';
+    box.innerHTML = '<div class="ev-dropdown-msg" style="color:#f59e0b;">Add a Challengermode refresh key under Apps > Challengermode first.</div>';
     box.style.display = 'block';
     return;
   }
@@ -15546,7 +16206,7 @@ function renderDashChallengermodeQueue(queue, fetchedAt) {
 
   searchInput.addEventListener('focus', () => {
     if (!currentState.challonge?.hasKey) {
-      resultsDiv.innerHTML = '<div class="ev-dropdown-msg" style="color:#f59e0b;">Add a Challonge API key in Integrations first.</div>';
+      resultsDiv.innerHTML = '<div class="ev-dropdown-msg" style="color:#f59e0b;">Add a Challonge API key under Apps > Challonge first.</div>';
       resultsDiv.style.display = 'block';
       return;
     }
@@ -15652,7 +16312,7 @@ function renderChalDropdown(tournaments, filterQuery) {
 
   searchInput.addEventListener('focus', () => {
     if (!currentState.nxgen?.hasKey) {
-      resultsDiv.innerHTML = '<div class="ev-dropdown-msg" style="color:#f59e0b;">Add a NXGEN API key in Integrations first.</div>';
+      resultsDiv.innerHTML = '<div class="ev-dropdown-msg" style="color:#f59e0b;">Add a NXGEN API key under Apps > NXGEN first.</div>';
       resultsDiv.style.display = 'block';
       return;
     }
@@ -15770,7 +16430,7 @@ function renderNxgenDropdown(events, filterQuery) {
 
   searchInput.addEventListener('focus', () => {
     if (!currentState.faceit?.hasKey) {
-      resultsDiv.innerHTML = '<div class="ev-dropdown-msg" style="color:#f59e0b;">Add a FACEIT API key in Integrations first.</div>';
+      resultsDiv.innerHTML = '<div class="ev-dropdown-msg" style="color:#f59e0b;">Add a FACEIT API key under Apps > FACEIT first.</div>';
       resultsDiv.style.display = 'block';
       return;
     }
@@ -16120,7 +16780,10 @@ function saveCasters() {
   });
 }
 el('btn-apply-casters')?.addEventListener('click', saveCasters);
-el('btn-apply-casters-footer')?.addEventListener('click', saveCasters);
+// The desk footer's Apply sets ONLY the lower-third text; the casters on the desk come from Talent.
+el('btn-apply-casters-footer')?.addEventListener('click', () => {
+  send('set_casters', { lowerThird: (el('input-caster-lower-third')?.value || castersLowerThirdDraft || '').trim() });
+});
 
 // Dashboard ▸ Game Settings is driven by games-hub.js (GamesHub.onState).
 
@@ -16273,6 +16936,55 @@ el('btn-veto-reset')?.addEventListener('click', () => {
 });
 el('btn-veto-show')?.addEventListener('click', () => send('veto_visible', { visible: true }));
 el('btn-veto-hide2')?.addEventListener('click', () => send('veto_visible', { visible: false }));
+
+// Import a played veto from a FACEIT room or HLTV match link: fetch → preview → apply. The
+// preview is shown before anything changes so a wrong link never overwrites the board.
+let _vetoImport = null;
+const VETO_API_BASE = location.protocol === 'file:' ? 'http://127.0.0.1:3000' : '';
+async function vetoImportFetch() {
+  const url = (el('veto-import-url')?.value || '').trim();
+  const box = el('veto-import-preview'); if (!box) return;
+  const h = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  box.hidden = false;
+  if (!url) { box.innerHTML = '<span class="vm-imp-err">Paste a FACEIT room or HLTV match link first.</span>'; return; }
+  box.textContent = /^https?:\/\//i.test(url) || /faceit\.com|hltv\.org/i.test(url) ? 'Fetching the match…' : 'Reading the veto…';
+  try {
+    const r = await fetch(`${VETO_API_BASE}/api/veto/import`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+    const j = await r.json();
+    if (!j.ok) {
+      // HLTV: the page cannot be fetched from here, so hand the producer the page to copy from.
+      box.innerHTML = `<span class="vm-imp-err">${h(j.error || 'Import failed')}</span>` + (j.openUrl ? ` <a href="${h(j.openUrl)}" target="_blank" rel="noopener" class="btn btn-ghost btn-xs" style="margin-left:8px;">Open the HLTV page</a>` : '');
+      return;
+    }
+    _vetoImport = j;
+    const word = { ban: 'banned', pick: 'picked' };
+    const teams = Array.isArray(j.teams) ? j.teams : [];
+    box.innerHTML = `<div class="vm-imp-head"><b>${h(teams.map((tm) => tm.name || '?').join(' vs '))}</b><span>Best of ${h(j.bestOf)} · ${j.source === 'hltv' ? 'HLTV' : j.source === 'pasted' ? 'pasted veto' : 'FACEIT'}${j.results && j.results.length ? ' · ' + j.results.length + ' map result' + (j.results.length === 1 ? '' : 's') : ''}</span></div>
+      <ol class="vm-imp-steps">${j.steps.map((s) => `<li>${s.action === 'decider' ? h(s.map) + ' left over' : h((teams[s.by] || {}).name || '?') + ' ' + (word[s.action] || s.action) + ' ' + h(s.map)}</li>`).join('')}</ol>
+      <div class="vm-actions">
+        <button class="btn btn-primary btn-sm" data-vimp="teams" title="Set the match teams, best-of and the veto board">Apply teams and veto</button>
+        <button class="btn btn-secondary btn-sm" data-vimp="veto" title="Load only the veto board, keep the current teams">Veto only</button>
+        <button class="btn btn-ghost btn-sm" data-vimp="cancel">Cancel</button>
+      </div>`;
+  } catch (e) { box.innerHTML = `<span class="vm-imp-err">${h(e.message || e)}</span>`; }
+}
+el('btn-veto-import')?.addEventListener('click', vetoImportFetch);
+el('veto-import-url')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); vetoImportFetch(); } });
+el('veto-import-preview')?.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-vimp]'); if (!b) return;
+  const box = el('veto-import-preview');
+  if (b.dataset.vimp === 'cancel') { box.hidden = true; _vetoImport = null; return; }
+  if (!_vetoImport) return;
+  b.disabled = true;
+  try {
+    const r = await fetch(`${VETO_API_BASE}/api/veto/import/apply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ import: _vetoImport, applyTeams: b.dataset.vimp === 'teams' }) });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'Apply failed');
+    box.hidden = true; _vetoImport = null;
+    const inp = el('veto-import-url'); if (inp) inp.value = '';
+    if (typeof showToast === 'function') showToast('Veto imported' + (b.dataset.vimp === 'teams' ? ' with the teams' : '') + '.', '#22c55e', 2500);
+  } catch (err) { b.disabled = false; if (typeof showToast === 'function') showToast(String(err.message || err), '#f59e0b', 3500); }
+});
 
 // Game-mode icons — m.mode carries the pool entry's type (Overwatch: Control/Hybrid/Escort/Push/
 // Flashpoint/Clash; Rocket League: Standard/Hoops/Dropshot/Snow Day/Rumble/Heatseeker/Spike Rush).
@@ -16602,6 +17314,18 @@ function renderDraftManager(data) {
   if (owBansRow) owBansRow.style.display = isOw ? 'flex' : 'none';
   if (owBansSel && document.activeElement !== owBansSel) owBansSel.value = String(d.owBanCount === 4 ? 4 : 2);
   el('draft-front-owbans-seg')?.querySelectorAll('button[data-v]').forEach((b) => b.classList.toggle('is-on', b.dataset.v === String(d.owBanCount === 4 ? 4 : 2)));
+
+  // Board look. Ban-only games (Overwatch, Marvel Rivals) always use their own ban board, so the layout
+  // choice is hidden there; the strip edge only matters when the strip is what goes on air.
+  const lookLayout = ['strip', 'board'].includes(d.layout) ? d.layout : 'auto';
+  const banOnlyGame = selGame === 'overwatch' || selGame === 'marvel-rivals';
+  const stripOnAir = !banOnlyGame && (lookLayout === 'strip' || (lookLayout === 'auto' && ['dota2', 'mobile-legends', 'honor-of-kings'].includes(selGame)));
+  const layoutRow = el('draft-front-layout-row'); if (layoutRow) layoutRow.style.display = banOnlyGame ? 'none' : '';
+  const posRow = el('draft-front-pos-row'); if (posRow) posRow.style.display = stripOnAir ? '' : 'none';
+  el('draft-front-layout-seg')?.querySelectorAll('button[data-v]').forEach((b) => b.classList.toggle('is-on', b.dataset.v === lookLayout));
+  el('draft-front-pos-seg')?.querySelectorAll('button[data-v]').forEach((b) => b.classList.toggle('is-on', b.dataset.v === (d.stripPos === 'bottom' ? 'bottom' : 'top')));
+  const clockSel = el('draft-front-clock');
+  if (clockSel && document.activeElement !== clockSel) clockSel.value = String([0, 15, 20, 30, 45, 60, -1].includes(Number(d.turnSeconds)) ? Number(d.turnSeconds) : 0);
 
   // Typeahead datalist
   const dl = el('draft-champs');
@@ -17285,8 +18009,10 @@ const SCENE_SOURCES = [
     { name: 'RL HUD (Modern)', path: '/rl-hud.html', live: 'always', desc: 'Modern Rocket League scorebar + boost/stat HUD.' },
     { name: 'RL Player HUD', path: '/rl-player.html', live: 'always', desc: 'For playing on this PC: follows YOUR car (boost, stats). Best popped out over the game.' },
     { name: 'RL Worlds HUD', path: '/rl-worlds.html', live: 'always', desc: 'RLCS Worlds-style Rocket League HUD: stats sidebar, scores ticker, title sponsor.' },
-    { name: 'Live HUD (auto-game)', path: '/live.html', live: 'always', desc: 'Unified HUD that follows whichever game is active.' },
+    { name: 'RL Series Stats', path: '/rl-series-stats.html', live: null, desc: 'Rocket League stats for the whole series so far: per-player goals, assists, saves, shots and score.' },
+    { name: '★ Live HUD (active game)', path: '/live.html', live: 'always', desc: 'The scoreboard source to use: shows the HUD of the game and layout set in the app, and follows it when you change game. Pair it with Graphics (gfx.html) on top.' },
     { name: 'CS2 / CS:GO HUD', path: '/csgo.html', live: 'always', desc: 'GSI scorebar, players, radar, bomb, economy.' },
+    { name: 'CS2 Pro HUD', path: '/cs2-pro.html', live: 'always', desc: 'Second CS2 layout: player photo cards, team utility bars, auto K/D/A scoreboard in freezetime + timeouts, timeout banner, radar.' },
     { name: 'Valorant HUD', path: '/valorant.html', live: 'always', desc: 'Round scorebar, agents, spike + economy.' },
     { name: 'Overwatch 2 HUD', path: '/overwatch.html', live: 'always', desc: 'Hero line-up, objective + score HUD.' },
     { name: 'Marvel Rivals HUD', path: '/marvel-rivals.html', live: 'always', desc: 'Hero roster + objective scorebar.' },
@@ -17328,8 +18054,12 @@ const SCENE_SOURCES = [
     { name: 'Vertical Casters (9:16)', path: '/vertical-casters.html', live: 'casters.visible', desc: 'TikTok / Shorts caster desk — cams stacked full-frame, scorebar on top, inside the phone-UI safe area. ?count=1|2|3, ?score=off, ?safe=0, ?guides=1.', aspect: '1080 × 1920' },
     { name: 'Listen In (player mic + captions)', path: '/listen-in.html', live: 'listenIn.active', desc: 'Live team/player mic + captions on stream (VDO).' },
     { name: 'Chat Highlight (lower third)', path: '/chat-highlight.html', live: 'chatHighlight.visible', desc: 'Featured chat message — click any message in the rail’s Twitch chat to put it on stream.' },
+    { name: 'Interview Desk', path: '/interview-desk.html', live: 'casters.visible', desc: 'Host and guest interview layout with a header bar.' },
+    { name: 'Caster Cam Feed (single)', path: '/castercam.html', live: null, desc: 'One caster camera, full frame. ?slot=1-4 picks the desk seat, 5 = the player cam. Shows the brand logo when the seat is empty.' },
+    { name: 'Interviewee Feed', path: '/int-cam.html', live: null, desc: 'The interview guest camera as one full-frame transparent source, to lay over any scene.' },
   ]},
   { group: 'Pre / Post / Breaks', icon: 'clock', items: [
+    { name: '★ Graphics (all-in-one)', path: '/gfx.html', live: null, desc: 'The source behind the Graphics page: every graphic you Show there appears on this one layer. Put it on top of your main scenes.' },
     { name: '★ Trigger Graphics (all-in-one)', path: '/triggers.html', live: null, desc: 'ONE source for every triggered graphic — countdown, winner, intro, veto, draft, bracket, upcoming, standings. Add it to any scene; the qrail Triggers/Overlays buttons pop the right one over it.' },
     { name: 'Countdown / Starting Soon', path: '/countdown.html', live: 'breakScreen.visible', desc: 'Break standby timer with movie-countdown finish.' },
     { name: 'Starting Soon — Timer only', path: '/countdown.html?timer=1', live: 'breakScreen.visible', desc: 'Countdown with no background — overlay on b-roll.' },
@@ -17344,6 +18074,15 @@ const SCENE_SOURCES = [
     { name: 'Matchup (pre-game)', path: '/matchup.html', live: null, desc: 'Cinematic split-screen — team color washes, large watermark logos, VS pillar, series pips.' },
     { name: 'Draft Screen', path: '/draft.html', live: null, desc: 'Animated pick/ban draft for character / agent select.' },
     { name: 'Ticker', path: '/ticker.html', live: 'ticker.visible', desc: 'Scrolling lower-third — manual messages or live start.gg scores.' },
+    { name: 'Stream Credits', path: '/stream-credits.html', live: null, desc: 'End-of-show credits: talent bar, movie-style staff roll, supporters and sponsors.' },
+  ]},
+  { group: 'Battle Royale', icon: 'trophy', items: [
+    { name: 'BR Leaderboard', path: '/br-leaderboard.html', live: null, desc: 'Full lobby standings table: placement and elimination points per team.' },
+    { name: 'BR Rail', path: '/br-rail.html', live: null, desc: 'Side rail of the lobby standings that pages through the field during a game.' },
+    { name: 'BR Match Result', path: '/br-match.html', live: null, desc: 'End-of-game result with the winning team plate.' },
+    { name: 'Drop Map', path: '/fn-dropmap.html', live: null, desc: 'Where each team lands on the Fortnite map.' },
+    { name: 'Team Comparison', path: '/fn-compare.html', live: null, desc: 'Two teams side by side with their lobby stats.' },
+    { name: 'Victory Royale', path: '/fn-victory.html', live: null, desc: 'Fortnite game-winner screen.' },
   ]},
   { group: 'Multiview & Whip-around', icon: 'film', items: [
     { name: 'Grid Wall (2/3/4/6-up)', path: '/grid.html', live: null, desc: 'GRID-style multiview wall — every org producer publishing their match becomes a tile: their feed, their Twitch handle and the series score. Auto-sizes as producers come online; brand-kit colours, logo, sponsors and the app ticker throughout. Pin a layout with ?tiles=2|3|4|6. Each producer must turn on Settings ▸ Broadcast ▸ Grid Multiview — with nobody publishing the wall shows STANDBY, never placeholder matches.' },
@@ -17357,6 +18096,8 @@ const SCENE_SOURCES = [
     { name: 'Standings', path: '/standings.html', live: 'standings.visible', desc: 'Dedicated standings board (auto from bracket, league or manual) — podium leaderboard, or top-8 placement cards with character art for Smash.' },
     { name: 'Schedule', path: '/schedule.html', live: 'upcoming.visible', desc: 'Next matches from start.gg stream queue or manual entry.' },
     { name: 'Map Veto', path: '/mapscreen.html', live: 'veto.visible', desc: 'Pick/ban board for CS2 / Valorant-style series.' },
+    { name: 'League Leaderboard', path: '/league-leaderboard.html', live: null, desc: 'Season standings for the active league.' },
+    { name: 'League Stats', path: '/league-stats.html', live: null, desc: 'Season stat leaders for the active league.' },
   ]},
   { group: 'Replays', icon: 'film', items: [
     { name: 'Replay / Montage Player', path: '/replay-player.html', live: null, desc: 'Full-screen OBS replay buffer + montage playout.' },
@@ -17388,6 +18129,44 @@ const SCENE_SOURCES = [
     { name: 'Sponsor Banner (Active brand)', path: '/sponsor-banner.html?src=brand', live: 'banner.visible', desc: 'Sponsor strip driven by the active client brand kit.' },
   ]},
 ];
+
+// Which games an overlay is for. Untagged overlays suit every game. Feature tags (fgc, vetoes,
+// draft, battle-royale) follow the game registry's `features`, so a new game that shares the
+// feature picks the overlay up without editing this list.
+const SCENE_GAME_TAGS = {
+  '/smash.html': ['smash'], '/smash-team.html': ['smash'], '/brawlhalla.html': ['brawlhalla'],
+  '/rl-hud.html': ['rocket-league'], '/rl-player.html': ['rocket-league'], '/rl-worlds.html': ['rocket-league'], '/rl-series-stats.html': ['rocket-league'],
+  '/csgo.html': ['csgo'], '/cs2-pro.html': ['csgo'], '/valorant.html': ['valorant'],
+  '/overwatch.html': ['overwatch'], '/ow-hud.html': ['overwatch'], '/marvel-rivals.html': ['marvel-rivals'],
+  '/the-finals.html': ['the-finals'], '/lol-hud.html': ['league'],
+  '/apex-observer.html': ['apex'], '/apex.html': ['apex'], '/tokon.html': ['marvel-tokon'],
+  '/fgc/tekken8-blue/template.html': ['tekken8'], '/fgc/tekken8-red/template.html': ['tekken8'],
+  '/fgc/sf6/template.html': ['sf6'], '/fgc/ggstrive/template.html': ['ggstrive'], '/fgc/2xko/template.html': ['2xko'],
+  '/fn-dropmap.html': ['fortnite'], '/fn-compare.html': ['fortnite'], '/fn-victory.html': ['fortnite'],
+};
+const SCENE_FEATURE_TAGS = {
+  '/fgc/default/template.html': ['fgc'], '/fgc/default-img/template.html': ['fgc'],
+  '/mapscreen.html': ['vetoes'], '/draft.html': ['draft', 'heroes', 'agents'],
+  '/br-leaderboard.html': ['battle-royale'], '/br-rail.html': ['battle-royale'], '/br-match.html': ['battle-royale'],
+};
+function sceneBasePath(p) { return String(p || '').split('?')[0]; }
+function sceneFitsGame(path, st) {
+  const p = sceneBasePath(path);
+  const games = SCENE_GAME_TAGS[p], feats = SCENE_FEATURE_TAGS[p];
+  if (!games && !feats) return true;
+  const gid = st && st.activeGame;
+  if (!gid) return true;
+  if (games && games.includes(gid)) return true;
+  const f = ((((st.games || {})[gid]) || {}).features) || [];
+  return !!feats && feats.some((x) => f.includes(x));
+}
+// "Start here": the sources almost every show needs. live.html shows the HUD of the game + layout
+// set in the app (so it never needs swapping), gfx.html carries every graphic pushed from the
+// Graphics panel (countdown, winner, bracket...). The desk and replay player are full scenes of
+// their own. Adding gfx.html's graphics as separate sources would show them twice.
+function sceneStartPaths() {
+  return ['/live.html', '/gfx.html', '/duorow.html', '/replay-player.html'];
+}
 
 function getPath(obj, dotted) {
   return dotted.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj);
@@ -17422,8 +18201,11 @@ function buildOnAirGrid() {
   });
 }
 
-let _sceneFilterGroup = 'all';   // active category chip
-let _sceneFilterText = '';       // search box text (lowercased)
+let _sceneFilterGroup = '__start';   // active category chip
+let _sceneFilterText = '';           // search box text (lowercased)
+let _sceneGameSig = '';              // active game + layout the filter last ran for
+// Hide overlays built for other games (on by default; remembered per machine).
+let _sceneGameOnly = (() => { try { return localStorage.getItem('ne_scene_game_only') !== '0'; } catch { return true; } })();
 
 const SCENE_DEFAULT_ASPECT = '1920 × 1080';
 
@@ -17475,10 +18257,14 @@ function buildSceneCard(it, groupName) {
   // Path included so a producer who knows the overlay's file (rl-hud.html) can search for it.
   card.dataset.search = (it.name + ' ' + (it.desc || '') + ' ' + groupName + ' ' + (it.path || '')).toLowerCase();
   card.dataset.live = it.live || '';
+  card.dataset.path = sceneBasePath(it.path);
+  // The browser-source URL, for one-click "Add to OBS" (Modern interface style reads it).
+  card.dataset.url = liveUrl();
   const tip = String(it.desc || it.name).replace(/"/g, '&quot;');
   card.innerHTML = `
-    <div class="scene-thumb" title="${tip}"><iframe class="scene-thumb-frame" loading="lazy" scrolling="no" data-nw="${nativeW}" data-nh="${nativeH}" data-src="${thumbUrl()}"></iframe><span class="scene-thumb-block"></span><span class="scene-onair-pill" hidden>ON AIR</span><span class="scene-aspect">${aspect}</span><span class="scene-thumb-name">${it.name}</span>
+    <div class="scene-thumb" title="${tip}"><img class="scene-thumb-img" alt="" draggable="false" data-src="${SCENE_BASE_URL}/api/overlay-thumb?file=${encodeURIComponent(String(it.path || '').split('?')[0].split('/').pop())}"><iframe class="scene-thumb-frame" loading="lazy" scrolling="no" data-nw="${nativeW}" data-nh="${nativeH}" data-src="${thumbUrl()}"></iframe><span class="scene-thumb-block"></span><span class="scene-onair-pill" hidden>ON AIR</span><span class="scene-aspect">${aspect}</span><span class="scene-thumb-name">${it.name}</span>
       <div class="scene-thumb-acts">
+        <button class="scene-thumb-btn ss-obs" title="Add to OBS (top layer of your current scene) or vMix (a Web Browser input), whichever is your switcher">${svgIcon('plus')}</button>
         <button class="scene-thumb-btn ss-open" title="Open in new window">${svgIcon('external')}</button>
         ${window.electronAPI?.openGameOverlay ? `<button class="scene-thumb-btn ss-game" title="Pop out over the game: transparent, always on top, click-through">${svgIcon('monitor')}</button>` : ''}
         <button class="scene-thumb-btn ss-copy" title="Copy browser-source URL">${svgIcon('copy')}</button>
@@ -17521,6 +18307,16 @@ function buildSceneCard(it, groupName) {
   colorIn.addEventListener('input', () => { bg.color = colorIn.value; persist(); });
   opIn.addEventListener('input', () => { bg.op = parseInt(opIn.value, 10); opVal.textContent = bg.op + '%'; persist(); });
 
+  card.querySelector('.ss-obs').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const sw = activeSwitcher();
+    if (!sw.ready) {
+      showToast(`Connect ${sw.name} first (Apps > ${sw.vmix ? 'vMix' : 'OBS Studio'}), then add overlays in one click.`, '#f59e0b', 5000);
+      return;
+    }
+    const label = String(it.name || 'Overlay').replace(/[★]/g, '').trim();
+    send('obs_add_overlay', { sourceName: 'NE ' + label, url: liveUrl(), width: nativeW, height: nativeH });
+  });
   card.querySelector('.ss-open').addEventListener('click', (e) => { e.stopPropagation(); window.open(liveUrl(), '_blank'); });
   card.querySelector('.ss-game')?.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -17530,13 +18326,30 @@ function buildSceneCard(it, groupName) {
   });
   card.querySelector('.ss-edit').addEventListener('click', () => openSceneEditor(it.path, it.name));
   card.querySelector('.scene-thumb').addEventListener('click', () => window.open(fullPrev(), '_blank'));
+  // The live overlay only runs while the pointer rests on the card; the cached picture does the rest.
+  (function hoverLive() {
+    const box = card.querySelector('.scene-thumb');
+    let onT = null, offT = null;
+    box.addEventListener('mouseenter', () => {
+      clearTimeout(offT);
+      onT = setTimeout(() => {
+        onT = null;
+        if (!thumb.src) { thumb.addEventListener('load', function () { _scaleThumb(thumb); box.classList.add('is-live'); }, { once: true }); thumb.src = thumb.dataset.src; }
+        else box.classList.add('is-live');
+      }, 350);
+    });
+    box.addEventListener('mouseleave', () => {
+      clearTimeout(onT); onT = null;
+      offT = setTimeout(() => { box.classList.remove('is-live'); if (thumb.src) thumb.removeAttribute('src'); }, 1200);
+    });
+  })();
   const copyBtn = card.querySelector('.ss-copy');
   copyBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     const url = liveUrl();
     const done = () => { copyBtn.innerHTML = svgIcon('check'); copyBtn.classList.add('ok'); setTimeout(() => { copyBtn.innerHTML = svgIcon('copy'); copyBtn.classList.remove('ok'); }, 1200); };
-    if (navigator.clipboard) navigator.clipboard.writeText(url).then(done).catch(() => prompt('Copy URL:', url));
-    else prompt('Copy URL:', url);
+    if (navigator.clipboard) navigator.clipboard.writeText(url).then(done).catch(() => customPrompt('Copy link', 'Select the link and copy it.', url, 'Done'));
+    else customPrompt('Copy link', 'Select the link and copy it.', url, 'Done');
   });
   return card;
 }
@@ -17599,8 +18412,17 @@ async function buildSceneSourceList() {
       <span class="scene-search-ico">${svgIcon('search')}</span>
       <input type="text" id="scene-search-input" placeholder="Search ${totalScenes} overlays…" autocomplete="off" spellcheck="false">
       <button class="scene-search-clear" id="scene-search-clear" title="Clear" hidden>×</button>
-    </div>`;
+    </div>
+    <label class="scene-game-only" title="Hide HUDs and boards made for other games">
+      <input type="checkbox" id="scene-game-only"${_sceneGameOnly ? ' checked' : ''}>
+      <span id="scene-game-only-label">Only this game</span>
+    </label>`;
   wrap.appendChild(topbar);
+  topbar.querySelector('#scene-game-only').addEventListener('change', (e) => {
+    _sceneGameOnly = e.target.checked;
+    try { localStorage.setItem('ne_scene_game_only', _sceneGameOnly ? '1' : '0'); } catch {}
+    applySceneFilter();
+  });
 
   // ── Two-column layout: sidebar nav + groups area ─────────────────────────
   const layout = document.createElement('div');
@@ -17616,6 +18438,13 @@ async function buildSceneSourceList() {
   main.className = 'scene-groups-area';
   main.id = 'scene-groups-area';
   layout.appendChild(main);
+  const startNote = document.createElement('div');
+  startNote.className = 'scene-start-note';
+  startNote.id = 'scene-start-note';
+  startNote.innerHTML = '<div><strong>The sources most shows need.</strong> <strong>Live HUD</strong> shows the HUD of the game set in the app; <strong>Graphics</strong> shows everything you put on air from the Graphics panel (countdown, winner, bracket and the rest), so keep it on top and do not add those graphics separately. Press <span class="scene-start-plus">+</span> on a card to add it to OBS (top layer of your current scene) or vMix (a Web Browser input).</div>'
+    + '<div class="scene-start-build">Starting from scratch? <button type="button" class="btn btn-secondary btn-xs" id="scene-build-scenes">Build show scenes</button> sets up OBS scenes or vMix inputs around these two sources and wires the automatic cuts.</div>';
+  main.appendChild(startNote);
+  startNote.querySelector('#scene-build-scenes').addEventListener('click', () => buildObsShowScenes());
 
   // ── Sidebar nav items ─────────────────────────────────────────────────────
   const mkNavItem = (key, label, iconHtml, count) => {
@@ -17626,6 +18455,7 @@ async function buildSceneSourceList() {
     b.addEventListener('click', () => { _sceneFilterGroup = key; applySceneFilter(); });
     return b;
   };
+  nav.appendChild(mkNavItem('__start', 'Start here', svgIcon('star'), 0));
   nav.appendChild(mkNavItem('all', 'All', '', totalScenes));
   const onAirItem = mkNavItem('__onair', 'On Air', '<span class="scene-chip-dot"></span>', 0);
   onAirItem.id = 'scene-nav-onair';
@@ -17661,6 +18491,7 @@ async function buildSceneSourceList() {
   });
   clearBtn.addEventListener('click', () => { search.value = ''; _sceneFilterText = ''; clearBtn.hidden = true; applySceneFilter(); });
 
+  applySceneFilter();
   refreshSceneOnAir(currentState);
   if (el('tab-media-content')?.classList.contains('active') && _assetsTab === 'overlays' && typeof loadScenePreviews === 'function') loadScenePreviews();
 }
@@ -17673,16 +18504,60 @@ function applySceneFilter() {
   // When a keyword search is active, flatten the group sections into one dense grid
   // (CSS .searching) so matches don't scatter across stacked headers → far less scrolling.
   const area = el('scene-groups-area');
-  if (area) area.classList.toggle('searching', !!_sceneFilterText);
+  const st = currentState || {};
+  // Start here = one card per starter source, in whichever group it lives. Searching always
+  // looks through everything, so a typed name is never hidden by the short list.
+  const starting = _sceneFilterGroup === '__start' && !_sceneFilterText;
+  const startSet = new Set(sceneStartPaths(st));
+  const seenStart = new Set();
+  wrap.querySelectorAll('.scene-card').forEach((c) => {
+    const p = c.dataset.path || '';
+    const isStart = startSet.has(p) && !seenStart.has(p);
+    if (isStart) seenStart.add(p);
+    c.classList.toggle('is-start', isStart);
+  });
+  if (area) {
+    area.classList.toggle('searching', !!_sceneFilterText || starting);
+    area.classList.toggle('starting', starting);
+  }
+  const gameName = (((st.games || {})[st.activeGame]) || {}).name;
+  const gLabel = el('scene-game-only-label');
+  if (gLabel) gLabel.textContent = gameName ? 'Only ' + gameName : 'Only this game';
+  const gameOk = (item) => !_sceneGameOnly || sceneFitsGame(item.dataset.path, st);
   // Rank across ALL groups at once: while searching, the sections collapse to `display: contents`
   // and every card becomes a direct grid item, so the best match genuinely lands top-left instead
   // of wherever its group happened to sit.
   const groupOk = (item) => {
+    if (starting) return item.classList.contains('is-start');
+    if (!gameOk(item)) return false;
     if (_sceneFilterGroup === '__onair') return item.classList.contains('is-onair');
-    if (_sceneFilterGroup === 'all') return true;
+    if (_sceneFilterGroup === 'all' || _sceneFilterGroup === '__start') return true;
     const sec = item.closest('.scene-group');
     return !!sec && sec.dataset.group === _sceneFilterGroup;
   };
+  // Nav counts follow the game filter, and a group with nothing for this game is hidden.
+  let allCount = 0;
+  wrap.querySelectorAll('.scene-group').forEach((section) => {
+    const n = Array.prototype.filter.call(section.querySelectorAll('.scene-card'), gameOk).length;
+    allCount += n;
+    const navItem = Array.prototype.find.call(document.querySelectorAll('#scene-nav .scene-nav-item'), (b) => b.dataset.group === section.dataset.group);
+    if (navItem) {
+      const c = navItem.querySelector('.scene-nav-count'); if (c) c.textContent = n;
+      navItem.hidden = !n;
+    }
+  });
+  document.querySelectorAll('#scene-nav .scene-nav-item').forEach((b) => {
+    const c = b.querySelector('.scene-nav-count');
+    if (!c) return;
+    if (b.dataset.group === 'all') c.textContent = allCount;
+    if (b.dataset.group === '__start') c.textContent = seenStart.size;
+  });
+  const activeNav = Array.prototype.find.call(document.querySelectorAll('#scene-nav .scene-nav-item'), (b) => b.dataset.group === _sceneFilterGroup);
+  if (activeNav && activeNav.hidden) { _sceneFilterGroup = 'all'; applySceneFilter(); return; }
+  const searchIn = el('scene-search-input');
+  if (searchIn) searchIn.placeholder = `Search ${allCount} overlays…`;
+  const note = el('scene-start-note');
+  if (note) note.hidden = !starting;
   const totalShown = NESearch.rankNodes(
     wrap.querySelectorAll('.scene-card'),
     _sceneFilterText,
@@ -17712,6 +18587,7 @@ function applySceneFilter() {
 function refreshSceneOnAir(state) {
   const wrap = el('scene-source-list');
   if (!wrap || !wrap.dataset.built) return;
+  if (!el('tab-media-content')?.classList.contains('active')) return;   // nothing to light up while hidden
   let liveCount = 0;
   wrap.querySelectorAll('.scene-card').forEach((card) => {
     const key = card.dataset.live;
@@ -17726,7 +18602,9 @@ function refreshSceneOnAir(state) {
   if (navOnAir) { const c = navOnAir.querySelector('.scene-nav-count'); if (c) c.textContent = liveCount; }
   const badge = el('scene-onair-count');
   if (badge) { badge.textContent = liveCount ? `${liveCount} on air` : ''; badge.style.display = liveCount ? '' : 'none'; }
-  if (_sceneFilterGroup === '__onair') applySceneFilter();
+  const cs = currentState || {};
+  const gameSig = (cs.activeGame || '') + '|' + (cs.activeOverlay || '') + '|' + !!(cs.games && cs.games[cs.activeGame]);
+  if (_sceneFilterGroup === '__onair' || gameSig !== _sceneGameSig) { _sceneGameSig = gameSig; applySceneFilter(); }
 }
 
 // Scene preview iframes each load a full overlay (WebSocket + animation loops),
@@ -17764,28 +18642,26 @@ let _sceneIO = null;
 function loadScenePreviews() {
   if (_scenePreviewTimer) { clearTimeout(_scenePreviewTimer); _scenePreviewTimer = null; }
   if (_sceneIO) { _sceneIO.disconnect(); _sceneIO = null; }
-  const frames = Array.from(document.querySelectorAll('.scene-thumb-frame[data-src]'));
-  if (!frames.length) return;
+  // Cards show a cached picture (/api/overlay-thumb) as they scroll into view; it stays loaded, so
+  // coming back to the page is instant. The live overlay itself only runs on hover (see hoverLive).
+  const imgs = Array.from(document.querySelectorAll('.scene-thumb-img[data-src]'));
+  if (!imgs.length) return;
   const scrollRoot = document.getElementById('tab-scroll') || null;   // the app's main scroll container
+  const loadImg = (im) => {
+    if (im.src || im._retry) return;
+    im.onerror = () => {   // 202 = still being captured; ask again shortly, a few times
+      im.removeAttribute('src');
+      im._tries = (im._tries || 0) + 1;
+      if (im._tries > 12) return;
+      im._retry = setTimeout(() => { im._retry = null; loadImg(im); }, 4000 + im._tries * 1000);
+    };
+    im.onload = () => { im.classList.add('is-ready'); };
+    im.src = im.dataset.src + (im._tries ? '&r=' + im._tries : '');
+  };
   _sceneIO = new IntersectionObserver((entries) => {
-    entries.forEach((en) => {
-      const f = en.target;
-      if (en.isIntersecting) {
-        // Defer the load ~180ms: if the producer scrolls straight past this thumb it never loads,
-        // so a fast scroll-through doesn't spin up (and immediately tear down) every overlay it passes.
-        if (!f.src && !f._loadT) {
-          f._loadT = setTimeout(() => {
-            f._loadT = null;
-            if (!f.src) { f.addEventListener('load', function () { _scaleThumb(f); }, { once: true }); f.src = f.dataset.src; }
-          }, 180);
-        }
-      } else {
-        if (f._loadT) { clearTimeout(f._loadT); f._loadT = null; }
-        if (f.src) f.removeAttribute('src');   // off-screen → free it (stops its WS + animation)
-      }
-    });
-  }, { root: scrollRoot, rootMargin: '250px', threshold: 0.01 });
-  frames.forEach((f) => _sceneIO.observe(f));
+    entries.forEach((en) => { if (en.isIntersecting) loadImg(en.target); });
+  }, { root: scrollRoot, rootMargin: '400px', threshold: 0.01 });
+  imgs.forEach((im) => _sceneIO.observe(im));
 }
 function unloadScenePreviews() {
   if (_scenePreviewTimer) { clearTimeout(_scenePreviewTimer); _scenePreviewTimer = null; }
@@ -18167,8 +19043,11 @@ function renderCockpitStatus(data) {
     ev.style.display = hasEvent ? '' : 'none';
     const evLogo = el('ck-chip-event-logo');
     if (evLogo) {
-      const logo = (data.brand && data.brand.logo) || '';
-      if (logo) { evLogo.src = logo; evLogo.style.display = 'block'; }
+      // Event's own platform logo first, then the in-app league feeding the broadcast, then the brand kit.
+      const _lid = data.competition && data.competition.leagueId;
+      const _lg = _lid && (data.leagues || []).find((l) => l && l.id === _lid);
+      const logo = (data.activeEvent && data.activeEvent.logo) || (_lg && _lg.logo) || (data.brand && data.brand.logo) || '';
+      if (logo) { if (evLogo.getAttribute('src') !== logo) evLogo.src = logo; evLogo.style.display = 'block'; }
       else evLogo.style.display = 'none';
     }
   }
@@ -18178,10 +19057,11 @@ function renderCockpitStatus(data) {
   const tooltipRows = el('conn-tooltip-rows');
   if (signal && tooltipRows) {
     // Gather per-service states: { label, ok: true/false/null }
+    const _sw = activeSwitcher(), _swS = _sw.vmix ? (data.vmix || {}) : obs;
     const services = [
       { label: 'Server',   ok: true },
-      { label: 'OBS',      ok: obs.connected ? true : (obs.enabled ? null : false),
-        status: obs.connected ? (obs.currentScene || 'connected') : (obs.enabled ? 'connecting…' : 'off') },
+      { label: _sw.name, ok: _swS.connected ? true : (_swS.enabled ? null : false),
+        status: _swS.connected ? (_swS.currentScene || 'connected') : (_swS.enabled ? 'connecting…' : 'off') },
       { label: 'Twitch',   ok: tw.connected ? true : false,
         status: tw.connected ? (tw.username || 'connected') : 'not connected' },
       { label: 'start.gg', ok: sg.connected ? true : (sgOn && sg.hasToken ? null : false),
@@ -18794,7 +19674,7 @@ function renderQuickToolbar(data) {
     descriptors.sort((a, b) => { const ra = rankOf(a.token), rb = rankOf(b.token); return ra === rb ? 0 : ra - rb; });
     // Render — the first 9 buttons in the row get hotkeys 1..9 (position = key).
     descriptors.forEach((d, i) => wrap.appendChild(d.make(i < 9 ? i + 1 : null)));
-    if (!wrap.children.length) hintEl(obs.enabled ? (connected ? 'No scenes mapped — use Customize' : 'OBS not connected') : 'OBS off — enable in Integrations → OBS');
+    if (!wrap.children.length) hintEl(obs.enabled ? (connected ? 'No scenes mapped — use Customize' : 'OBS not connected') : 'OBS off. Turn it on under Apps > Streaming software');
     if (typeof bbUpdateExpandToggle === 'function') requestAnimationFrame(bbUpdateExpandToggle);
   }
   // Highlight the SCENE button matching the live program scene (per tick, no rebuild).
@@ -18867,6 +19747,17 @@ function renderQuickToolbar(data) {
 })();
 // Expandable second row: collapsed clips the bar to one row; the chevron reveals the rest.
 // The chevron only appears when the buttons actually overflow onto a second row.
+// Show Deck option pills: lit while their switch is on, and the whole pill toggles it
+// (styles.css used .td-opt:has(input:checked), which Electron 18 does not support).
+function tdOptSync() { document.querySelectorAll('.td-opt').forEach((o) => { const i = o.querySelector('input[type="checkbox"]'); o.classList.toggle('is-on', !!(i && i.checked)); }); }
+document.addEventListener('change', (e) => { if (e.target && e.target.closest && e.target.closest('.td-opt')) tdOptSync(); });
+document.addEventListener('click', (e) => {
+  const o = e.target && e.target.closest && e.target.closest('.td-opt');
+  if (!o || e.target.closest('label, input')) return;
+  const i = o.querySelector('input[type="checkbox"]'); if (!i) return;
+  i.checked = !i.checked; i.dispatchEvent(new Event('change', { bubbles: true }));
+});
+setTimeout(tdOptSync, 0);
 function bbUpdateExpandToggle() {
   const bar = el('bottom-bar'), wrap = el('qt-obs-scenes'), tog = el('bb-expand-toggle');
   if (!bar || !wrap || !tog) return;
@@ -18876,6 +19767,8 @@ function bbUpdateExpandToggle() {
   bar.classList.remove('bb-expanded');
   const overflowing = wrap.scrollHeight > wrap.clientHeight + 3;
   if (wasExpanded) bar.classList.add('bb-expanded');
+  // The page pads its bottom by this class (Electron 18 has no :has() for body:has(.bb-expanded)).
+  document.body.classList.toggle('bb-is-expanded', wasExpanded);
   tog.style.display = overflowing ? '' : 'none';
   tog.classList.toggle('is-open', wasExpanded && overflowing);
   const rows = overflowing && !wasExpanded ? ' — more below' : '';
@@ -18992,7 +19885,7 @@ function renderQrailScenes(data) {
     wrap.innerHTML = '';
     wrap.classList.toggle('qrail-scenes-editing', _progEdit);
     const hint = (t) => { const h = document.createElement('div'); h.className = 'qrail-scenes-hint'; h.textContent = t; wrap.appendChild(h); };
-    if (!enabled) hint('OBS off — enable in Settings → OBS');
+    if (!enabled) hint('OBS off. Turn it on under Apps > Streaming software');
     else if (!connected) hint('Connecting to OBS… scenes appear here automatically');
     else if (!list.length) hint('No scenes found in this OBS profile');
     else {
@@ -19434,10 +20327,11 @@ function renderUpNext(data) {
   if (!box || !txt) return;
   const sg = data.startgg || {};
   const queue = Array.isArray(sg.queue) ? sg.queue : [];
-  if (!sg.queueEnabled || !queue.length) { box.style.display = 'none'; return; }
+  const hideWf = () => { const wf = el('wf-upnext'); if (wf) wf.style.display = 'none'; };
+  if (!sg.queueEnabled || !queue.length) { box.style.display = 'none'; hideWf(); return; }
   // Prefer the next not-yet-finished set that isn't already live; else the live one.
   const next = queue.find((q) => !q.live && q.state !== 3) || queue.find((q) => q.live) || queue[0];
-  if (!next) { box.style.display = 'none'; return; }
+  if (!next) { box.style.display = 'none'; hideWf(); return; }
   const round = next.round ? next.round + ' · ' : '';
   const label = `${round}${next.teamA || 'TBD'} vs ${next.teamB || 'TBD'}`;
   txt.textContent = label;
@@ -19579,7 +20473,7 @@ function tickTimer() {
 }
 function adjustTimer(delta) {                 // ±seconds; works running or stopped
   _timer.endsAt = null;                       // manual override → local value until the server round-trips a fresh endsAt
-  _timer.secs = Math.max(0, Math.min(99 * 60 + 59, _timer.secs + delta));
+  _timer.secs = Math.max(0, Math.min(359999, _timer.secs + delta));
   if (!_timer.running) _timer.base = _timer.secs;
   paintTimer(); syncTimerToOverlay();
 }
@@ -19588,7 +20482,7 @@ function adjustTimer(delta) {                 // ±seconds; works running or sto
 // sends { seconds } while running, so the server re-anchors endsAt and every overlay follows.
 function setTimerSecs(secs) {
   _timer.endsAt = null;                       // manual set → local value until the server round-trips a fresh endsAt
-  _timer.secs = Math.max(0, Math.min(99 * 60 + 59, Math.round(secs)));
+  _timer.secs = Math.max(0, Math.min(359999, Math.round(secs)));
   _timer.base = _timer.secs;
   // A running timer that's been re-set to 0 has nothing left to count, so stop it rather than
   // leaving a live interval spinning on zero.
@@ -19835,7 +20729,7 @@ el('btn-ad-break')?.addEventListener('click', () => {
   if (!obs.connected) { flashHotkeyHint('Connect OBS first (Integrations).'); return; }
   const scenes = obs.scenes || {};
   if (!(scenes.commercial || scenes.break) && !(currentState.commercial && currentState.commercial.active)) {
-    flashHotkeyHint('Map a Commercial scene in Integrations → OBS.');
+    flashHotkeyHint('Map a Commercial scene under Apps > Streaming software.');
     document.querySelector('.tab-btn[data-tab="integrations"]')?.click();
     return;
   }
@@ -20014,7 +20908,7 @@ function applyObsScreenshot(d) {
     if (msg) msg.style.display = 'none';
   } else {
     if (img) img.style.display = 'none';
-    if (msg) { msg.textContent = (d && d.reason) === 'OBS not connected' ? 'OBS not connected — connect OBS in Settings, then reopen this preview.' : ((d && d.reason) || 'OBS not connected'); msg.style.display = 'flex'; }
+    if (msg) { msg.textContent = (d && d.reason) === 'OBS not connected' ? 'OBS is not connected. Connect it under Apps > Streaming software, then reopen this preview.' : ((d && d.reason) || 'OBS not connected'); msg.style.display = 'flex'; }
   }
 }
 el('btn-preview')?.addEventListener('click', () => {
@@ -20261,7 +21155,7 @@ function renderStreamQueue(data) {
       status.textContent = 'Polling stream queue…';
       status.style.color = 'var(--muted)';
     } else {
-      status.textContent = 'Stream queue off — enable in Settings (token + tournament slug) then toggle on.';
+      status.textContent = 'Stream queue off. Add your token and tournament under Apps > start.gg, then turn it on.';
       status.style.color = 'var(--muted)';
     }
   }
@@ -20619,7 +21513,7 @@ function renderPreshowGfxPanel(data) {
   }
   topics.forEach((t, i) => {
     const row = document.createElement('div');
-    row.style.cssText = 'display:flex; align-items:center; gap:8px;';
+    row.className = 'ps-topic-row';
     const activeBtn = document.createElement('button');
     activeBtn.type = 'button'; activeBtn.className = 'btn btn-ghost btn-sm';
     activeBtn.title = 'Set as active topic — also cuts OBS to its Scene, if set';
@@ -20631,7 +21525,7 @@ function renderPreshowGfxPanel(data) {
       if (sceneName) send('obs_switch_scene', { sceneName });
     });
     const input = document.createElement('input');
-    input.type = 'text'; input.className = 'input-text'; input.style.flex = '1';
+    input.type = 'text'; input.className = 'input-text ps-topic-text';
     input.maxLength = 60; input.placeholder = 'Topic…'; input.value = (t && t.text) || '';
     input.addEventListener('input', function () {
       const cur = (currentState.preshow && currentState.preshow.topics) || [];
@@ -20642,7 +21536,7 @@ function renderPreshowGfxPanel(data) {
     input.addEventListener('blur', flushPreshowSend);
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') flushPreshowSend(); });
     const sceneSel = document.createElement('select');
-    sceneSel.className = 'input-select'; sceneSel.style.width = '150px'; sceneSel.style.flexShrink = '0';
+    sceneSel.className = 'input-select ps-topic-scene';
     sceneSel.title = 'Optional — cut OBS to this scene when this topic goes active';
     fillSceneSelect(sceneSel, scenes, (t && t.sceneName) || '');
     sceneSel.addEventListener('change', function () {
@@ -20813,9 +21707,7 @@ el('btn-preshow-clear-picks')?.addEventListener('click', () => send('set_preshow
 el('preshow-preset-save')?.addEventListener('click', async () => {
   const cur = el('preshow-preset-sel');
   const curName = (currentState.preshowPresets || []).find((p) => p.id === cur?.value)?.name || '';
-  const name = typeof customPrompt === 'function'
-    ? await customPrompt('Save Topic Preset', 'Preset name (same name overwrites)', curName, 'Save')
-    : prompt('Preset name (same name overwrites):', curName);
+  const name = await customPrompt('Save Topic Preset', 'Preset name (same name overwrites)', curName, 'Save');
   if (!name || !name.trim()) return;
   send('save_preshow_preset', { name: name.trim() });
   showToast(`Topics saved as "${name.trim()}"`, '#22c55e');
@@ -20875,8 +21767,8 @@ function buildCasterDeskLayouts() {
         copyBtn.textContent = 'Copied!';
         setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1200);
       };
-      if (navigator.clipboard) navigator.clipboard.writeText(url).then(done).catch(() => prompt('Copy URL:', url));
-      else prompt('Copy URL:', url);
+      if (navigator.clipboard) navigator.clipboard.writeText(url).then(done).catch(() => customPrompt('Copy link', 'Select the link and copy it.', url, 'Done'));
+      else customPrompt('Copy link', 'Select the link and copy it.', url, 'Done');
     });
     wrap.appendChild(row);
   });
@@ -22643,17 +23535,28 @@ function resetBrandForm() {
   populateBrandObsSelects('', '');
 }
 
-// Spots a sponsor logo can be assigned to (checkmarks in the brand editor).
+// Spots a sponsor logo can be assigned to. `desc` is what the producer reads: where it shows and
+// when it is on screen (the same conditions sponsor proof-of-play counts, server.js adProofOnAir).
 const SPONSOR_SPOTS_UI = [
-  { key: 'title',       label: 'Title',       multi: false },
-  { key: 'rail',        label: 'Rail',        multi: true },
-  { key: 'desk',        label: 'Caster Desk', multi: true },
-  { key: 'banner',      label: 'Banner',      multi: true },
-  { key: 'overtime',    label: 'Overtime',    multi: false },
-  { key: 'replayGoal',  label: 'Replay',      multi: false },
-  { key: 'replayOutro', label: 'Replay Outro',multi: false },
-  { key: 'scoreboard',  label: 'Scoreboard',  multi: false },
-  { key: 'ticker',      label: 'Ticker',      multi: false },
+  { key: 'title',       label: 'Title',        multi: false, desc: 'The "Presented by" logo on the break screen and the full-screen boards: bracket, desk show, schedule, standings, matchup and credits.' },
+  { key: 'rail',        label: 'Rail',         multi: true,  desc: 'The sponsor bug on the gameplay overlay. Several sponsors take turns.' },
+  { key: 'desk',        label: 'Caster desk',  multi: true,  desc: 'Logos along the bottom of the caster desk while the casters are on screen.' },
+  { key: 'banner',      label: 'Banner',       multi: true,  desc: 'The sponsor banner graphic. It rotates through every sponsor ticked here while you show it.' },
+  { key: 'scoreboard',  label: 'Scoreboard',   multi: false, desc: 'The logo on the post-game scoreboard.' },
+  { key: 'ticker',      label: 'Ticker',       multi: false, desc: 'The logo on the scrolling ticker bar while it is on.' },
+  { key: 'replayGoal',  label: 'Replay',       multi: false, desc: 'The logo on goal and highlight replays.' },
+  { key: 'replayOutro', label: 'Replay outro', multi: false, desc: 'The logo at the end of each replay.' },
+  { key: 'overtime',    label: 'Overtime',     multi: false, desc: 'The logo on the Overtime graphic when a game goes to overtime.' },
+];
+// Sponsor tiers: a tier is a preset of placements, so a producer picks "Title sponsor" instead of
+// working out nine checkboxes. Ticking a box by hand turns the sponsor into Custom. One-sponsor
+// spots a tier claims are taken from whoever had them.
+const SPONSOR_TIERS = [
+  { id: 'title',      label: 'Title sponsor',      blurb: 'Top billing: presented-by, scoreboard and ticker, plus rail, desk and banner.', spots: ['title', 'scoreboard', 'ticker', 'rail', 'desk', 'banner'] },
+  { id: 'presenting', label: 'Presenting partner', blurb: 'Owns the replays and overtime, plus rail, desk and banner.', spots: ['replayGoal', 'replayOutro', 'overtime', 'rail', 'desk', 'banner'] },
+  { id: 'partner',    label: 'Official partner',   blurb: 'Rail, caster desk and banner.', spots: ['rail', 'desk', 'banner'] },
+  { id: 'supporting', label: 'Supporting',         blurb: 'The rail only.', spots: ['rail'] },
+  { id: 'custom',     label: 'Custom',             blurb: 'Pick the placements yourself.', spots: null },
 ];
 function defaultPlacements() {
   return { title: false, rail: true, desk: false, banner: false, overtime: false, replayGoal: false, replayOutro: false, scoreboard: false, ticker: false };
@@ -22663,20 +23566,55 @@ function ensurePlacements(s) {
   SPONSOR_SPOTS_UI.forEach((sp) => { if (typeof s.placements[sp.key] !== 'boolean') s.placements[sp.key] = false; });
   return s.placements;
 }
+// The tier whose preset matches what is ticked; anything else reads as Custom.
+function sponsorTierOf(s) {
+  const pl = ensurePlacements(s);
+  const on = SPONSOR_SPOTS_UI.filter((sp) => pl[sp.key]).map((sp) => sp.key).sort().join(',');
+  const hit = SPONSOR_TIERS.find((t) => t.spots && t.spots.slice().sort().join(',') === on);
+  return hit ? hit.id : 'custom';
+}
+// Apply a tier preset. Returns the names of sponsors a one-sponsor spot was taken from.
+function applySponsorTier(s, tierId) {
+  const t = SPONSOR_TIERS.find((x) => x.id === tierId);
+  s.tier = tierId;
+  if (!t || !t.spots) return [];
+  const taken = [];
+  SPONSOR_SPOTS_UI.forEach((sp) => {
+    const want = t.spots.includes(sp.key);
+    s.placements[sp.key] = want;
+    if (want && !sp.multi) {
+      brandSponsors.forEach((o) => {
+        if (o === s) return;
+        ensurePlacements(o);
+        if (o.placements[sp.key]) { o.placements[sp.key] = false; o.tier = sponsorTierOf(o); taken.push((o.name || 'another sponsor') + ' (' + sp.label + ')'); }
+      });
+    }
+  });
+  return taken;
+}
 
 let sponsorsSortable = null;
+let _sponsorNote = '';
 function renderBrandSponsors() {
   const list = el('sponsors-list'); const empty = el('sponsors-empty');
   if (!list) return;
-  list.querySelectorAll('.sponsor-row').forEach((i) => i.remove());
+  list.querySelectorAll('.sponsor-row, .sponsor-note').forEach((i) => i.remove());
   if (empty) empty.style.display = brandSponsors.length ? 'none' : '';
+  if (_sponsorNote) {
+    const n = document.createElement('div'); n.className = 'sponsor-note'; n.textContent = _sponsorNote;
+    list.insertBefore(n, list.firstChild);
+    _sponsorNote = '';
+  }
+  // Who holds each one-sponsor spot, so a chip can say "with Red Bull" before you take it.
+  const holder = {};
+  brandSponsors.forEach((o) => { ensurePlacements(o); SPONSOR_SPOTS_UI.forEach((sp) => { if (!sp.multi && o.placements[sp.key] && !holder[sp.key]) holder[sp.key] = o; }); });
   brandSponsors.forEach((s, idx) => {
     ensurePlacements(s);
     const row = document.createElement('div'); row.className = 'sponsor-row preset-item';
     row._sponsorRef = s;   // kept in sync by drag-reorder below (DOM order → array order)
 
     const head = document.createElement('div'); head.className = 'sponsor-row-head';
-    const grip = document.createElement('span'); grip.className = 'sponsor-row-grip'; grip.title = 'Drag to reorder'; grip.textContent = '⠿';
+    const grip = document.createElement('span'); grip.className = 'sponsor-row-grip'; grip.title = 'Drag to reorder (the rail and banner rotate in this order)'; grip.textContent = '⠿';
     head.appendChild(grip);
     const thumb = document.createElement('div'); thumb.className = 'sponsor-row-thumb';
     if (s.logo) { const img = document.createElement('img'); img.src = s.logo; thumb.appendChild(img); }
@@ -22687,49 +23625,74 @@ function renderBrandSponsors() {
     name.placeholder = '(logo only)';
     name.title = 'Rename this sponsor';
     name.addEventListener('input', () => { s.name = name.value; });
+    // Tier: a preset of placements.
+    const tierWrap = document.createElement('label'); tierWrap.className = 'sponsor-tier';
+    tierWrap.title = 'A tier ticks the placements for you. Change any placement below and it becomes Custom.';
+    const tierSel = document.createElement('select'); tierSel.className = 'input-select sponsor-tier-select';
+    const curTier = sponsorTierOf(s);
+    SPONSOR_TIERS.forEach((t) => { const o = new Option(t.label, t.id); o.title = t.blurb; tierSel.appendChild(o); });
+    tierSel.value = curTier;
+    s.tier = curTier;
+    tierSel.addEventListener('change', () => {
+      const taken = applySponsorTier(s, tierSel.value);
+      if (taken.length) _sponsorNote = 'Moved to ' + (s.name || 'this sponsor') + ': ' + taken.join(', ') + '. Those spots show one sponsor at a time.';
+      renderBrandSponsors();
+    });
+    tierWrap.appendChild(tierSel);
     const del = document.createElement('button'); del.className = 'btn btn-danger btn-sm'; del.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
     del.title = 'Remove sponsor';
     del.addEventListener('click', () => { brandSponsors.splice(idx, 1); renderBrandSponsors(); });
-    head.appendChild(thumb); head.appendChild(name); head.appendChild(del);
+    head.appendChild(thumb); head.appendChild(name); head.appendChild(tierWrap); head.appendChild(del);
 
+    // Placements as chips: lit = this sponsor shows there. Each says what it is on hover; a
+    // one-sponsor spot held by someone else says who.
+    const spots = document.createElement('div'); spots.className = 'sponsor-placements';
+    const lab0 = document.createElement('span'); lab0.className = 'sponsor-placements-k'; lab0.textContent = 'Shows on';
+    spots.appendChild(lab0);
+    SPONSOR_SPOTS_UI.forEach((sp) => {
+      const on = !!s.placements[sp.key];
+      const other = !sp.multi && !on && holder[sp.key] && holder[sp.key] !== s ? holder[sp.key] : null;
+      const chip = document.createElement('button'); chip.type = 'button';
+      chip.className = 'sponsor-chip' + (on ? ' is-on' : '') + (sp.multi ? '' : ' is-single') + (other ? ' is-held' : '');
+      chip.setAttribute('aria-pressed', on ? 'true' : 'false');
+      chip.title = sp.label + ': ' + sp.desc + (sp.multi ? ' Any number of sponsors.' : ' One sponsor at a time.')
+        + (other ? ' Now: ' + (other.name || 'another sponsor') + '. Click to give it to ' + (s.name || 'this sponsor') + '.' : '');
+      chip.textContent = sp.label;
+      if (!sp.multi) { const one = document.createElement('i'); one.textContent = '1'; one.title = 'One sponsor'; chip.appendChild(one); }
+      chip.addEventListener('click', () => {
+        s.placements[sp.key] = !on;
+        if (!sp.multi && !on) {
+          brandSponsors.forEach((o) => { if (o !== s) { ensurePlacements(o); if (o.placements[sp.key]) { o.placements[sp.key] = false; o.tier = sponsorTierOf(o); } } });
+        }
+        s.tier = sponsorTierOf(s);
+        renderBrandSponsors();
+      });
+      spots.appendChild(chip);
+    });
+
+    // Deal numbers are optional and only matter for Analytics, so they sit quietly at the end.
     const deal = document.createElement('div'); deal.className = 'sponsor-deal-row';
     const dvLab = document.createElement('label'); dvLab.className = 'sponsor-deal-field';
-    dvLab.title = 'Total $ this sponsor paid for this deal — feeds realized CPM in Sponsor Proof of Play (Analytics).';
+    dvLab.title = 'Optional. What this sponsor paid for the deal. Analytics turns it into a cost per thousand views delivered.';
     dvLab.appendChild(document.createTextNode('Deal $'));
-    const dv = document.createElement('input'); dv.type = 'number'; dv.min = '0'; dv.step = '0.01'; dv.placeholder = '—';
+    const dv = document.createElement('input'); dv.type = 'number'; dv.min = '0'; dv.step = '0.01'; dv.placeholder = 'optional';
     dv.className = 'input-text sponsor-deal-input';
     dv.value = s.dealValue != null ? s.dealValue : '';
     dv.addEventListener('change', () => { const n = parseFloat(dv.value); s.dealValue = (Number.isFinite(n) && n >= 0) ? n : null; });
     dvLab.appendChild(dv);
     const cpmLab = document.createElement('label'); cpmLab.className = 'sponsor-deal-field';
-    cpmLab.title = 'Their agreed/market CPM (cost per 1000 impression-seconds) — feeds $ value delivered.';
+    cpmLab.title = 'Optional. Their agreed price per 1,000 views. Analytics uses it to put a dollar value on the screen time delivered.';
     cpmLab.appendChild(document.createTextNode('Target CPM $'));
-    const cpm = document.createElement('input'); cpm.type = 'number'; cpm.min = '0'; cpm.step = '0.01'; cpm.placeholder = '—';
+    const cpm = document.createElement('input'); cpm.type = 'number'; cpm.min = '0'; cpm.step = '0.01'; cpm.placeholder = 'optional';
     cpm.className = 'input-text sponsor-deal-input';
     cpm.value = s.targetCpm != null ? s.targetCpm : '';
     cpm.addEventListener('change', () => { const n = parseFloat(cpm.value); s.targetCpm = (Number.isFinite(n) && n >= 0) ? n : null; });
     cpmLab.appendChild(cpm);
     deal.appendChild(dvLab); deal.appendChild(cpmLab);
 
-    const spots = document.createElement('div'); spots.className = 'sponsor-placements';
-    SPONSOR_SPOTS_UI.forEach((sp) => {
-      const lab = document.createElement('label'); lab.className = 'sponsor-spot' + (sp.multi ? '' : ' sponsor-spot-single');
-      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!s.placements[sp.key];
-      cb.title = sp.multi ? `Show on ${sp.label} (multiple sponsors allowed)` : `Fill the ${sp.label} slot (one sponsor)`;
-      cb.addEventListener('change', function () {
-        s.placements[sp.key] = this.checked;
-        // Single-logo slots hold one sponsor: claiming it clears the others.
-        if (!sp.multi && this.checked) {
-          brandSponsors.forEach((o) => { if (o !== s) { ensurePlacements(o); o.placements[sp.key] = false; } });
-          renderBrandSponsors();
-        }
-      });
-      lab.appendChild(cb); lab.appendChild(document.createTextNode(sp.label));
-      spots.appendChild(lab);
-    });
-
-    row.appendChild(head); row.appendChild(deal); row.appendChild(spots); list.appendChild(row);
+    row.appendChild(head); row.appendChild(spots); row.appendChild(deal); list.appendChild(row);
   });
+  renderSponsorGuide();
 
   if (sponsorsSortable) { sponsorsSortable.destroy(); sponsorsSortable = null; }
   if (brandSponsors.length > 1 && typeof Sortable !== 'undefined') {
@@ -22738,6 +23701,20 @@ function renderBrandSponsors() {
       onEnd: () => { brandSponsors = [...list.querySelectorAll('.sponsor-row')].map((r) => r._sponsorRef).filter(Boolean); renderBrandSponsors(); }
     });
   }
+}
+// "Where sponsors show": every placement, what it is, and who has it in this package. Sits above
+// the sponsor list, folded by default once you have seen it.
+function renderSponsorGuide() {
+  const host = el('sponsor-guide'); if (!host) return;
+  const who = (key) => brandSponsors.filter((o) => o.placements && o.placements[key]).map((o) => o.name || 'logo only');
+  const rows = SPONSOR_SPOTS_UI.map((sp) => {
+    const w = who(sp.key);
+    return `<div class="sg-row"><b>${sp.label}${sp.multi ? '' : '<i title="One sponsor">1</i>'}</b><span>${escHtml(sp.desc)}</span><em class="${w.length ? '' : 'is-empty'}">${w.length ? escHtml(w.join(', ')) : 'Nobody yet'}</em></div>`;
+  }).join('');
+  const tiers = SPONSOR_TIERS.filter((t) => t.spots).map((t) => `<div class="sg-tier"><b>${t.label}</b><span>${escHtml(t.blurb)}</span></div>`).join('');
+  host.innerHTML = `<details class="sg"${brandSponsors.length ? '' : ' open'}><summary>Where sponsors show, and what the tiers mean</summary>`
+    + `<div class="sg-tiers">${tiers}</div><div class="sg-rows">${rows}</div>`
+    + `<p class="sg-foot">Spots marked 1 hold one sponsor at a time. The rest show every sponsor ticked, taking turns in the order of the list.</p></details>`;
 }
 
 // Show/hide the square brand-logo preview vs the empty placeholder.
@@ -22925,8 +23902,7 @@ function renderBrands(data) {
       : 'Snapshot the current show setup into "' + (pkg.name || 'Main') + '"')
       + ' — scene presets · ticker · event name · titles · caster lineup · OBS scene mappings';
     capBtn.addEventListener('click', () => {
-      send('capture_package_snapshot', { kitId: k.id, packageId: pkg.id });
-      showToast('Show setup captured into "' + (pkg.name || 'Main') + '"', '#22c55e');
+      send('capture_package_snapshot', { kitId: k.id, packageId: pkg.id });   // brand-result toasts the outcome
     });
     const editBtn = document.createElement('button');
     editBtn.className = 'btn btn-ghost btn-sm'; editBtn.textContent = 'Edit';
@@ -23202,7 +24178,8 @@ el('input-sponsor-logo')?.addEventListener('change', async (e) => {
 el('btn-add-sponsor')?.addEventListener('click', () => {
   const name = (el('input-sponsor-name').value || '').trim();
   if (!name && !pendingSponsorLogo) { showToast('Enter a sponsor name or pick a logo.', '#ef4444'); return; }
-  brandSponsors.push({ name, logo: pendingSponsorLogo || null, tier: 'partner', placements: defaultPlacements(), dealValue: null, targetCpm: null });
+  // New sponsors start as Official partner (rail, caster desk, banner); the tier picker changes it.
+  brandSponsors.push({ name, logo: pendingSponsorLogo || null, tier: 'partner', placements: { ...defaultPlacements(), desk: true, banner: true }, dealValue: null, targetCpm: null });
   pendingSponsorLogo = null;
   el('input-sponsor-name').value = '';
   el('input-sponsor-logo').value = '';
@@ -23296,10 +24273,26 @@ el('brand-editor-modal')?.addEventListener('click', (e) => { if (e.target === el
 });
 
 // ── CS2 Game State Integration ──────────────────────────────────────────────
+// One click: the server finds CS2 through Steam and installs the game-data and observer configs.
+el('btn-csgo-setup')?.addEventListener('click', () => {
+  const r = el('csgo-result'); if (r) { r.textContent = 'Looking for CS2 in your Steam libraries...'; r.style.color = ''; }
+  send('csgo_setup', {});
+});
+el('btn-csgo-launch')?.addEventListener('click', () => send('csgo_launch_observer', {}));
+// CS2 Pro HUD radar position/size (1920x1080 px). Default = the layout's own spot.
+const CS2_RADAR_DEFAULT = { wide: { x: 18, y: 34, size: 380 }, stacked: { x: 1522, y: 34, size: 380 } };
+function cs2RadarSend() {
+  const v = (id) => Number(el(id)?.value);
+  send('csgo_radar_layout', { layout: { x: v('cs2-radar-x'), y: v('cs2-radar-y'), size: v('cs2-radar-size') } });
+}
+['cs2-radar-x', 'cs2-radar-y', 'cs2-radar-size'].forEach((id) => el(id)?.addEventListener('change', cs2RadarSend));
+el('cs2-radar-reset')?.addEventListener('click', () => send('csgo_radar_layout', { layout: null }));
+el('check-csgo-auto-hud')?.addEventListener('change', (e) => send('csgo_auto_hud', { enabled: !!e.target.checked }));
+el('check-csgo-observer-assist')?.addEventListener('change', (e) => send('csgo_observer_assist', { enabled: !!e.target.checked }));
 el('btn-csgo-install')?.addEventListener('click', () => {
   const p = (el('input-csgo-path')?.value || '').trim();
-  if (!p) { showToast('Enter your CS2 install or cfg folder path.', '#ef4444'); return; }
-  send('install_csgo_gsi', { path: p });
+  if (!p) { showToast('Paste the CS2 folder first.', '#ef4444'); return; }
+  send('csgo_setup', { path: p });
 });
 
 el('btn-csgo-spectator')?.addEventListener('click', () => {
@@ -23316,6 +24309,49 @@ el('check-csgo-history')?.addEventListener('change', (e) => {
 
 el('check-csgo-builtin-radar')?.addEventListener('change', (e) => {
   send('csgo_radar_mode', { builtin: !!e.target.checked });
+});
+
+// CS2 Pro HUD layout (one click, live on air).
+el('csgo-pro-layout-seg')?.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-layout]'); if (!b) return;
+  send('csgo_pro_layout', { layout: b.dataset.layout });
+});
+// Suggest mode = Director auto-switch off (same setting as Production > Director).
+el('csgo-director-mode-seg')?.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-mode]'); if (!b) return;
+  send('set_director', { autoSwitch: b.dataset.mode === 'auto' });
+});
+// The CS2 HUD over the game: ONE window. Observer Assist is part of it (toggle above), not a second
+// window. Opens whichever CS2 HUD design is selected.
+el('btn-csgo-observer-assist')?.addEventListener('click', () => {
+  const msgEl = el('csgo-observer-msg');
+  const say = (t, ok) => { if (msgEl) { msgEl.textContent = t; msgEl.style.color = ok ? '#9ae6b4' : '#f56565'; } };
+  const pro = ((currentState && currentState.themesByGame && currentState.themesByGame.csgo) || '') === 'cs2-pro';
+  const hud = pro ? '/cs2-pro.html' : '/csgo.html';
+  if (!window.electronAPI || !window.electronAPI.openGameOverlay) {
+    say('Over-game windows only work in the desktop app.', false);
+    return;
+  }
+  window.electronAPI.openGameOverlay({ url: SCENE_BASE_URL + hud, path: hud, name: pro ? 'CS2 Pro HUD' : 'CS2 HUD', nativeW: 1920, nativeH: 1080 })
+    .then((r) => say(r && r.ok ? 'The HUD is open over the game. Run CS2 in borderless or windowed mode. Point at any part of it to see through it. Ctrl+Shift+F10 hides it all; Ctrl+Shift+F9 to move, resize or make it see-through.' : 'Could not open the HUD over the game.', !!(r && r.ok)))
+    .catch(() => say('Could not open the HUD over the game.', false));
+});
+// Cinematic freezetime camera.
+el('check-csgo-cinematic')?.addEventListener('change', (e) => {
+  send('csgo_cinematic_set', { enabled: !!e.target.checked, port: Number(el('input-csgo-netcon-port')?.value) || 2121 });
+});
+el('input-csgo-netcon-port')?.addEventListener('change', (e) => {
+  const port = Math.round(Number(e.target.value));
+  if (port >= 1024 && port <= 65535) send('csgo_cinematic_set', { port });
+});
+el('csgo-cine-shots')?.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-cine]'); if (!b) return;
+  const idx = Number(b.dataset.idx) || 0;
+  const map = el('csgo-cine-shots').dataset.map || '';
+  const act = b.dataset.cine;
+  if (act === 'from' || act === 'to') send('csgo_cinematic_capture', { map, idx, which: act });
+  else if (act === 'preview') send('csgo_cinematic_preview', { map, idx });
+  else if (act === 'reset') send('csgo_cinematic_reset', { map, idx });
 });
 
 // Auto-hide RL native UI was REMOVED (2026-08) — Rocket League now has its own in-game "Hide UI"
@@ -23745,9 +24781,28 @@ function applyCsgoState(data) {
 
   const conn = el('csgo-conn');
   if (conn) {
-    conn.textContent = cs.connected ? 'CS2: connected' : 'CS2: waiting';
+    conn.textContent = cs.connected ? 'Receiving' : 'Waiting';
     conn.className = 'prod-chip' + (cs.connected ? ' ok' : '');
   }
+  // One-click setup checklist: each step goes green when it is done.
+  const setupEl = el('cs2-setup');
+  if (setupEl) {
+    const c = cs.cinematic || {};
+    const consoleOn = c.status === 'connected';
+    const step = (k, done) => setupEl.querySelector('[data-step="' + k + '"]')?.classList.toggle('is-done', !!done);
+    step('cfg', !!cs.cfgPath); step('console', consoleOn); step('hud', !!cs.cfgPath); step('live', !!cs.connected);
+    const t = (id, v) => { const x = el(id); if (x) x.textContent = v; };
+    t('cs2-step-cfg', cs.cfgPath ? 'Installed in ' + cs.cfgPath : 'Not set up yet.');
+    t('cs2-step-console', consoleOn ? 'Connected. The app can hide the HUD and move the camera.'
+      : (c.status === 'waiting' ? 'Not open. Current CS2 builds may not open their console even with -netconport, so cinematic camera moves can be unavailable. The clean observer view does not need it.' : 'Lets the app move the camera for cinematic shots.'));
+    t('cs2-step-live', cs.connected ? 'Game data is coming in.' : 'Spectate a match in CS2 and the overlay fills in.');
+    const sb = el('btn-csgo-setup'); if (sb) sb.textContent = cs.cfgPath ? 'Set up again' : 'Set up CS2';
+    const ah = el('check-csgo-auto-hud'); if (ah && document.activeElement !== ah) ah.checked = cs.autoHud !== false;
+  }
+  const oa = el('check-csgo-observer-assist'); if (oa && document.activeElement !== oa) oa.checked = cs.observerAssist !== false;
+  const rl = cs.radarLayout || CS2_RADAR_DEFAULT[cs.proLayout === 'stacked' ? 'stacked' : 'wide'];
+  [['cs2-radar-x', rl.x], ['cs2-radar-y', rl.y], ['cs2-radar-size', rl.size]].forEach(([id, val]) => { const f = el(id); if (f && document.activeElement !== f) f.value = val; });
+  const rr = el('cs2-radar-reset'); if (rr) rr.disabled = !cs.radarLayout;
 
   const awEl = el('check-csgo-auto-winner');
   if (awEl && document.activeElement !== awEl) awEl.checked = cs.autoWinner !== false;
@@ -23756,6 +24811,48 @@ function applyCsgoState(data) {
 
   const radarEl = el('check-csgo-builtin-radar');
   if (radarEl && document.activeElement !== radarEl) radarEl.checked = !!cs.builtinRadar;
+
+  el('csgo-pro-layout-seg')?.querySelectorAll('[data-layout]').forEach((b) => b.classList.toggle('active', b.dataset.layout === (cs.proLayout === 'stacked' ? 'stacked' : 'wide')));
+  const auto = !!(data.director && data.director.autoSwitch);
+  el('csgo-director-mode-seg')?.querySelectorAll('[data-mode]').forEach((b) => b.classList.toggle('active', (b.dataset.mode === 'auto') === auto));
+  renderCsgoCinematic(cs);
+}
+
+// Cinematic freezetime panel: toggle, port, console status + the two shots for the loaded map.
+function renderCsgoCinematic(cs) {
+  const c = (cs && cs.cinematic) || {};
+  const chk = el('check-csgo-cinematic');
+  if (chk && document.activeElement !== chk) chk.checked = !!c.enabled;
+  const portEl = el('input-csgo-netcon-port');
+  if (portEl && document.activeElement !== portEl && c.port) portEl.value = c.port;
+  const launch = el('csgo-netcon-launch'); if (launch) launch.textContent = '-netconport ' + (c.port || 2121);
+  const chip = el('csgo-cinematic-conn');
+  if (chip) {
+    const st = c.status || 'off';
+    chip.textContent = st === 'connected' ? (c.playing ? 'Playing: ' + (c.playing.name || 'shot') : 'Console: connected') : st === 'waiting' ? 'Console: waiting for CS2' : 'Console: off';
+    chip.className = 'prod-chip' + (st === 'connected' ? ' ok' : '');
+    chip.title = c.statusDetail || '';
+  }
+  const map = (cs && cs.map && cs.map.name) || '';
+  const mapEl = el('csgo-cine-map'); if (mapEl) mapEl.textContent = map || 'the current map (load one in CS2)';
+  const box = el('csgo-cine-shots'); if (!box) return;
+  const custom = (c.shots && c.shots[map]) || [];
+  const live = c.enabled && c.status === 'connected';
+  const fmt = (p) => p ? Math.round(p.x) + ', ' + Math.round(p.y) + ', ' + Math.round(p.z) : '';
+  const html = !map ? '<p class="gh-hint">Load a map in CS2 (spectating) to capture shots for it.</p>' : [0, 1].map((i) => {
+    const sh = custom[i] && custom[i].from ? custom[i] : null;
+    const desc = sh ? 'Your shot: ' + fmt(sh.from) + (sh.to && sh.to !== sh.from ? ' to ' + fmt(sh.to) : '') : 'Starter shot above ' + (i ? 'B' : 'A') + ' site';
+    const dis = live ? '' : ' disabled';
+    return '<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:6px 0; border-top:1px solid var(--border);">'
+      + '<b style="min-width:52px;">Shot ' + (i + 1) + '</b><span class="gh-hint" style="flex:1; min-width:180px;">' + tlEsc(desc) + '</span>'
+      + '<button type="button" class="btn btn-ghost btn-sm" data-cine="from" data-idx="' + i + '"' + dis + ' title="Use the CS2 spectator camera position right now as where this shot starts">Capture start</button>'
+      + '<button type="button" class="btn btn-ghost btn-sm" data-cine="to" data-idx="' + i + '"' + dis + ' title="Use the CS2 spectator camera position right now as where this shot ends">Capture end</button>'
+      + '<button type="button" class="btn btn-ghost btn-sm" data-cine="preview" data-idx="' + i + '"' + dis + '>Preview</button>'
+      + (sh ? '<button type="button" class="btn btn-ghost btn-sm" data-cine="reset" data-idx="' + i + '">Use starter</button>' : '')
+      + '</div>';
+  }).join('');
+  if (box.dataset.sig !== html) { box.dataset.sig = html; box.innerHTML = html; }
+  box.dataset.map = map;
 }
 
 // ── OBS settings ────────────────────────────────────────────────────────────
@@ -23787,6 +24884,15 @@ function getObsPayload() {
   const pw = el('input-obs-password')?.value.trim();
   if (pw) payload.password = pw;          // non-empty → update stored password
   else if (el('btn-obs-clear-password')?.dataset.clearing === '1') payload.clearPassword = true;
+  // Streamlabs Desktop fills the same slot through its Remote Control API (own address + token).
+  const appSel = el('select-obs-app');
+  if (appSel) payload.app = appSel.value === 'streamlabs' ? 'streamlabs' : 'obs';
+  const sIp = (el('input-slobs-ip')?.value.trim() || '127.0.0.1').replace(/^wss?:\/\//i, '');
+  const sPort = el('input-slobs-port')?.value.trim() || '59650';
+  payload.slobsUrl = `ws://${sIp}:${sPort}`;
+  const tok = el('input-slobs-token')?.value.trim();
+  if (tok) payload.slobsToken = tok;
+  else if (el('btn-slobs-clear-token')?.dataset.clearing === '1') payload.clearSlobsToken = true;
   return payload;
 }
 
@@ -24386,7 +25492,7 @@ async function bhFindPlayer(side, seat) {
   const t = (currentState.teams || {})[side] || {};
   const roster = Array.isArray(t.players) ? t.players : [];
   const guess = ((roster[seat] && (roster[seat].gamertag || roster[seat].name)) || '').trim();
-  const q = prompt('Brawlhalla name to look up (or paste a numeric Brawlhalla ID):', guess);
+  const q = await customPrompt('Find Brawlhalla player', 'Brawlhalla name to look up, or paste a numeric Brawlhalla ID.', guess, 'Look up');
   if (q == null) return;
   const query = q.trim();
   if (!query) return;
@@ -24406,9 +25512,9 @@ async function bhFindPlayer(side, seat) {
     if (!r.ok || !d.ok) throw new Error(d.error || 'Lookup failed');
     const hits = (d.hits || []).filter((h) => h.brawlhallaId);
     if (!hits.length) { if (st) st.textContent = d.note || 'No ranked player by that name.'; return; }
-    const pick = hits.length === 1 ? hits[0] : (() => {
+    const pick = hits.length === 1 ? hits[0] : await (async () => {
       const lines = hits.map((h, i) => `${i + 1}. ${h.name} — ${h.tier || 'unranked'} ${h.rating || ''} (${h.region}) #${h.rank}`);
-      const n = prompt('Which player?\n\n' + lines.join('\n'), '1');
+      const n = await customPrompt('Which player?', lines.join('\n') + '\n\nType the number.', '1', 'Link');
       const idx = parseInt(n, 10);
       return (idx >= 1 && idx <= hits.length) ? hits[idx - 1] : null;
     })();
@@ -24722,7 +25828,7 @@ const SCENE_CONTROL_MOMENTS = [
   { key: 'inGame', label: 'In-Game' },
   { key: 'replay', label: 'Replay' },
   { key: 'postGame', label: 'Post-Game' },
-  { key: 'break', label: 'Commercial' },
+  { key: 'break', label: 'Break' },
   { key: 'casters', label: 'Casters' },
   { key: 'bracket', label: 'Bracket' }
 ];
@@ -24794,7 +25900,7 @@ function applySceneControl(obs) {
     } else {
       btn.disabled = true;
       btn.style.opacity = '0.45';
-      btn.title = sceneName ? 'Connect to OBS to use' : 'No scene mapped (Settings → OBS)';
+      btn.title = sceneName ? 'Connect to OBS to use' : 'No scene mapped (Apps > Streaming software)';
     }
     btnWrap.appendChild(btn);
   });
@@ -24810,8 +25916,8 @@ function applySceneControl(obs) {
 
   if (hint) {
     hint.textContent = !connected
-      ? 'Not connected to OBS — connect in Settings → OBS.'
-      : (anyMapped ? '' : 'No scenes mapped yet — set them in Settings → OBS.');
+      ? 'Not connected to OBS. Connect it under Apps > Streaming software.'
+      : (anyMapped ? '' : 'No scenes mapped yet. Set them under Apps > Streaming software.');
   }
 }
 
@@ -24859,6 +25965,27 @@ function applyObsState(data) {
     if (pwClear) pwClear.style.display = hasSaved ? 'inline-block' : 'none';
   }
 
+  // Streaming app: OBS Studio or Streamlabs Desktop, each with its own connection fields.
+  const appSel = el('select-obs-app');
+  // A program picked but not saved yet (Apps ▸ Streaming software) keeps its form up until Save.
+  if (window._swPendingApp && window._swPendingApp === (obs.app === 'streamlabs' ? 'streamlabs' : 'obs')) window._swPendingApp = '';
+  if (appSel && document.activeElement !== appSel) appSel.value = window._swPendingApp || (obs.app === 'streamlabs' ? 'streamlabs' : 'obs');
+  syncObsAppFields();
+  if (typeof swRenderPicker === 'function') swRenderPicker(data);
+  const sIpEl = el('input-slobs-ip'), sPortEl = el('input-slobs-port');
+  if (sIpEl || sPortEl) {
+    const m = String(obs.slobsUrl || 'ws://127.0.0.1:59650').match(/^wss?:\/\/([^:/]+)(?::(\d+))?/i);
+    if (sIpEl && document.activeElement !== sIpEl) sIpEl.value = m ? m[1] : '127.0.0.1';
+    if (sPortEl && document.activeElement !== sPortEl) sPortEl.value = m && m[2] ? m[2] : '59650';
+  }
+  const tokEl = el('input-slobs-token'), tokInd = el('slobs-token-indicator'), tokClear = el('btn-slobs-clear-token');
+  if (tokEl && tokInd) {
+    const hasTok = obs.hasSlobsToken && !tokEl.value;
+    tokInd.style.display = hasTok ? 'block' : 'none';
+    tokEl.placeholder = hasTok ? '••••••••••••' : 'From Settings > Remote Control';
+    if (tokClear) tokClear.style.display = hasTok ? 'inline-block' : 'none';
+  }
+
   populateObsSceneSelects(obs.availableScenes || [], obs.scenes || {}, (obs.kickoff && obs.kickoff.scene) || '');
   applyRlSceneAuto(data);   // RL-only kickoff/post-game scene automation in the Match ▸ Teams gear panel
   if (typeof syncSheetsUi === 'function') syncSheetsUi(data);   // Google Sheets integration settings
@@ -24903,7 +26030,7 @@ function applyObsState(data) {
   const resultEl = el('obs-result');
   if (resultEl) {
     if (obs.connected) {
-      resultEl.textContent = `● Connected to OBS — ${(obs.availableScenes || []).length} scene(s) available.`;
+      resultEl.textContent = `● Connected to ${obs.app === 'streamlabs' ? 'Streamlabs Desktop' : 'OBS'} — ${(obs.availableScenes || []).length} scene(s) available.`;
       resultEl.style.color = '#9ae6b4';
     } else if (obs.lastError) {
       resultEl.textContent = `Last error: ${obs.lastError}`;
@@ -24919,6 +26046,24 @@ function applyObsState(data) {
 
 el('btn-obs-save')?.addEventListener('click', () => {
   send('set_obs_settings', getObsPayload());
+});
+// Show the connection fields for the chosen app. Changing app only switches the form; Save or
+// Test connects to it.
+function syncObsAppFields() {
+  const slobs = (el('select-obs-app') || {}).value === 'streamlabs';
+  const sf = el('slobs-fields'); if (sf) sf.style.display = slobs ? 'flex' : 'none';
+  const og = el('obs-fields-grid'); if (og) og.style.display = slobs ? 'none' : 'grid';
+  const oh = el('obs-fields-help'); if (oh) oh.style.display = slobs ? 'none' : '';
+}
+el('select-obs-app')?.addEventListener('change', syncObsAppFields);
+el('btn-slobs-clear-token')?.addEventListener('click', () => {
+  const btn = el('btn-slobs-clear-token');
+  const t = el('input-slobs-token'); if (t) t.value = '';
+  btn.dataset.clearing = '1';
+  send('set_obs_settings', getObsPayload());
+  delete btn.dataset.clearing;
+  btn.style.display = 'none';
+  const ind = el('slobs-token-indicator'); if (ind) ind.style.display = 'none';
 });
 el('input-obs-postgame-casters')?.addEventListener('change', () => send('set_obs_settings', getObsPayload()));
 el('check-obs-kickoff')?.addEventListener('change', () => send('set_obs_settings', getObsPayload()));
@@ -24957,7 +26102,7 @@ el('btn-vmix-test')?.addEventListener('click', () => {
 document.querySelectorAll('#switcher-target-seg .seg-btn').forEach((b) => b.addEventListener('click', () => send('set_switcher_target', { target: b.dataset.target })));
 
 // ── Marketplace page (tab id 'integrations') — top pills: Integrations (the 'store' grid) / Plugins / Developers.
-// Per-app panels (Video Switcher / Cameras / Tournament Platforms / Twitch / Stream Deck) open from the cards with a back bar. ──
+// Per-app panels (Streaming software / Cameras / Tournament Platforms / Twitch / Stream Deck) open from the cards with a back bar. ──
 // 'chatgames' (Marble Race) is parked — unlisted from Integrations, implementation intact.
 // To restore: add 'chatgames' back here, re-add the panels/titles entries below, and
 // un-comment the subnav button + store card in index.html (the #integration-chatgames panel
@@ -24993,7 +26138,7 @@ function _intShowTab(which) {
   const backbar = el('int-backbar');
   if (backbar) {
     backbar.style.display = isTop ? 'none' : 'flex';
-    const titles = { switcher: 'Video Switcher', cameras: 'Cameras', streamdeck: 'Elgato Stream Deck',
+    const titles = { switcher: 'Streaming software', cameras: 'Cameras', streamdeck: 'Elgato Stream Deck',
       games: 'Games & GSI', tournaments: 'Tournament Platforms', twitch: 'Twitch', riot: 'Riot Games' };
     const t = el('int-backbar-title');
     if (t) t.textContent = (typeof INT_APP_NAMES !== 'undefined' && INT_APP_NAMES[_intAppFilter]) || titles[_intTab] || '';
@@ -25017,9 +26162,10 @@ el('int-back')?.addEventListener('click', () => { _intAppFilter = ''; _intShowTa
 // Which app was clicked — shared panels (tournaments, switcher, games) narrow to
 // JUST that app's section so start.gg never shows Challonge's settings, etc.
 let _intAppFilter = '';
-const INT_APP_NAMES = { obs: 'OBS Studio', vmix: 'vMix', twitch: 'Twitch', startgg: 'start.gg',
-  challonge: 'Challonge', nxgen: 'NXGEN', faceit: 'FACEIT', vdo: 'VDO.Ninja', rl: 'Rocket League',
-  cs2: 'Counter-Strike 2', valorant: 'Valorant', lol: 'League of Legends', riot: 'Riot Games' };
+const INT_APP_NAMES = { obs: 'Streaming software', vmix: 'Streaming software', twitch: 'Twitch', startgg: 'start.gg',
+  challonge: 'Challonge', challengermode: 'Challengermode', nxgen: 'NXGEN', faceit: 'FACEIT', vdo: 'VDO.Ninja', rl: 'Rocket League',
+  cs2: 'Counter-Strike 2', valorant: 'Valorant', lol: 'League of Legends', riot: 'Riot Games',
+  sheets: 'Google Sheets', liquipedia: 'Liquipedia', streamdeck: 'Elgato Stream Deck' };
 function _intApplyAppFilter() {
   // One app = one titled <section class="section"> inside its shared panel.
   const scope = {
@@ -25027,9 +26173,14 @@ function _intApplyAppFilter() {
     challonge: { panel: 'integration-startgg', title: /^challonge/i },
     nxgen:     { panel: 'integration-startgg', title: /^nxgen/i },
     faceit:    { panel: 'integration-startgg', title: /^faceit/i },
-    obs:       { panel: 'integration-obs', title: /^obs/i },
-    vmix:      { panel: 'integration-obs', title: /^vmix/i },
+    challengermode: { panel: 'integration-startgg', title: /^challengermode/i },
+    sheets:    { panel: 'integration-startgg', title: /^google sheets/i },
+    liquipedia:{ panel: 'integration-startgg', title: /^nxgen/i },   // its block lives inside the NXGEN section
   };
+  // The "Tournament platforms" page-head only describes the bracket apps; Sheets and Liquipedia
+  // share the panel but are not platforms.
+  const platHead = document.querySelector('#integration-startgg > .page-head');
+  if (platHead) platHead.classList.toggle('int-head-hidden', /^(sheets|liquipedia)$/.test(String(_intAppFilter || '')));
   ['integration-startgg', 'integration-obs'].forEach((pid) => {
     const p = el(pid); if (!p) return;
     const cfg = scope[_intAppFilter];
@@ -25039,6 +26190,29 @@ function _intApplyAppFilter() {
       sec.style.display = cfg.title.test(((t && t.textContent) || '').trim()) ? '' : 'none';
     });
   });
+  // The streaming software panel shows only the chosen program's section (the loop above reset it).
+  if (typeof swRenderPicker === 'function') swRenderPicker();
+  // Liquipedia shares the NXGEN section: show only its own block when it was clicked, and hide
+  // that block when NXGEN was.
+  const lpBlock = el('integration-liquipedia');
+  if (lpBlock) {
+    const nxSec = lpBlock.closest('section.section');
+    if (nxSec) {
+      Array.from(nxSec.children).forEach((c) => {
+        if (c.contains(lpBlock)) { c.style.display = ''; return; }   // the wrapper that holds the block
+        c.style.display = _intAppFilter === 'liquipedia' ? 'none' : '';
+      });
+      // Inside that wrapper: Liquipedia only, or everything but Liquipedia.
+      const wrap = lpBlock.parentElement;
+      if (wrap && wrap !== nxSec) Array.from(wrap.children).forEach((c) => {
+        if (c === lpBlock) c.style.display = _intAppFilter === 'nxgen' ? 'none' : '';
+        else c.style.display = _intAppFilter === 'liquipedia' ? 'none' : '';
+      });
+      else lpBlock.style.display = _intAppFilter === 'nxgen' ? 'none' : '';
+    }
+    if (_intAppFilter === 'liquipedia') { lpBlock.style.marginTop = '0'; lpBlock.style.paddingTop = '0'; lpBlock.style.borderTop = '0'; }
+    else { lpBlock.style.marginTop = ''; lpBlock.style.paddingTop = ''; lpBlock.style.borderTop = ''; }
+  }
   // Games: select the matching inner game tab and hide the tab row while narrowed.
   const gameMap = { cs2: 'cs2', rl: 'rl', lol: 'league', valorant: 'valorant' };
   const bar = document.querySelector('#integration-games .game-tab-row');
@@ -25055,7 +26229,7 @@ document.querySelectorAll('#int-store-grid .int-card').forEach((card) => {
     // game. Don't set _intAppFilter here (it would later hide the game selector in the settings panel).
     if (card.dataset.goto === 'games') {
       if (typeof openSettings === 'function') openSettings('games');
-      const gm = { cs2: 'cs2', rl: 'rl', lol: 'league', valorant: 'valorant' };
+      const gm = { cs2: 'cs2', rl: 'rl', lol: 'league', valorant: 'valorant', dota2: 'dota2' };
       const g = gm[cardKey];
       if (g) setTimeout(() => document.querySelector('#integration-games .game-tab-btn[data-game="' + g + '"]')?.click(), 50);
       return;
@@ -25063,7 +26237,7 @@ document.querySelectorAll('#int-store-grid .int-card').forEach((card) => {
     _intAppFilter = cardKey;
     _intShowTab(card.dataset.goto);
     const target = card.dataset.scroll && el(card.dataset.scroll);
-    if (target) setTimeout(() => target.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+    if (target) setTimeout(() => target.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 60);
   });
 });
 function renderIntegrationStore(data) {
@@ -25077,20 +26251,25 @@ function renderIntegrationStore(data) {
   const obs = data.obs || {}, vmix = data.vmix || {}, tw = data.twitch || {};
   const sgg = data.startgg || {}, ch = data.challonge || {}, nx = data.nxgen || {};
   const fc = data.faceit || {};
+  const cm = data.challengermode || {};
   const sh = data.sheets || {};
   let on = 0;
-  on += set('obs',   !obs.enabled ? 'off' : obs.connected ? 'on' : 'warn',
-                     !obs.enabled ? 'Off' : obs.connected ? 'Connected' : 'Not reachable') ? 1 : 0;
-  on += set('vmix',  !vmix.enabled ? 'off' : vmix.connected ? 'on' : 'warn',
-                     !vmix.enabled ? 'Off' : vmix.connected ? 'Connected' : 'Not reachable') ? 1 : 0;
+  // One card for the streaming software: its status is the program in use (OBS, Streamlabs or vMix).
+  const swV = (data.switcher && data.switcher.target) === 'vmix';
+  const swS = swV ? vmix : obs;
+  const swName = swV ? 'vMix' : (obs.app === 'streamlabs' ? 'Streamlabs' : 'OBS');
+  on += set('obs', !swS.enabled ? 'off' : swS.connected ? 'on' : 'warn',
+                   !swS.enabled ? 'Off' : swS.connected ? swName + ' connected' : swName + ' not reachable') ? 1 : 0;
   on += set('twitch', tw.connected ? 'on' : 'off', tw.connected ? 'Connected' : 'Not connected') ? 1 : 0;
-  on += set('startgg', sgg.hasToken ? 'on' : 'off', sgg.hasToken ? 'Token saved' : 'No token') ? 1 : 0;
+  const sggOk = !!(sgg.hasToken && (sgg.lastSyncAt || sgg.selectedEvent));
+  on += set('startgg', sgg.hasToken ? (sggOk ? 'on' : 'warn') : 'off', sgg.hasToken ? (sggOk ? 'Connected' : 'Token saved') : 'No token') ? 1 : 0;
   on += set('challonge', ch.hasKey ? (ch.connected ? 'on' : 'warn') : 'off',
                          ch.hasKey ? (ch.connected ? 'Connected' : 'Key saved') : 'No key') ? 1 : 0;
   on += set('nxgen', nx.hasKey ? (nx.connected ? 'on' : 'warn') : 'off',
                      nx.hasKey ? (nx.connected ? 'Connected' : 'Key saved') : 'No key') ? 1 : 0;
   on += set('faceit', fc.hasKey ? (fc.connected ? 'on' : 'warn') : 'off',
                       fc.hasKey ? (fc.connected ? 'Connected' : 'Key saved') : 'No key') ? 1 : 0;
+  on += set('challengermode', cm.hasKey ? 'on' : 'off', cm.hasKey ? 'Key saved' : 'No key') ? 1 : 0;
   on += set('sheets', sh.hasKey ? (sh.connected ? 'on' : 'warn') : 'off',
                       sh.hasKey ? (sh.connected ? 'Connected' : 'Key saved') : 'No key') ? 1 : 0;
   const rt = data.riot || {};
@@ -25101,10 +26280,16 @@ function renderIntegrationStore(data) {
                    (data.csgo && data.csgo.connected) ? 'Connected' : 'Waiting for game') ? 1 : 0;
   const sd = !!(data.streamdeck && data.streamdeck.connected);
   on += set('streamdeck', sd ? 'on' : 'off', sd ? 'Connected' : 'Not installed') ? 1 : 0;
+  const dt = data.dota || {};
+  on += set('dota2', dt.connected ? 'on' : 'off', dt.connected ? 'Connected' : (dt.cfgPath ? 'Waiting for game' : 'Not set up')) ? 1 : 0;
   const sdStatus = el('streamdeck-conn-status');
   if (sdStatus) sdStatus.textContent = sd ? 'Plugin connected — keys are live.' : 'Plugin not connected.';
   const count = el('int-strip-count');
-  if (count) count.textContent = on + ' of 12';
+  if (count) {
+    const all = grid.querySelectorAll('.int-card .int-card-status');
+    let live = 0; all.forEach((c) => { if (c.dataset.st === 'on') live++; });
+    count.textContent = live + ' of ' + all.length;
+  }
 }
 
 function applyVmixState(data) {
@@ -25141,6 +26326,23 @@ el('btn-obs-clear-password')?.addEventListener('click', () => {
   if (pwInd) pwInd.style.display = 'none';
   if (pwEl) pwEl.placeholder = 'OBS WebSocket password';
 });
+
+// OBS or vMix, whichever is the switcher (Settings > OBS / vMix toggle), and whether it is reachable.
+function activeSwitcher() {
+  const st = currentState || {};
+  const vmix = !!(st.switcher && st.switcher.target === 'vmix');
+  return { vmix, name: vmix ? 'vMix' : (st.obs && st.obs.app === 'streamlabs' ? 'Streamlabs' : 'OBS'), ready: vmix ? !!(st.vmix && st.vmix.enabled && st.vmix.connected) : !!(st.obs && st.obs.connected) };
+}
+function buildObsShowScenes() {
+  const sw = activeSwitcher();
+  if (!sw.ready) {
+    showToast(`Connect ${sw.name} first (Apps > ${sw.vmix ? 'vMix' : 'OBS Studio'}), then build the scenes.`, '#f59e0b', 5000);
+    return;
+  }
+  send('obs_build_show_scenes', { base: SCENE_BASE_URL });
+  showToast(`Building your show in ${sw.name}…`, '#3b82f6', 2500);
+}
+el('btn-obs-build-scenes')?.addEventListener('click', buildObsShowScenes);
 
 el('btn-obs-download-collection')?.addEventListener('click', async () => {
   const btn = el('btn-obs-download-collection');
@@ -25179,7 +26381,6 @@ el('btn-obs-download-collection')?.addEventListener('click', async () => {
 // (Updated via full_state)
 
 // ── AI Director & Clips ───────────────────────────────────────────────────
-let selectedClipIds = new Set();
 let selectedClipId = null;   // the clip currently loaded in the REPLAYS editor
 
 function gameHasDirector() {
@@ -25688,7 +26889,7 @@ function rpArmMontage(m) {
 // Keep the bulk shelf-action buttons in step with the active shelf: the Copy label names the OTHER
 // shelf, and both disable when the current shelf has no reels.
 function rpUpdateShelfActions() {
-  const otherLabel = _rpFolder === 'highlights' ? 'Replays' : 'Highlights';
+  const otherLabel = _rpFolder === 'highlights' ? 'Moments' : 'Highlights';
   const all = (currentState.clips && currentState.clips.montages) || [];
   const count = all.filter((x) => (x.folder || 'replays') === _rpFolder).length;
   const copyBtn = el('rp-copy-shelf');
@@ -25704,7 +26905,7 @@ el('rp-clear-shelf')?.addEventListener('click', async () => {
   const all = (currentState.clips && currentState.clips.montages) || [];
   const count = all.filter((x) => (x.folder || 'replays') === _rpFolder).length;
   if (!count) return;
-  const label = _rpFolder === 'highlights' ? 'Highlights' : 'Replays';
+  const label = _rpFolder === 'highlights' ? 'Highlights' : 'Moments';
   const ok = await customConfirm('Clear shelf', `Remove all ${count} reel${count === 1 ? '' : 's'} from ${label}? Clips stay in your library.`, 'Clear');
   if (ok) send('montage_clear_shelf', { folder: _rpFolder });
 });
@@ -25712,23 +26913,24 @@ el('rp-clear-shelf')?.addEventListener('click', async () => {
 // Which of the section's three tabs is showing: the clip pool (for the active shelf) or the
 // playlists built from it. Playlists used to be a collapsed accordion UNDER the pool, which read as
 // a footnote — it's a peer view of the same shelf, so it's a peer tab.
-let _rpPoolView = 'pool';   // 'pool' | 'playlists'
+var _rpPoolView = 'pool';   // 'pool' (Moments / Highlights) | 'playlists' | 'obsfolder'
 function rpApplyPoolView() {
+  const pool = _rpPoolView === 'pool';
   const playlists = _rpPoolView === 'playlists';
-  // Pool-only chrome. The Transition row governs every push (including playlist playout), so it
-  // stays visible on both tabs.
+  const obsfolder = _rpPoolView === 'obsfolder';
   ['rp-pool-bulk', 'rp-pool-shelf-actions', 'rp-clip-pool'].forEach((id) => {
     const n = el(id); if (!n) return;
-    if (id === 'rp-pool-bulk') { n.style.display = playlists ? 'none' : (_poolSelected.size ? 'flex' : 'none'); return; }
-    n.style.display = playlists ? 'none' : '';
+    if (id === 'rp-pool-bulk') { n.style.display = pool && _poolSelected.size ? 'flex' : 'none'; return; }
+    n.style.display = pool ? '' : 'none';
   });
   const sec = el('rp-pl-section'); if (sec) sec.style.display = playlists ? '' : 'none';
   if (playlists) rpSetPlaylistsSectionExpanded(true);
+  const of = el('rpx-obsfolder'); if (of) of.style.display = obsfolder ? '' : 'none';
   const sw = el('rp-pl-shelf-switch');
-  if (sw) sw.innerHTML = (_rpFolder === 'highlights' ? 'Highlights' : 'Replays') + ' shelf &#8646;';
+  if (sw) sw.innerHTML = (_rpFolder === 'highlights' ? 'Highlights' : 'Moments') + ' &#8646;';
   const tabs = document.getElementById('rp-folder-tabs');
   if (tabs) tabs.querySelectorAll('.rp-folder-tab').forEach((b) => {
-    b.classList.toggle('active', b.dataset.view === 'playlists' ? playlists : (!playlists && b.dataset.folder === _rpFolder));
+    b.classList.toggle('active', b.dataset.view ? b.dataset.view === _rpPoolView : (pool && b.dataset.folder === _rpFolder));
   });
 }
 // Switch shelf (Replays ⇄ Highlights) — used by the two shelf tabs and by the Playlists tab's own
@@ -25750,18 +26952,19 @@ function rpSetFolder(f) {
   tabs.addEventListener('click', (e) => {
     const btn = e.target.closest('.rp-folder-tab');
     if (!btn) return;
-    if (btn.dataset.view === 'playlists') {
-      _rpPoolView = 'playlists';
+    if (btn.dataset.view === 'playlists' || btn.dataset.view === 'obsfolder') {
+      _rpPoolView = btn.dataset.view;
       rpApplyPoolView();
-      if (currentState.clips) renderPlaylistPane(currentState.clips);
+      if (_rpPoolView === 'playlists' && currentState.clips) renderPlaylistPane(currentState.clips);
+      if (_rpPoolView === 'obsfolder' && !_stagingLoading) scanStagingArea();
       return;
     }
     const f = btn.dataset.folder === 'highlights' ? 'highlights' : 'replays';
-    const wasPlaylists = _rpPoolView === 'playlists';
+    const wasOther = _rpPoolView !== 'pool';
     _rpPoolView = 'pool';
     rpSetFolder(f);
     rpApplyPoolView();
-    if (wasPlaylists && currentState.clips) renderClipPool(currentState.clips);
+    if (wasOther && currentState.clips) renderClipPool(currentState.clips);
   });
   el('rp-pl-shelf-switch')?.addEventListener('click', () => {
     rpSetFolder(_rpFolder === 'highlights' ? 'replays' : 'highlights');
@@ -25886,7 +27089,7 @@ function rpPreviewStop(finished) {
   if (v && !finished) v.pause();
   _plPreview = null;
   rpPreviewSyncBar();
-  const title = el('rp-editor-title'); if (title) title.innerHTML = '<span class="rp-step-num">2</span> Trim';
+  const title = el('rp-editor-title'); if (title) title.textContent = 'Player';
 }
 
 function rpPreviewSyncBar() {
@@ -25979,7 +27182,7 @@ function renderPlaylistPane(c) {
     // transitions actually repaint instead of getting stuck on a stale badge.
     const sig = JSON.stringify(montages.map((x) => [x.id, x.name, (x.clipIds || []).length, montageBadgeInfo(x, encodeActive, encodeQueue).label])) + '|' + mId + '|' + _rpFolder;
     const otherFolder = _rpFolder === 'highlights' ? 'replays' : 'highlights';
-    const moveLabel = _rpFolder === 'highlights' ? 'Replays' : 'Highlights';
+    const moveLabel = _rpFolder === 'highlights' ? 'Moments' : 'Highlights';
     if (listV.dataset.sig !== sig) {
       listV.dataset.sig = sig;
       listV.innerHTML = montages.length ? montages.map((x) => {
@@ -25988,7 +27191,7 @@ function renderPlaylistPane(c) {
         const badge = montageBadgeInfo(x, encodeActive, encodeQueue);
         return `<div class="rp-pl-row${isActive ? ' active' : ''}${isActive && _plCollapsed ? ' collapsed' : ''}" data-mid="${x.id}">
           <span class="rp-pl-row-chev">&#9660;</span>
-          <button class="rp-pl-row-prev" data-mid="${x.id}" title="Watch this playlist in Trim (off air)"${n ? '' : ' disabled'}>&#9654;</button>
+          <button class="rp-pl-row-prev" data-mid="${x.id}" title="Watch this playlist in the player (off air)"${n ? '' : ' disabled'}>&#9654;</button>
           <span class="rp-pl-row-name">${(x.name || 'Playlist').replace(/</g, '&lt;')}</span>
           <span class="rp-pl-row-count">${n} clip${n === 1 ? '' : 's'}</span>
           <span class="rp-pl-badge rp-pl-badge--${badge.cls}">${badge.label}</span>
@@ -26178,11 +27381,11 @@ let _poolSelected = new Set();
 function rpUpdatePoolBulkBar() {
   const bar = el('rp-pool-bulk');
   if (!bar) return;
-  bar.style.display = (_poolSelected.size && _rpPoolView !== 'playlists') ? 'flex' : 'none';
+  bar.style.display = (_poolSelected.size && _rpPoolView === 'pool') ? 'flex' : 'none';
   const count = el('rp-pool-bulk-count');
   if (count) count.textContent = `${_poolSelected.size} selected`;
   const copyBtn = el('rp-pool-bulk-copy');
-  if (copyBtn) copyBtn.innerHTML = `Copy &rarr; ${_rpFolder === 'highlights' ? 'Replays' : 'Highlights'}`;
+  if (copyBtn) copyBtn.innerHTML = `Copy &rarr; ${_rpFolder === 'highlights' ? 'Moments' : 'Highlights'}`;
 }
 
 // Transition for pushing pool clips live (per-row single To Air + the bulk bar's To Air) — a separate,
@@ -26229,11 +27432,52 @@ function rpPoolClipIds() {
   return lib.filter((cl) => (cl.folder || 'replays') === _rpFolder).map((cl) => cl.id);
 }
 
+// ── Moments / Highlights cards ─────────────────────────────────────────────
+// What a moment is called on its card. Capture gives most clips a generic name ("Manual clip", a
+// file timestamp), which tells a producer nothing; an event type (Goal, Save…) or a title the
+// producer typed is what they scan for.
+var RP_GENERIC_NAME = /^(manual clip|highlight|clip|replay|untitled)$|^(replay\s*)?\d{4}-\d{2}-\d{2}\b/i;
+function rpTimeLabel(ms) {
+  return ms ? new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+}
+function rpMomentTitle(clip) {
+  const name = String(clip.name || '').trim();
+  const type = String(clip.type || '').trim();
+  // A name that is just the event type ("Goal") gets the player added, like an untitled one.
+  if (name && !RP_GENERIC_NAME.test(name) && name.toLowerCase() !== type.toLowerCase()) return name;
+  if (type && !/^(manual|highlight|import)$/i.test(type)) {
+    const t = type.charAt(0).toUpperCase() + type.slice(1).replace(/_/g, ' ');
+    return clip.player ? t + ' · ' + clip.player : t;
+  }
+  return 'Replay ' + rpTimeLabel(clip.createdAt);
+}
+// The match a moment belongs to ("FRT vs EMB · Game 3"), stamped at capture. Older clips have none
+// and group by day instead.
+function rpMomentGroup(clip) {
+  if (clip.match) return clip.match + (clip.gameNumber ? ' · Game ' + clip.gameNumber : '');
+  if (!clip.createdAt) return 'Earlier';
+  const d = new Date(clip.createdAt), today = new Date();
+  if (d.toDateString() === today.toDateString()) return 'Today';
+  return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+}
+// Starred = a Highlights copy made from this moment exists.
+function rpHighlightCopyOf(clipId) {
+  const lib = (currentState.clips && currentState.clips.library) || [];
+  return lib.find((cl) => (cl.folder || 'replays') === 'highlights' && cl.copiedFrom === clipId) || null;
+}
+function rpToggleStar(clip) {
+  if (!clip) return;
+  const copy = rpHighlightCopyOf(clip.id);
+  if (copy) { send('clip_remove', { id: copy.id }); showToast('Removed from Highlights.', '#94a3b8', 1800); }
+  else { send('clip_copy_folder', { id: clip.id, folder: 'highlights' }); showToast('Starred: added to Highlights.', '#22c55e', 1800); }
+}
+
 function renderClipPool(c) {
   const grid = el('rp-clip-pool');
   if (!grid) return;
   const lib = (c && c.library) || [];
   const clips = lib.filter((cl) => (cl.folder || 'replays') === _rpFolder);
+  const isHl = _rpFolder === 'highlights';
   // Drop selections that fell off this shelf (copied away, deleted, or a shelf switch).
   const validIds = new Set(clips.map((cl) => cl.id));
   let selChanged = false;
@@ -26250,44 +27494,63 @@ function renderClipPool(c) {
     selAllBtn.disabled = !clips.length;
     selAllBtn.textContent = (clips.length && clips.every((cl) => _poolSelected.has(cl.id))) ? 'Deselect all' : 'Select all';
   }
+  rpSyncTabCounts(c);
 
-  const sig = JSON.stringify(clips.map((cl) => [cl.id, cl.name, cl.trimIn, cl.trimOut, cl.duration])) + '|' + _rpFolder + '|' + [..._poolSelected].sort().join(',') + '|' + (selectedClipId || '');
+  const starred = new Set(lib.filter((cl) => (cl.folder || 'replays') === 'highlights' && cl.copiedFrom).map((cl) => cl.copiedFrom));
+  const sig = JSON.stringify(clips.map((cl) => [cl.id, cl.name, cl.type, cl.player, cl.match, cl.gameNumber, cl.trimIn, cl.trimOut, cl.duration, starred.has(cl.id)]))
+    + '|' + _rpFolder + '|' + [..._poolSelected].sort().join(',') + '|' + (selectedClipId || '') + '|' + rpQ().join(',');
   if (grid.dataset.sig === sig) { if (selChanged) rpUpdatePoolBulkBar(); return; }
   grid.dataset.sig = sig;
 
-  const otherFolder = _rpFolder === 'highlights' ? 'replays' : 'highlights';
-  const otherLabel = _rpFolder === 'highlights' ? 'Replays' : 'Highlights';
-  // Card markup mirrors renderStagingList()'s .rp-stage-card exactly (thumb/body/actions classes)
-  // so the pool reads as the same kind of list as Staging, not a different widget.
-  grid.innerHTML = clips.length ? clips.map((clip) => {
+  const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  const card = (clip) => {
     const dur = clip.trimOut != null ? clip.trimOut - (clip.trimIn || 0) : (clip.duration || 0);
-    const when = clip.createdAt ? new Date(clip.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
-    const name = (clip.name || 'Clip').replace(/</g, '&lt;');
-    const checked = _poolSelected.has(clip.id) ? ' checked' : '';
-    return `<div class="rp-stage-card rp-pool-item${_poolSelected.has(clip.id) ? ' checked' : ''}${selectedClipId === clip.id ? ' active' : ''}" data-cid="${clip.id}">
-      <span class="rp-sc-grip" title="Drag to reorder this pool" draggable="true"><svg viewBox="0 0 16 16" width="11" height="11" fill="currentColor"><circle cx="5" cy="3" r="1.4"/><circle cx="11" cy="3" r="1.4"/><circle cx="5" cy="8" r="1.4"/><circle cx="11" cy="8" r="1.4"/><circle cx="5" cy="13" r="1.4"/><circle cx="11" cy="13" r="1.4"/></svg></span>
-      <label class="rp-sc-check" title="Select"><input type="checkbox"${checked}></label>
-      <div class="rp-sc-thumb">
-        <svg class="rp-sc-thumb-icon" viewBox="0 0 24 24" width="18" height="18" fill="rgba(255,255,255,0.25)"><path d="M8 5v14l11-7z"/></svg>
+    const qPos = rpQ().indexOf(clip.id);
+    const isStar = starred.has(clip.id);
+    const title = rpMomentTitle(clip);
+    const meta = [clip.gameClock ? String(clip.gameClock) : '', rpTimeLabel(clip.createdAt)].filter(Boolean).join(' · ');
+    return `<div class="rp-pool-item rpx-card${_poolSelected.has(clip.id) ? ' checked' : ''}${selectedClipId === clip.id ? ' active' : ''}${qPos >= 0 ? ' queued' : ''}" data-cid="${clip.id}">
+      <div class="rpx-card-media">
         <img class="rp-sc-thumb-img" alt="" loading="lazy" src="${thumbUrl(clip.path)}">
+        <svg class="rpx-card-ph" viewBox="0 0 24 24" width="22" height="22" fill="rgba(255,255,255,0.25)"><path d="M8 5v14l11-7z"/></svg>
+        ${dur ? `<span class="rpx-card-dur">${fmtTime(dur)}</span>` : ''}
+        ${qPos >= 0 ? `<span class="rpx-card-qbadge" title="Position in Up next">Next #${qPos + 1}</span>` : ''}
+        <label class="rp-sc-check" title="Select"><input type="checkbox"${_poolSelected.has(clip.id) ? ' checked' : ''}></label>
+        ${isHl ? `<span class="rp-sc-grip" title="Drag to change the reel order" draggable="true"><svg viewBox="0 0 16 16" width="11" height="11" fill="currentColor"><circle cx="5" cy="3" r="1.4"/><circle cx="11" cy="3" r="1.4"/><circle cx="5" cy="8" r="1.4"/><circle cx="11" cy="8" r="1.4"/><circle cx="5" cy="13" r="1.4"/><circle cx="11" cy="13" r="1.4"/></svg></span>` : ''}
       </div>
-      <div class="rp-sc-body">
-        <div class="rp-sc-name" title="${(clip.name || 'Clip').replace(/"/g, '&quot;')}">${name}</div>
-        <div class="rp-sc-meta">${dur ? fmtTime(dur) : '—'}${when ? ' · ' + when : ''}</div>
+      <div class="rpx-card-body">
+        <div class="rpx-card-title" title="${esc(title)}">${esc(title)}</div>
+        <div class="rpx-card-meta">${esc(meta)}</div>
       </div>
-      <div class="rp-sc-acts">
-        <button class="rp-vi-act rp-pool-air" data-cid="${clip.id}" title="To Air — play this clip live right now">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-        </button>
-        <button class="rp-vi-act rp-pool-copy" data-cid="${clip.id}" title="Copy to ${otherLabel}">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="12" x2="18" y2="12"/><polyline points="12 6 18 12 12 18"/></svg>
-        </button>
-        <button class="rp-vi-del rp-pool-del" data-cid="${clip.id}" title="Delete clip">
-          <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5M11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1zm1.958 1-.846 10.58a1 1 0 0 1-.997.92h-6.23a1 1 0 0 1-.997-.92L3.042 3.5zm-7.487 1a.5.5 0 0 1 .528.47l.5 8.5a.5.5 0 0 1-.998.06L5 5.03a.5.5 0 0 1 .47-.53zm5.058 0a.5.5 0 0 1 .47.53l-.5 8.5a.5.5 0 1 1-.998-.06l.5-8.5a.5.5 0 0 1 .528-.47M8 4.5a.5.5 0 0 1 .5.5v8.5a.5.5 0 0 1-1 0V5a.5.5 0 0 1 .5-.5"/></svg>
-        </button>
+      <div class="rpx-card-acts">
+        <button class="rpx-act rpx-act-air rp-pool-air" title="Show now: play this on air">&#9654; Air</button>
+        <button class="rpx-act rpx-act-q${qPos >= 0 ? ' is-on' : ''}" title="${qPos >= 0 ? 'Take it out of Up next' : 'Add to Up next'}">${qPos >= 0 ? 'Queued' : '+ Next'}</button>
+        ${isHl ? '' : `<button class="rpx-act rpx-act-star${isStar ? ' is-on' : ''}" title="${isStar ? 'Starred: in Highlights. Click to remove it from Highlights' : 'Star: copy to Highlights'}">&#9733;</button>`}
+        <button class="rpx-act rpx-act-del rp-pool-del" title="${isHl ? 'Remove from Highlights' : 'Delete this moment'}"><svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4zM2.5 3h11V2h-11z"/></svg></button>
       </div>
     </div>`;
-  }).join('') : `<div class="rp-empty" style="padding:16px 12px;">No clips in ${_rpFolder === 'highlights' ? 'Highlights' : 'Replays'} yet — capture one, or load a staging file into the editor and Save edit.</div>`;
+  };
+
+  if (!clips.length) {
+    grid.innerHTML = isHl
+      ? '<div class="rp-empty rpx-empty"><b>No highlights yet</b><span>Star a moment (&#9733;) to copy it here. Highlights play in the order shown; drag to change it.</span></div>'
+      : '<div class="rp-empty rpx-empty"><b>No moments yet</b><span>Press Capture during the game. Every capture lands here, newest first, grouped by match.</span></div>';
+  } else if (isHl) {
+    grid.innerHTML = `<div class="rpx-cards">${clips.map(card).join('')}</div>`;
+  } else {
+    // Moments: grouped by match / game in capture order (newest first).
+    let html = '', cur = null;
+    clips.forEach((clip) => {
+      const g = rpMomentGroup(clip);
+      if (g !== cur) {
+        if (cur !== null) html += '</div>';
+        html += `<div class="rpx-group-head">${esc(g)}</div><div class="rpx-cards">`;
+        cur = g;
+      }
+      html += card(clip);
+    });
+    grid.innerHTML = html + '</div>';
+  }
 
   grid.querySelectorAll('.rp-sc-thumb-img').forEach((img) => {
     img.addEventListener('load', () => img.classList.add('loaded'));
@@ -26295,9 +27558,9 @@ function renderClipPool(c) {
   });
 
   grid.querySelectorAll('.rp-pool-item').forEach((row) => {
+    const clip = clips.find((cl) => cl.id === row.dataset.cid);
     row.addEventListener('click', (e) => {
-      if (e.target.closest('.rp-sc-check') || e.target.closest('.rp-pool-air') || e.target.closest('.rp-pool-copy') || e.target.closest('.rp-pool-del') || e.target.closest('.rp-sc-grip')) return;
-      const clip = clips.find((cl) => cl.id === row.dataset.cid);
+      if (e.target.closest('.rp-sc-check') || e.target.closest('.rpx-act') || e.target.closest('.rp-sc-grip')) return;
       if (clip) loadClipPreview(clip);
     });
     row.querySelector('.rp-sc-check input')?.addEventListener('change', function () {
@@ -26305,33 +27568,195 @@ function renderClipPool(c) {
       row.classList.toggle('checked', this.checked);
       rpUpdatePoolBulkBar();
     });
-    // One-click instant replay: load it (so trims/scene/loop apply) and send straight to Program —
-    // no editor round-trip, no playlist. Uses the pool's own transition picker (not the Playlists
-    // section's #rp-transition, so this never rewrites a saved playlist's transition as a side effect).
+    // One-click instant replay: load it (so trims/scene/loop apply) and send straight to Program.
     row.querySelector('.rp-pool-air')?.addEventListener('click', (e) => {
       e.stopPropagation();
-      const clip = clips.find((cl) => cl.id === row.dataset.cid);
       if (!clip) return;
       loadClipPreview(clip);
       sendToScreen('program', poolTransitionOpts());
     });
-    row.querySelector('.rp-pool-copy')?.addEventListener('click', (e) => {
+    row.querySelector('.rpx-act-q')?.addEventListener('click', (e) => {
       e.stopPropagation();
-      send('clip_copy_folder', { id: row.dataset.cid, folder: otherFolder });
-      showToast('Copied to ' + otherLabel + '.', '#22c55e', 2200);
+      rpQueueToggle(row.dataset.cid);
+    });
+    row.querySelector('.rpx-act-star')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      rpToggleStar(clip);
     });
     row.querySelector('.rp-pool-del')?.addEventListener('click', async (e) => {
       e.stopPropagation();
-      const clip = clips.find((cl) => cl.id === row.dataset.cid);
-      const ok = await customConfirm('Delete Clip', `Delete "${clip ? clip.name : 'this clip'}"? This also removes it from any playlist using it.`, 'Delete');
+      // Taking a starred copy out of Highlights only drops the copy; the moment stays.
+      const ok = isHl && clip && clip.copiedFrom
+        ? true
+        : await customConfirm(isHl ? 'Remove from Highlights' : 'Delete moment', `${isHl ? 'Remove' : 'Delete'} "${clip ? rpMomentTitle(clip) : 'this clip'}"? This also removes it from any playlist using it.`, isHl ? 'Remove' : 'Delete');
       if (!ok) return;
       _poolSelected.delete(row.dataset.cid);
+      rpQueueRemove(row.dataset.cid);
       send('clip_remove', { id: row.dataset.cid });
     });
   });
 
   rpUpdatePoolBulkBar();
 }
+
+// ── Up next: moments lined up for the next stoppage ────────────────────────
+// An ordered list of clip ids, kept on this computer, rolled back to back through the same engine
+// as Play all (poolPlayLive). Rolling empties it, the way a replay operator's queue works.
+// `var` + rpQ(): renderClipPool can run before this part of the file has executed.
+var _rpQueue;
+var _rpQueueSortable = null;
+function rpQ() {
+  if (!Array.isArray(_rpQueue)) {
+    try { _rpQueue = JSON.parse(localStorage.getItem('ne_rp_queue') || '[]').filter((x) => typeof x === 'string'); } catch (e) { _rpQueue = []; }
+  }
+  return _rpQueue;
+}
+function rpQueueSave() { try { localStorage.setItem('ne_rp_queue', JSON.stringify(rpQ())); } catch (e) {} }
+function rpQueueChanged() {
+  rpQueueSave();
+  rpRenderQueue();
+  if (currentState.clips) renderClipPool(currentState.clips);
+  rpSyncPlayerActions();
+}
+function rpQueueToggle(id) {
+  if (!id) return;
+  const q = rpQ(), i = q.indexOf(id);
+  if (i >= 0) q.splice(i, 1); else q.push(id);
+  rpQueueChanged();
+}
+function rpQueueRemove(id) {
+  const q = rpQ(), i = q.indexOf(id);
+  if (i >= 0) { q.splice(i, 1); rpQueueChanged(); }
+}
+function rpQueueClips() {
+  const lib = (currentState.clips && currentState.clips.library) || [];
+  return rpQ().map((id) => lib.find((cl) => cl.id === id)).filter(Boolean);
+}
+function rpRenderQueue() {
+  const list = el('rpx-queue-list'); if (!list) return;
+  const lib = (currentState.clips && currentState.clips.library) || [];
+  // Moments deleted elsewhere fall out of the queue.
+  if (lib.length || currentState.clips) {
+    const have = new Set(lib.map((cl) => cl.id));
+    const q = rpQ(), kept = q.filter((id) => have.has(id));
+    if (kept.length !== q.length) { _rpQueue = kept; rpQueueSave(); }
+  }
+  const clips = rpQueueClips();
+  const total = clips.reduce((t, cl) => t + (cl.trimOut != null ? cl.trimOut - (cl.trimIn || 0) : (cl.duration || 0)), 0);
+  const cnt = el('rpx-queue-count');
+  if (cnt) cnt.textContent = clips.length ? `${clips.length} moment${clips.length === 1 ? '' : 's'}${total ? ' · ' + fmtTime(total) : ''}` : '';
+  const roll = el('rpx-queue-roll');
+  if (roll) { roll.disabled = !clips.length; roll.innerHTML = clips.length ? `&#9654; Roll ${clips.length}` : '&#9654; Roll'; }
+  const clr = el('rpx-queue-clear'); if (clr) clr.disabled = !clips.length;
+  const box = el('rpx-queue'); if (box) box.classList.toggle('is-empty', !clips.length);
+
+  const sig = clips.map((cl) => cl.id + ':' + cl.name + ':' + cl.trimIn + ':' + cl.trimOut).join('|') + '|' + (selectedClipId || '');
+  if (list.dataset.sig === sig) return;
+  list.dataset.sig = sig;
+  const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  list.innerHTML = clips.length ? clips.map((cl, i) => {
+    const dur = cl.trimOut != null ? cl.trimOut - (cl.trimIn || 0) : (cl.duration || 0);
+    const title = rpMomentTitle(cl);
+    return `<div class="rpx-qitem${selectedClipId === cl.id ? ' active' : ''}" data-cid="${cl.id}" title="${esc(title)}">
+      <span class="rpx-qnum">${i + 1}</span>
+      <div class="rpx-qthumb"><img alt="" loading="lazy" src="${thumbUrl(cl.path)}"></div>
+      <div class="rpx-qtext"><b>${esc(title)}</b><span>${dur ? fmtTime(dur) : ''}</span></div>
+      <button class="rpx-qx" title="Take out of Up next">&times;</button>
+    </div>`;
+  }).join('') : '<div class="rpx-queue-hint">Press <b>+ Next</b> on a moment to line it up for the next stoppage, then <b>Roll</b> plays them back to back.</div>';
+  list.querySelectorAll('.rpx-qthumb img').forEach((img) => img.addEventListener('error', () => img.remove()));
+  list.querySelectorAll('.rpx-qitem').forEach((it) => {
+    it.addEventListener('click', (e) => {
+      if (e.target.closest('.rpx-qx')) { rpQueueRemove(it.dataset.cid); return; }
+      const cl = clips.find((x) => x.id === it.dataset.cid);
+      if (cl) loadClipPreview(cl);
+    });
+  });
+  if (_rpQueueSortable) { try { _rpQueueSortable.destroy(); } catch (e) {} _rpQueueSortable = null; }
+  if (clips.length > 1 && typeof Sortable !== 'undefined') {
+    _rpQueueSortable = Sortable.create(list, {
+      animation: 150, draggable: '.rpx-qitem', direction: 'horizontal',
+      onEnd: () => {
+        _rpQueue = [...list.querySelectorAll('.rpx-qitem')].map((n) => n.dataset.cid);
+        list.dataset.sig = '';
+        rpQueueChanged();
+      }
+    });
+  }
+}
+el('rpx-queue-roll')?.addEventListener('click', () => {
+  const ids = rpQueueClips().map((cl) => cl.id);
+  if (!ids.length) return;
+  poolPlayLive(ids);
+  showToast(`Rolling ${ids.length} moment${ids.length === 1 ? '' : 's'}.`, '#22c55e', 2200);
+  _rpQueue = [];
+  rpQueueChanged();
+});
+el('rpx-queue-clear')?.addEventListener('click', () => { _rpQueue = []; rpQueueChanged(); });
+el('rp-pool-bulk-queue')?.addEventListener('click', () => {
+  const q = rpQ();
+  let added = 0;
+  [..._poolSelected].forEach((id) => { if (!q.includes(id)) { q.push(id); added++; } });
+  if (added) showToast(`${added} added to Up next.`, '#22c55e', 1800);
+  rpQueueChanged();
+});
+
+// ── Player: Up next / Highlight buttons for the loaded moment, and the empty state ──
+function rpLoadedLibraryClip() {
+  if (!selectedClipId) return null;
+  const lib = (currentState.clips && currentState.clips.library) || [];
+  return lib.find((cl) => cl.id === selectedClipId) || null;
+}
+function rpSyncPlayerActions() {
+  const clip = rpLoadedLibraryClip();
+  const qb = el('rpx-queue-add');
+  if (qb) {
+    const inQ = !!clip && rpQ().includes(clip.id);
+    qb.disabled = !clip;
+    qb.textContent = inQ ? 'Queued' : '+ Up next';
+    qb.classList.toggle('is-on', inQ);
+    qb.title = !clip ? 'Only moments can be queued (this file is not imported)' : inQ ? 'Take it out of Up next' : 'Add this moment to Up next';
+  }
+  const sb = el('rpx-star-cur');
+  if (sb) {
+    const hl = !!clip && (clip.folder || 'replays') === 'highlights';
+    const on = !!clip && !hl && !!rpHighlightCopyOf(clip.id);
+    sb.disabled = !clip || hl;
+    sb.innerHTML = hl ? '&#9733; In Highlights' : on ? '&#9733; Starred' : '&#9733; Highlight';
+    sb.classList.toggle('is-on', on || hl);
+  }
+  const v = el('clip-preview-video'), empty = el('rpx-player-empty');
+  if (empty) empty.style.display = (v && v.currentSrc) ? 'none' : '';
+}
+el('rpx-queue-add')?.addEventListener('click', () => { const c = rpLoadedLibraryClip(); if (c) rpQueueToggle(c.id); });
+el('rpx-star-cur')?.addEventListener('click', () => { rpToggleStar(rpLoadedLibraryClip()); setTimeout(rpSyncPlayerActions, 400); });
+el('clip-preview-video')?.addEventListener('loadedmetadata', rpSyncPlayerActions);
+el('clip-preview-video')?.addEventListener('emptied', rpSyncPlayerActions);
+
+// Tab counts: Moments / Highlights / Playlists.
+function rpSyncTabCounts(c) {
+  const lib = (c && c.library) || [];
+  const n = (f) => lib.filter((cl) => (cl.folder || 'replays') === f).length;
+  const set = (id, v) => { const e = el(id); if (e) e.textContent = v ? String(v) : ''; };
+  set('rpx-count-replays', n('replays'));
+  set('rpx-count-highlights', n('highlights'));
+  set('rpx-count-playlists', ((c && c.montages) || []).length);
+}
+
+// Deck: what's on air.
+function rpSyncOnAir(onAir) {
+  const tag = el('rpx-onair-tag'), box = el('rpx-onair');
+  if (tag) tag.textContent = onAir ? 'On air' : 'Off air';
+  if (box) box.classList.toggle('is-live', !!onAir);
+}
+
+// The page keeps these in step with clips_update / full_state through applyClipsState; the
+// interval covers what changes outside it (a playlist ending, the loaded clip).
+setInterval(() => {
+  if (!document.querySelector('#tab-replays-content.active')) return;
+  rpRenderQueue();
+  rpSyncPlayerActions();
+}, 1000);
 
 // Drag the pool into show order (grip handle only, so a card click still loads the clip). Persisted
 // server-side via clip_reorder — the same order the pool's Play all and Make Playlist then use.
@@ -26381,7 +27806,7 @@ el('rp-pool-bulk-copy')?.addEventListener('click', () => {
   const other = _rpFolder === 'highlights' ? 'replays' : 'highlights';
   const n = _poolSelected.size;
   _poolSelected.forEach((id) => send('clip_copy_folder', { id, folder: other }));
-  showToast(`Copied ${n} clip${n === 1 ? '' : 's'} to ${other === 'highlights' ? 'Highlights' : 'Replays'}.`, '#22c55e', 2200);
+  showToast(`Copied ${n} clip${n === 1 ? '' : 's'} to ${other === 'highlights' ? 'Highlights' : 'Moments'}.`, '#22c55e', 2200);
 });
 // ── Go-live hold: buffer the first clip BEFORE cutting to the replay scene ─────────────────────
 // The scene cut used to fire first and the clip started loading after it, so the OBS transition
@@ -26425,7 +27850,7 @@ async function poolPlayLive(ids) {
   _plLiveItems = (ids || []).map((id) => lib.find((cl) => cl.id === id)).filter(Boolean).map(clipToLiveItem);
   if (!_plLiveItems.length) return;
   const programScene = (el('rp-program-scene')?.value || '').trim();
-  if (!programScene) showToast('No OBS scene selected — pick a scene in the Replays page\'s On-Air row so OBS switches to the replay-player source.', '#fbbf24', 5000);
+  if (!programScene) showToast('No OBS scene selected — set "Plays in" at the top of the Replays page so OBS switches to the replay-player source.', '#fbbf24', 5000);
   _plLoop = !!el('rp-loop')?.checked;
   _plReturnScene = '';
   _plScene = programScene;
@@ -26498,7 +27923,7 @@ el('rp-clear-pool')?.addEventListener('click', async () => {
   const lib = (currentState.clips && currentState.clips.library) || [];
   const count = lib.filter((cl) => (cl.folder || 'replays') === _rpFolder).length;
   if (!count) return;
-  const label = _rpFolder === 'highlights' ? 'Highlights' : 'Replays';
+  const label = _rpFolder === 'highlights' ? 'Highlights' : 'Moments';
   const ok = await customConfirm('Clear Pool', `Remove all ${count} clip${count === 1 ? '' : 's'} from ${label}? This also removes them from any playlist using them.`, 'Clear');
   if (!ok) return;
   _poolSelected.clear();
@@ -27017,24 +28442,50 @@ function hkCombo(e) {
   parts.push(k);
   return parts.join('+');
 }
+// Hotkey rows grouped by what they drive; the group name replaces the "Trigger:" style prefix.
+const HK_GROUPS = [
+  ['Graphics', /^(trigger|overlay|countdown):|^hide all overlays/i],
+  ['Replays and clips', /^(replay):|^save replay|^play playlist|^twitch clip/i],
+  ['Show', /./],
+];
 function renderHotkeys() {
   const list = el('hk-list'); if (!list) return;
   const en = el('hk-enabled'); if (en) en.checked = _hkEnabled;
   list.innerHTML = '';
-  HK_ACTIONS.forEach((a) => {
-    const row = document.createElement('div');
-    row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:6px 10px;border:1px solid var(--border);border-radius:7px;background:var(--surface2);';
-    const lbl = document.createElement('span'); lbl.style.cssText = 'flex:1;font-size:12.5px;'; lbl.textContent = a.label;
-    const key = document.createElement('button'); key.className = 'btn btn-ghost btn-sm';
-    key.style.cssText = 'min-width:128px;font-family:ui-monospace,monospace;font-size:11px;';
-    const cur = _hkMap[a.id];
-    key.textContent = (_hkCapturing === a.id) ? 'Press a key… (Esc)' : (cur || 'Set key');
-    if (_hkCapturing === a.id) key.style.borderColor = 'var(--cp-accent)';
-    key.addEventListener('click', () => { _hkCapturing = (_hkCapturing === a.id) ? null : a.id; renderHotkeys(); });
-    const clr = document.createElement('button'); clr.className = 'btn btn-ghost btn-sm'; clr.textContent = '✕'; clr.title = 'Clear'; clr.style.color = '#f56565'; clr.disabled = !cur;
-    clr.addEventListener('click', () => { delete _hkMap[a.id]; hkSaveMap(); renderHotkeys(); });
-    row.appendChild(lbl); row.appendChild(key); row.appendChild(clr);
-    list.appendChild(row);
+  list.classList.add('hk-list');
+  const set = HK_ACTIONS.filter((a) => _hkMap[a.id]).length;
+  const sum = document.createElement('div'); sum.className = 'hk-summary';
+  sum.textContent = set ? `${set} of ${HK_ACTIONS.length} actions have a key.` : 'No keys set yet. Click Set key, then press the key you want.';
+  list.appendChild(sum);
+  const groups = HK_GROUPS.map(([name]) => ({ name, rows: [] }));
+  HK_ACTIONS.forEach((a) => { const i = HK_GROUPS.findIndex(([, re]) => re.test(a.label)); groups[i].rows.push(a); });
+  groups.forEach((g) => {
+    if (!g.rows.length) return;
+    const head = document.createElement('div'); head.className = 'hk-group'; head.textContent = g.name;
+    list.appendChild(head);
+    g.rows.forEach((a) => {
+      const cur = _hkMap[a.id];
+      const capturing = _hkCapturing === a.id;
+      const row = document.createElement('div'); row.className = 'hk-row' + (cur ? ' is-set' : '') + (capturing ? ' is-capturing' : '');
+      const lbl = document.createElement('span'); lbl.className = 'hk-label';
+      lbl.textContent = a.label.replace(/^(trigger|overlay|replay|countdown):\s*/i, (m, p) => (/countdown/i.test(p) ? 'Countdown ' : ''));
+      const key = document.createElement('button'); key.type = 'button'; key.className = 'hk-key';
+      if (capturing) key.textContent = 'Press a key… (Esc to cancel)';
+      else if (cur) cur.split('+').forEach((part, i) => {
+        if (i) key.appendChild(document.createTextNode('+'));
+        const k = document.createElement('kbd'); k.textContent = part; key.appendChild(k);
+      });
+      else key.textContent = 'Set key';
+      key.title = cur ? 'Click to change the key' : 'Click, then press the key for this action';
+      key.addEventListener('click', () => { _hkCapturing = capturing ? null : a.id; renderHotkeys(); });
+      row.appendChild(lbl); row.appendChild(key);
+      if (cur) {
+        const clr = document.createElement('button'); clr.type = 'button'; clr.className = 'hk-clear'; clr.textContent = '✕'; clr.title = 'Remove this key';
+        clr.addEventListener('click', () => { delete _hkMap[a.id]; hkSaveMap(); renderHotkeys(); });
+        row.appendChild(clr);
+      }
+      list.appendChild(row);
+    });
   });
 }
 el('hk-enabled')?.addEventListener('change', function () { _hkEnabled = this.checked; try { localStorage.setItem(HK_ON_KEY, _hkEnabled ? '1' : '0'); } catch {} });
@@ -27724,7 +29175,7 @@ const RD_GFX_LABEL = { break: 'Break', winner: 'Winner', intro: 'Line-up', match
 function rdRenderDriver() {
   const driver = el('rd-driver'); if (!driver) return;
   const nowEl = el('rd-now'), gfxEl = el('rd-now-gfx');
-  if (nowEl) { const obs = (currentState && currentState.obs) || {}; nowEl.textContent = (obs.connected && obs.currentScene) ? obs.currentScene : '—'; }
+  if (nowEl) { const obs = (currentState && currentState.obs) || {}; nowEl.textContent = !obs.connected ? 'OBS not connected' : (obs.currentScene || 'No scene'); }
   if (gfxEl) {
     const g = (currentState && typeof currentState.gfxActive === 'string') ? currentState.gfxActive : '';
     const nice = g ? (RD_GFX_LABEL[g] || g) : '';
@@ -28712,7 +30163,10 @@ function renderFlows() {
   const list = el('flow-list'); if (!list) return;
   if (list.contains(document.activeElement)) return;
   if (!_flows.length) {
-    list.innerHTML = '<div style="padding:20px 14px;text-align:center;font-size:12px;color:var(--muted);line-height:1.6;">No flows yet.<br>Click <strong>+ New Flow</strong> to build your first automation.</div>';
+    list.innerHTML = '<div class="empty-state"><b>No automations yet</b>'
+      + '<span>An automation runs a set of actions when something happens in the show (a goal, a scene cut, a timer), or when you press it.</span>'
+      + '<div class="empty-state-acts"><button type="button" class="btn btn-primary btn-sm" data-empty-click="flow-new">+ New automation</button>'
+      + '<button type="button" class="btn btn-ghost btn-sm" data-empty-click="flow-templates">Start from a template</button></div></div>';
     return;
   }
   const fireLog = (currentState && currentState.flowFireLog) || {};
@@ -29303,6 +30757,8 @@ function _showTemplatesPicker() {
       <div id="tpl-list">${rows}</div>
     </div>`;
   document.body.appendChild(m);
+  const onKey = (e) => { if (e.key === 'Escape' && m.isConnected) { e.stopPropagation(); m.remove(); } if (!m.isConnected) document.removeEventListener('keydown', onKey, true); };
+  document.addEventListener('keydown', onKey, true);
   m.querySelector('#tpl-close').addEventListener('click', () => m.remove());
   m.addEventListener('click', e => { if (e.target === m) m.remove(); });
   m.querySelectorAll('.tpl-row').forEach(row => {
@@ -29902,7 +31358,7 @@ function qtalentRow(r) {
     bar += `<button class="cf-ico-btn qt-monitor" title="Monitor — open their cam &amp; audio">${svgIcon('headphones')}</button>`;
   }
   // Mic = mute/unmute their mic (their audio into the room).
-  bar += `<button class="cf-ico-btn qt-mic${isMuted ? ' is-on' : ''}" title="${isMuted ? 'Unmute mic' : 'Mute mic'}"${r.audioRef ? '' : ' disabled'}>${svgIcon('mic')}</button>`
+  bar += `<button class="cf-ico-btn qt-mic${isMuted ? ' is-on' : ''}" title="${isMuted ? 'Unmute in the program (their OBS feed)' : 'Mute in the program (their OBS feed; their mic stays on in the room)'}"${r.audioRef ? '' : ' disabled'}>${svgIcon('mic')}</button>`
     + `<span class="qt-expand-ico" title="In-depth VDO settings">${svgIcon('chevdown')}</span></div>`;
   row.innerHTML = bar + `<div class="qt-detail" hidden></div>`;
   return row;
@@ -29965,7 +31421,7 @@ function qtalentToggleMute(row) {
   if (r.audioRef.kind === 'player') send('set_player_audio', { side: r.audioRef.side, playerId: r.audioRef.playerId, audio });
   else if (r.audioRef.kind === 'lib' && r.audioRef.id) send('set_library_audio', { id: r.audioRef.id, audio });
   r.audio = a;
-  const mic = row.querySelector('.qt-mic'); if (mic) { mic.classList.toggle('is-on', becomingMuted); mic.title = becomingMuted ? 'Unmute mic' : 'Mute mic'; }
+  const mic = row.querySelector('.qt-mic'); if (mic) { mic.classList.toggle('is-on', becomingMuted); mic.title = becomingMuted ? 'Unmute in the program (their OBS feed)' : 'Mute in the program (their OBS feed; their mic stays on in the room)'; }
   const exV = row.querySelector('.qt-vol'); if (exV) exV.value = a.volume;
   const exMute = row.querySelector('.qt-mute'); if (exMute) exMute.classList.toggle('is-on', becomingMuted);
   const exVv = row.querySelector('.qt-vol-v'); if (exVv) exVv.textContent = a.volume;
@@ -30016,10 +31472,13 @@ function cfMaybeRefreshTalent(data) {
 // Opening the rail's Talent tab auto-pulls links and starts (media-free) monitoring so the
 // connection / camera statuses populate without the producer clicking Start or Refresh.
 function cfTalentAutoOpen() {
-  fetch(`${VDO_API}/api/vdo/links`).then((r) => r.json()).then((d) => {
+  // peek=1: a refresh must never provision rooms or API keys as a side effect; only the producer's
+  // own actions (Talent Rooms tab, Generate, Link existing) create anything.
+  fetch(`${VDO_API}/api/vdo/links?peek=1`).then((r) => r.json()).then((d) => {
     _cfDirectorData = d;
-    if (!_directorOn && typeof cfStartDirectorConsoles === 'function') cfStartDirectorConsoles();
-    else if (typeof cfPollGuests === 'function') cfPollGuests();
+    // The producer's Stop is final until they press Start again (window._directorUserStopped).
+    if (!_directorOn && !window._directorUserStopped && typeof cfStartDirectorConsoles === 'function') cfStartDirectorConsoles();
+    else if (_directorOn && typeof cfPollGuests === 'function') cfPollGuests();
     renderQtalent();
   }).catch(() => { renderQtalent(); });
 }
@@ -30028,7 +31487,7 @@ function renderTalentList(list) {
   if (!list) return;
   const li = currentState.listenIn || {};
   const pillHtml = (li.active && li.name) ? `<a href="#" class="js-qtalent-clear" style="color:#4ade80;text-decoration:none;font-weight:600;">● ${poEsc(li.name)} — stop</a>` : '';
-  ['qtalent-listen', 'dash-talent-listen'].forEach((id) => { const lp = el(id); if (lp) lp.innerHTML = pillHtml; });
+  ['qtalent-listen', 'dash-talent-listen', 'dcc-talent-listen'].forEach((id) => { const lp = el(id); if (lp) lp.innerHTML = pillHtml; });
   const d = _cfDirectorData || {};
   if (!d.teams && !d.groups) cfEnsureTalentData();
 
@@ -30055,11 +31514,33 @@ function renderTalentList(list) {
   });
   // Talent groups: Hosts (casters) · Guests · Observers — always rendered (even empty) so they're
   // drop targets for re-grouping.
-  [['casters', 'HOSTS', '#e83a8b'], ['observers', 'OBSERVERS', '#2dd4bf'], ['guests', 'LOBBY', '#a855f7']].forEach(([key, label, color]) => {
+  // Talent: ON THE DESK is tonight only (desk slots, Host, Observer, station check-ins), not the
+  // whole caster library: that listed every crew member ever saved (producers and socials too) as
+  // 22 offline "hosts". A desk person's stream id comes from casters.list (what the castercam and a
+  // website station actually use), so their connection dot can light. The full library stays on
+  // the Talent page.
+  const cst = currentState.casters || {};
+  const onDesk = Array.isArray(cst.list) ? cst.list : [];
+  const roles = cst.showRoles || {};
+  const lineupIds = new Set((cst.lineup || []).map((l) => String(l.libraryId)));
+  const nameKey = (n) => String(n || '').trim().toLowerCase();
+  const deskNames = new Set(onDesk.map((c) => nameKey(c.name)).concat([nameKey(roles.host), nameKey(roles.observer)]).filter(Boolean));
+  const deskByName = {}; onDesk.forEach((c) => { deskByName[nameKey(c.name)] = c; });
+  [['casters', 'ON THE DESK', '#e83a8b'], ['observers', 'OBSERVERS', '#2dd4bf'], ['guests', 'LOBBY', '#a855f7']].forEach(([key, label, color]) => {
     const g = (d.groups && d.groups[key]) || {};
-    const members = (typeof cfGroupMembersFor === 'function') ? cfGroupMembersFor(key, g) : [];
-    sections.push({ label, color, roomId: g.room || '', groupKey: key, rows: members.map((m) => ({
-      name: m.name || m.handle, sid: m.streamId, join: m.joinUrl, obs: m.obsUrl, listen: null,
+    let members = (typeof cfGroupMembersFor === 'function') ? cfGroupMembersFor(key, g) : [];
+    if (key === 'casters') {
+      members = members.filter((m) => lineupIds.has(String(m.libraryId)) || deskNames.has(nameKey(m.name)));
+      // Desk people who have no library entry (a name typed as Host, a station check-in).
+      const have = new Set(members.map((m) => nameKey(m.name)));
+      onDesk.concat([roles.host, roles.observer].filter(Boolean).map((n) => ({ name: n })))
+        .filter((c) => c && c.name && !have.has(nameKey(c.name)))
+        .forEach((c) => { have.add(nameKey(c.name)); members.push({ name: c.name, streamId: c.streamId || '', joinUrl: '', obsUrl: c.camUrl || '' }); });
+      // Desk people read by their gamertag, the same name the desk lineup and the overlay show.
+      members = members.map((m) => { const c = deskByName[nameKey(m.name)]; if (!c) return m; return Object.assign({}, m, c.streamId ? { streamId: c.streamId, obsUrl: c.camUrl || m.obsUrl } : {}, c.gamertag ? { displayName: c.gamertag } : {}); });
+    }
+    sections.push({ label, color, roomId: g.room || '', groupKey: key, emptyHint: key === 'casters' ? 'Nobody on the desk yet. Pick tonight’s casters on Talent › Desk lineup.' : '', rows: members.map((m) => ({
+      name: m.displayName || m.name || m.handle, sid: m.streamId, join: m.joinUrl, obs: m.obsUrl, listen: null,
       audio: m.audio || null, audioRef: m.libraryId ? { kind: 'lib', id: m.libraryId } : null, homeRoom: g.room || '', side: ''
     })) });
   });
@@ -30113,6 +31594,10 @@ function renderTalentList(list) {
     const inviteBtn = inviteUrl ? `<button class="cf-ico-btn qt-hdr-invite" data-url="${poEsc(inviteUrl)}" title="Copy VDO room invite link">${svgIcon('link')}</button>` : '';
     hdr.innerHTML = `<span class="qt-hdr-bar"></span><span class="qt-hdr-lbl">${poEsc(s.label)}</span><span class="qt-hdr-count">${cnt}</span>${listenBtn}${intvBtn}${inviteBtn}<span class="qt-hdr-drop">drop to move</span>`;
     list.appendChild(hdr);
+    if (!s.rows.length && s.emptyHint) {
+      const e = document.createElement('div'); e.className = 'qtalent-empty'; e.textContent = s.emptyHint;
+      list.appendChild(e);
+    }
     s.rows.forEach((r) => {
       const row = qtalentRow(r); row.style.setProperty('--qc', s.color); list.appendChild(row);
       if (r.sid && wasExpanded.has(r.sid)) { row.dataset.expanded = '1'; qtalentBuildDetail(row); const det = row.querySelector('.qt-detail'); if (det) det.hidden = false; }
@@ -30155,7 +31640,12 @@ el('qros-start')?.addEventListener('click', () => { rdStart(); renderQros(); });
 el('qros-next')?.addEventListener('click', () => { rdNext(); renderQros(); });
 el('qros-stop')?.addEventListener('click', () => { rdStop(); renderQros(); });
 el('qros-cancel')?.addEventListener('click', rdCancelHold);
-document.querySelectorAll('.js-goto-ros, .js-goto-flows').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); document.querySelector('.tab-btn[data-tab="produccion"]')?.click(); }));
+document.querySelectorAll('.js-goto-ros').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); document.querySelector('.tab-btn[data-tab="produccion"]')?.click(); }));
+document.querySelectorAll('.js-goto-flows').forEach((a) => a.addEventListener('click', (e) => {
+  e.preventDefault();
+  document.querySelector('.tab-btn[data-tab="produccion"]')?.click();
+  if (typeof window._pdShow === 'function') window._pdShow('flows');
+}));
 // Rail "Edit" / "Build a rundown" -> Production ▸ Rundown. Delegated: the Build button is re-rendered.
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.js-goto-rundown')) return;
@@ -30231,8 +31721,8 @@ function _renderQsggActivity() {
   ).join('');
 }
 
-function _qsggFlagMatch(item) {
-  const note = prompt('Flag note for this match (e.g. "Score dispute", "Team not here"):\n' + (item.teamA||'TBD') + ' vs ' + (item.teamB||'TBD'));
+async function _qsggFlagMatch(item) {
+  const note = await customPrompt('Flag this match', (item.teamA||'TBD') + ' vs ' + (item.teamB||'TBD') + '\nWhat is wrong? For example: score dispute, team not here.', '', 'Flag');
   if (!note || !note.trim()) return;
   const txt = (item.teamA||'TBD') + ' vs ' + (item.teamB||'TBD') + ': ' + note.trim();
   if (typeof addNotification === 'function') addNotification(txt, '#f59e0b', { title: 'Producer Flag', level: 'warning' });
@@ -30718,6 +32208,7 @@ function applyReplayMonitors(replay) {
   // Show the on-air Stop button whenever something is live (covers a looping single clip, which
   // otherwise had no visible way to stop).
   const sb = el('rp-stop-program'); if (sb) sb.style.display = onAir ? '' : 'none';
+  rpSyncOnAir(onAir);
 }
 function setReplayMonitor(vidId, cellId, bus) {
   const v = el(vidId); const cell = el(cellId); if (!v || !cell) return;
@@ -30821,7 +32312,7 @@ function applyClipsState(c) {
         <div class="montage-card-name" title="${(m.name || 'Montage').replace(/"/g, '&quot;').replace(/</g, '&lt;')}">${(m.name || 'Montage').replace(/</g, '&lt;')}</div>
         <div class="montage-card-meta">${n} clip${n === 1 ? '' : 's'} &middot; encoded</div>
         <div class="montage-card-actions">
-          <button class="btn btn-secondary btn-sm btn-montage-prev" data-mid="${m.id}" title="Watch this export in Trim (off air)">Preview</button>
+          <button class="btn btn-secondary btn-sm btn-montage-prev" data-mid="${m.id}" title="Watch this export in the player (off air)">Preview</button>
           <button class="btn btn-danger btn-sm btn-montage-screen" data-mid="${m.id}" title="Play this export on Program">To air</button>
           <button class="btn btn-secondary btn-sm btn-montage-save" data-mid="${m.id}" title="Save encoded file to disk">Save As&hellip;</button>
           <button class="rp-vi-del btn-montage-delx" data-mid="${m.id}" title="Delete this encoded file (the playlist stays)">&times;</button>
@@ -30857,6 +32348,8 @@ function applyClipsState(c) {
   }
 
   renderClipPool(c);
+  rpRenderQueue();
+  rpSyncPlayerActions();
   renderPlaylistPane(c);
   // Keep social clip-prep dropdowns in sync when the library updates
   if (el('soc-panel-clipprep') && el('soc-panel-clipprep').style.display !== 'none') {
@@ -31345,7 +32838,7 @@ function rpRenderPlayoutReady() {
   wrap.style.display = '';
   const hit = _rpPlayerScenes.find((s) => s.scene === scene);
   if (!obs.connected) {
-    msg = 'OBS not connected — clips can\'t reach the stream. Settings → OBS.';
+    msg = 'OBS is not connected, so clips cannot reach the stream. Connect it from the bar at the bottom.';
   } else if (!scene) {
     msg = _rpPlayerScenes.length
       ? `Pick a scene above — ${_rpPlayerScenes.map((s) => '"' + s.scene + '"').join(', ')} ${_rpPlayerScenes.length === 1 ? 'has' : 'have'} the replay player.`
@@ -31513,7 +33006,7 @@ function rpSyncCaptureUi(data) {
   if (tb) {
     tb.textContent = obs.replayBufferActive ? 'Stop Buffer' : 'Start Buffer';
     tb.disabled = !obs.connected;
-    tb.title = !obs.connected ? 'Connect to OBS in Settings ▸ OBS first'
+    tb.title = !obs.connected ? 'Connect OBS under Apps > Streaming software first'
       : rbOffInObs(obs) ? RB_OFF_HINT
       : (obs.replayBufferActive ? 'Stop the OBS replay buffer' : 'Start the OBS replay buffer (Capture also starts it automatically)');
   }
@@ -31547,7 +33040,7 @@ function renderQrailBufferStatus(data) {
     toggleBtn.textContent = obs.replayBufferActive ? 'Stop Buffer' : 'Start Buffer';
     toggleBtn.disabled = !obs.connected;
     toggleBtn.style.opacity = obs.connected ? '1' : '0.45';
-    toggleBtn.title = !obs.connected ? 'Connect to OBS in Settings → OBS first'
+    toggleBtn.title = !obs.connected ? 'Connect OBS under Apps > Streaming software first'
       : rbOffInObs(obs) ? RB_OFF_HINT
       : (obs.replayBufferActive ? 'Stop the OBS replay buffer' : 'Start the OBS replay buffer — required before Save Replay can capture anything');
   }
@@ -31728,7 +33221,7 @@ async function qrTwLoad() {
       list.appendChild(row);
     });
   } catch (e) {
-    list.innerHTML = '<div class="field-hint" style="margin:0;">' + esc(e.message) + ' — connect Twitch in Integrations.</div>';
+    list.innerHTML = '<div class="field-hint" style="margin:0;">' + esc(e.message) + '. Connect Twitch under Apps > Twitch.</div>';
   }
 }
 let _qrPlSig = '';
@@ -32907,20 +34400,6 @@ el('btn-clip-capture')?.addEventListener('click', () => {
     reason: 'Producer manual capture'
   });
 });
-el('btn-montage-create')?.addEventListener('click', () => {
-  const ids = [...selectedClipIds];
-  if (!ids.length) {
-    const status = el('clips-status');
-    if (status) { status.textContent = 'Select at least one clip first.'; status.style.color = '#f56565'; }
-    return;
-  }
-  const tpl = el('select-montage-template')?.value || 'highlights';
-  const tplNames = { highlights: 'Highlights', brb: 'BRB Reel', postgame: 'Post-Game' };
-  const name = (tplNames[tpl] || 'Reel') + ' ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  send('montage_create', { name, clipIds: ids, template: tpl, folder: _rpFolder });
-  selectedClipIds.clear();
-});
-
 // ── Notification center (bell) ─────────────────────────────────────────────
 // Central in-app notification store. Toasts and Twitch activity feed into the bell so
 // the producer has one persistent history with unread tracking, next to the profile icon.
@@ -33164,7 +34643,13 @@ async function connect() {
       _r('renderUpNext',       () => renderUpNext(msg.data));
       _r('renderPlayerCams',   () => renderPlayerCams(msg.data));
       _r('renderStreamQueue',  () => renderStreamQueue(msg.data));
+      _r('siteEvents',         () => { if (window.__siteEvents) window.__siteEvents.render(currentState); });
+      // Settings > Software Updates: the version is in every state; do not wait for an update event to show it.
+      _r('updVersion',         () => { const c = el('upd-current'); if (c && currentState && currentState.version && c.textContent === '—') c.textContent = 'v' + currentState.version; });
       _r('renderStreamArchive', () => { if (el('sgg-tab-archive')?.classList.contains('is-on')) renderStreamArchive(msg.data); });
+      _r('dockControls',         () => { if (typeof window._dockControlsRender === 'function') window._dockControlsRender(); });
+      _r('dockShow',             () => { if (typeof window._dockShowRender === 'function') window._dockShowRender(); });
+      _r('gfxFormSync',          () => { if (typeof window._gfxFormSync === 'function') window._gfxFormSync(); });
       _r('renderCfStations',   () => renderCfStations());
       _r('renderQrailBufferStatus', () => { if (typeof renderQrailBufferStatus === 'function') renderQrailBufferStatus(msg.data); });
       _r('applyDirectorState', () => applyDirectorState(msg.data.director));
@@ -33469,6 +34954,11 @@ async function connect() {
       showToast('Converting this clip for air — first push only…', '#fbbf24', 9000);
       // If a go-live is holding for this clip, wait for the conversion rather than cutting to black.
       if (typeof rpOnArmPreparing === 'function') rpOnArmPreparing();
+    } else if (msg.type === 'brand-result') {
+      if (msg.data && msg.data.message) showToast(msg.data.message, msg.data.ok ? '#22c55e' : '#f56565', msg.data.ok ? 3000 : 7000);
+    } else if (msg.type === 'obs-virtualcam') {
+      // Say WHY the live OBS preview has no feed instead of the generic "no virtual camera" path.
+      if (msg.data && msg.data.ok === false) { const m = el('pv-obs-msg'); if (m) { m.textContent = 'OBS preview unavailable: ' + (msg.data.reason || 'virtual camera unavailable'); m.style.display = ''; } }
     } else if (msg.type === 'obs-result') {
       const color = msg.data.ok ? '#9ae6b4' : '#f56565';
       // Replay-buffer replies used to land only in Settings ▸ OBS, so a refused Start looked like
@@ -33526,7 +35016,7 @@ async function connect() {
       // Server halted EventSub/chat/stream-poll because the OAuth token expired
       // (implicit grant = no refresh). Without this toast the producer is silently
       // logged out mid-show and only notices when alerts/stats stop.
-      showToast('Twitch session expired — reconnect in Integrations → Twitch to resume alerts, chat and stream stats.', '#c53030', 12000);
+      showToast('Twitch session expired — reconnect it under Apps > Twitch to resume alerts, chat and stream stats.', '#c53030', 12000);
       const tw = el('twitch-test-result');
       if (tw) { tw.textContent = 'Token expired — sign in with Twitch again to reconnect.'; tw.style.color = '#f56565'; }
     } else if (msg.type === 'rl-scene-result') {
@@ -33550,6 +35040,19 @@ async function connect() {
         if (line) { s.textContent = line; s.style.color = 'var(--muted)'; s.dataset.bkProgress = '1'; }
         else if (s.dataset.bkProgress) { delete s.dataset.bkProgress; }   // leave the final result in place
       });
+    } else if (msg.type === 'custom-overlay' || msg.type === 'custom-overlay-saved') {
+      if (window.__ovb) window.__ovb.onMsg(msg.type, msg.data || {});
+    } else if (msg.type === 'desk-cam-link') {
+      const d = msg.data || {};
+      if (!d.ok) showToast(d.error || 'No camera link for that seat yet.', '#fbbf24', 5000);
+      else if (window._tdCamWant === 'watch') { if (d.viewUrl) window.open(d.viewUrl, '_blank', 'noopener,width=960,height=560'); }
+      else {
+        const done = () => showToast('Copied. Send it to ' + (d.name || 'them') + ': it opens their camera and mic straight into desk seat ' + d.slot + '.', '#22c55e', 6000);
+        try { navigator.clipboard.writeText(d.joinUrl).then(done, () => { customPrompt('Camera link', 'Copy this link', d.joinUrl, 'Close'); }); }
+        catch (er) { customPrompt('Camera link', 'Copy this link', d.joinUrl, 'Close'); }
+      }
+    } else if (msg.type === 'site-event-result') {
+      if (window.__siteEvents) window.__siteEvents.onResult(msg.data || {});
     } else if (msg.type === 'bracket-result' || msg.type === 'event-result') {
       const resultEl = el('bracket-status');
       if (resultEl) {
@@ -33612,11 +35115,19 @@ async function connect() {
         r.dataset.fresh = '1';
         setTimeout(() => { delete r.dataset.fresh; }, 8000);
       }
+    } else if (msg.type === 'dota-result') {
+      const r = el('dota-result');
+      if (r) { r.textContent = msg.data.message || ''; r.style.color = msg.data.ok ? '#9ae6b4' : '#f56565'; }
     } else if (msg.type === 'csgo-result') {
       const resultEl = el('csgo-result');
       if (resultEl) {
         resultEl.textContent = msg.data.message || '';
         resultEl.style.color = msg.data.ok ? '#9ae6b4' : '#f56565';
+      }
+      // CS2 was already open: options only apply when Steam starts it, so offer the restart.
+      if (msg.data.running) {
+        customConfirm('Restart CS2 for observing?', 'CS2 is open. It has to start again for the observer view to apply. Close CS2 now and start it again? Anything unsaved in CS2 is lost.', 'Restart CS2')
+          .then((ok) => { if (ok) { if (resultEl) { resultEl.textContent = 'Closing CS2...'; resultEl.style.color = ''; } send('csgo_launch_observer', { restart: true }); } });
       }
     } else if (msg.type === 'questions_pull_result') {
       // Discord backlog pull finished (server → the panel that asked).
@@ -33624,12 +35135,16 @@ async function connect() {
       if (fb) { fb.textContent = msg.data.text || ''; fb.style.color = msg.data.ok ? '#4ade80' : '#f87171'; }
       if (!msg.data.ok) showToast(msg.data.text || 'Discord pull failed.', '#7b2020', 8000);
       const btn = el('q-pull-btn'); if (btn) btn.disabled = false;
+    } else if (msg.type === 'csgo-cinematic-result') {
+      const m = el('csgo-cinematic-msg');
+      if (m) { m.textContent = (msg.data && msg.data.message) || ''; m.style.color = msg.data && msg.data.ok ? '#9ae6b4' : '#f56565'; }
     } else if (msg.type === 'csgo_update') {
       const conn = el('csgo-conn');
       if (conn) {
         conn.textContent = msg.data && msg.data.connected ? 'CS2: connected' : 'CS2: waiting';
         conn.className = 'prod-chip' + (msg.data && msg.data.connected ? ' ok' : '');
       }
+      if (msg.data) renderCsgoCinematic(msg.data);
     } else if (msg.type === 'resource_warning') {
       showToast(`High resource usage — CPU ${msg.data.cpu}% · RAM ${msg.data.ramMb} MB`, '#c53030', 30000);
     } else if (msg.type === 'crash_alert') {
@@ -33825,8 +35340,8 @@ el('btn-twitch-login')?.addEventListener('click', async () => {
   }, 1000);
 });
 
-el('btn-twitch-token-manual')?.addEventListener('click', () => {
-  const token = prompt('Paste your Twitch OAuth token:\n\n(You can get one at twitchtokengenerator.com with Channel Points scopes)');
+el('btn-twitch-token-manual')?.addEventListener('click', async () => {
+  const token = await customPrompt('Twitch token', 'Paste your Twitch OAuth token. You can get one at twitchtokengenerator.com with the Channel Points scopes.', '', 'Save token');
   if (!token) return;
 
   fetch('http://127.0.0.1:3000/api/twitch/set-token', {
@@ -34962,24 +36477,12 @@ function startStreamStatePolling() {
       const viewersNEl = el('tb-viewers-n');
 
       if (viewersEl && viewersNEl) {
-        viewersNEl.textContent = data.viewers.toLocaleString();
+        try { _viewerCount = data.viewers || 0; renderViewers(); } catch (e) {}
         viewersEl.style.opacity = data.isLive ? '1' : '0.6';
       }
 
-      // Fetch ad countdown
-      const adRes = await fetch('http://127.0.0.1:3000/api/twitch/ads/countdown');
-      if (!adRes.ok) return;
-
-      const adData = await adRes.json();
-      const adTimerEl = el('tb-adtimer');
-      const adTimerNEl = el('tb-adtimer-n');
-
-      if (adTimerEl && adTimerNEl && adData.secondsUntilAd !== null) {
-        const mins = Math.floor(adData.secondsUntilAd / 60);
-        const secs = adData.secondsUntilAd % 60;
-        adTimerNEl.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
-        adTimerEl.style.opacity = adData.secondsUntilAd > 0 ? '1' : '0.6';
-      }
+      // The ad chip is owned by renderAdChip() (1s ticker over stored deadlines); writing it from
+      // here made it flicker between two different countdowns.
     } catch (err) {
       console.error('[Stream State]', err);
     }
@@ -35035,7 +36538,10 @@ async function _adPost(url, body, okMsg, color) {
     const r = await fetch('http://127.0.0.1:3000' + url, opts);
     const j = await r.json().catch(() => ({}));
     if (r.ok && j.success) showToast(okMsg, color, 4000);
-    else showToast('Twitch: ' + (j.error || 'request failed'), '#c53030', 5000);
+    else {
+      const msg = String(j.error || 'request failed');
+      showToast(/twitch/i.test(msg) ? msg + (/not connected/i.test(msg) ? '. Connect it under Apps > Twitch.' : '') : 'Twitch: ' + msg, '#c53030', 5000);
+    }
   } catch (err) { showToast('Twitch request failed: ' + err.message, '#c53030', 5000); }
 }
 let _adLocalTimer = null;
@@ -35522,6 +37028,28 @@ const LIVE_STALE_MS = 45000;
 function renderLiveDataPanels(data) {
   const esc = (v) => String(v == null ? '' : v).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
+  // Dota 2 (Game State Integration)
+  const dota = (data && data.dota) || {};
+  const dl = dota.connected && dota.live;
+  const dBox = el('dota-live-readout');
+  if (dBox) {
+    const clk = dl && dl.map ? Math.max(0, Math.floor(dl.map.clock || 0)) : 0;
+    dBox.innerHTML = dl
+      ? '<strong>Live:</strong> ' + (dl.spectating ? 'spectating' : '<span style="color:#f6ad55">not spectating (Dota only sends your own hero)</span>')
+        + (dl.map && dl.map.state ? ' &middot; ' + esc(dl.map.state) : '')
+        + ' &middot; ' + Math.floor(clk / 60) + ':' + String(clk % 60).padStart(2, '0')
+        + ' &middot; kills ' + ((dl.map && dl.map.radiantScore) || 0) + '\u2013' + ((dl.map && dl.map.direScore) || 0)
+        + (dl.draft ? ' &middot; draft in progress' : '')
+      : (dota.cfgPath ? 'Set up. Waiting for Dota 2 to send data.' : '');
+  }
+  const dAuto = el('chk-dota-autodraft'); if (dAuto && document.activeElement !== dAuto) dAuto.checked = dota.autoDraft !== false;
+  const dBoard = el('chk-dota-board'); if (dBoard && document.activeElement !== dBoard) dBoard.checked = !!dota.showBoard;
+  el('dota-radiant-seg')?.querySelectorAll('button[data-v]').forEach((b) => {
+    b.classList.toggle('is-on', b.dataset.v === (dota.radiantSide === 'b' ? 'b' : 'a'));
+    const nm = b.dataset.v === 'b' ? ((data.teams && data.teams.orange && data.teams.orange.name) || 'Orange team') : ((data.teams && data.teams.blue && data.teams.blue.name) || 'Blue team');
+    if (b.textContent !== nm) b.textContent = nm;
+  });
+
   // Rainbow Six
   const r6 = (data && data.r6) || {};
   const g = r6.gepData || null;
@@ -35578,3 +37106,62 @@ function renderLiveDataPanels(data) {
 }
 bedwarsEndpointHint();   // placeholder until the first state broadcast supplies lanHost
 
+
+// ── Dota 2 setup (Settings ▸ Games ▸ Dota 2) ──
+el('btn-dota-setup')?.addEventListener('click', () => {
+  const r = el('dota-result'); if (r) { r.textContent = 'Looking for Dota 2 in your Steam libraries...'; r.style.color = ''; }
+  send('dota_setup', {});
+});
+el('btn-dota-install')?.addEventListener('click', () => {
+  const p = (el('input-dota-path')?.value || '').trim();
+  const r = el('dota-result');
+  if (!p) { if (r) { r.textContent = 'Enter your dota 2 beta folder first.'; r.style.color = '#f56565'; } return; }
+  send('dota_setup', { path: p });
+});
+el('btn-dota-launch')?.addEventListener('click', () => send('dota_launch', {}));
+el('chk-dota-autodraft')?.addEventListener('change', (e) => send('dota_settings', { autoDraft: !!e.target.checked }));
+el('chk-dota-board')?.addEventListener('change', (e) => send('dota_settings', { showBoard: !!e.target.checked }));
+el('dota-radiant-seg')?.addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-v]'); if (!b) return;
+  el('dota-radiant-seg').querySelectorAll('button[data-v]').forEach((x) => x.classList.toggle('is-on', x === b));
+  send('dota_settings', { radiantSide: b.dataset.v });
+});
+
+// ── Streaming software picker (Apps ▸ Streaming software) ──
+// One choice for the program that sends the stream: OBS Studio and Streamlabs Desktop share the OBS
+// connection (select-obs-app, saved with the OBS settings); vMix is the switcher target. Only the
+// chosen program's section shows.
+function swCurrentApp(st) {
+  const s = st || currentState || {};
+  if ((s.switcher && s.switcher.target) === 'vmix') return 'vmix';
+  if (window._swPendingApp) return window._swPendingApp;
+  return (s.obs && s.obs.app) === 'streamlabs' ? 'streamlabs' : 'obs';
+}
+function swRenderPicker(st) {
+  const app = swCurrentApp(st);
+  el('sw-app-seg')?.querySelectorAll('button[data-v]').forEach((b) => b.classList.toggle('is-on', b.dataset.v === app));
+  const obsSec = el('sw-sec-obs'), vmixSec = el('sw-sec-vmix');
+  if (obsSec) obsSec.style.display = app === 'vmix' ? 'none' : '';
+  if (vmixSec) vmixSec.style.display = app === 'vmix' ? '' : 'none';
+  const nm = app === 'streamlabs' ? 'Streamlabs Desktop' : 'OBS Studio';
+  const t = el('sw-obs-title'); if (t && t.textContent !== nm) t.textContent = nm;
+  const l = el('sw-obs-enable-lbl'); if (l) l.textContent = 'Connect to ' + nm;
+  // The vMix section's own OBS/vMix toggle is now this picker.
+  const tseg = el('switcher-target-seg'); const trow = tseg && tseg.closest('.field-row'); if (trow) trow.style.display = 'none';
+}
+el('sw-app-seg')?.addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-v]'); if (!b) return;
+  const v = b.dataset.v;
+  window._swPendingApp = v === 'vmix' ? '' : v;
+  if (v === 'vmix') send('set_switcher_target', { target: 'vmix' });
+  else {
+    send('set_switcher_target', { target: 'obs' });
+    const sel = el('select-obs-app');
+    if (sel && sel.value !== v) { sel.value = v; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+  }
+  // Show the choice straight away; the next state confirms it.
+  const st = currentState ? JSON.parse(JSON.stringify({ switcher: currentState.switcher || {}, obs: currentState.obs || {} })) : { switcher: {}, obs: {} };
+  st.switcher.target = v === 'vmix' ? 'vmix' : 'obs';
+  if (v !== 'vmix') st.obs.app = v;
+  swRenderPicker(st);
+});

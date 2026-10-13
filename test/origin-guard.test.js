@@ -29,6 +29,21 @@ no('http://localhost.evil.example', 'localhost:3000', 'look-alike host');
 no('chrome-extension://xyz', 'localhost:3000', 'browser extension pages');
 no('not a url', 'localhost:3000', 'garbage');
 
+// DNS rebinding: a public name pointed at 127.0.0.1 is same-origin with us, so the Host is the tell.
+no('http://evil.example:3000', 'evil.example:3000', 'rebinding page (Origin host == Host)');
+no(undefined, 'evil.example:3000', 'rebinding page, same-origin GET with no Origin');
+ok(undefined, 'studio-pc:3000', 'LAN machine name');
+ok('http://studio-pc.local:3000', 'studio-pc.local:3001', 'mDNS LAN name');
+
+// "null" / file:// only from the app or OBS (their User-Agent), never a sandboxed iframe in a browser.
+const ua = (origin, host, agent, want, why) => { assert.strictEqual(isAllowedOrigin(origin, host, agent), want, why); pass++; };
+ua('null', 'localhost:3000', 'Mozilla/5.0 Chrome/100.0 Electron/18.3.15 Safari/537.36', true, 'panel (Electron)');
+ua('file://', '127.0.0.1:3001', 'Mozilla/5.0 Chrome/100.0 Electron/18.3.15', true, 'panel WS (Electron)');
+ua('null', 'localhost:3000', 'Mozilla/5.0 Chrome/103.0 Safari/537.36 OBS/30.0.2', true, 'OBS local-file source');
+ua('null', '127.0.0.1:3001', 'Mozilla/5.0 (Windows NT 10.0) Chrome/126.0 Safari/537.36', false, 'sandboxed iframe in a browser');
+ua('null', '127.0.0.1:3001', '', false, 'no user agent');
+ua('http://localhost:3000', 'localhost:3001', 'Mozilla/5.0 Chrome/126.0', true, 'overlay origin is unaffected by UA');
+
 // Escape hatch
 process.env.NE_ALLOW_ORIGINS = 'https://tools.example.org';
 ok('https://tools.example.org', 'localhost:3000', 'NE_ALLOW_ORIGINS entry');

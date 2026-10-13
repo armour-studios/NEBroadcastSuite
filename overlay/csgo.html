@@ -267,6 +267,13 @@
   .pkad { display: flex; align-items: center; gap: 3px; font-weight: 600; font-size: 14px; color: #c4c9d2; font-variant-numeric: tabular-nums; }
   .pkad .kad-ic { display: block; }
   .pmoney { font-weight: 600; font-size: 14px; color: #6ee7a0; }
+  .pkad .kad-a { color: #8b909a; margin-left: 2px; }                 /* assists */
+  .parm { display: none; height: 14px; opacity: .9; filter: brightness(0) invert(1); }
+  .parm.on { display: block; }
+  .prow.dead .parm { display: none; }
+  .pmvp { font-weight: 700; font-size: 12px; color: #f5c84b; white-space: nowrap; }   /* MVP stars */
+  .pmvp:empty { display: none; }
+  .cb-loss { display: block; font-size: 11px; font-weight: 700; letter-spacing: 1px; color: #8b909a; white-space: nowrap; }
   /* Round damage — only on dead rows, where money/loadout have dropped out (JT's-HUD idea:
      a dead player's last useful stat is what they did before they died). */
   .pdmg { display: none; font-weight: 700; font-size: 11px; letter-spacing: 1.5px; color: #8b909a; white-space: nowrap; }
@@ -1173,7 +1180,7 @@ let plantStart = null;   // ms timestamp when the current plant began
 const DEMO = {
   connected: false,
   map: { name: 'de_mirage', phase: 'live' },
-  ct: { score: 16 }, t: { score: 15 },
+  ct: { score: 16, lossBonus: 0 }, t: { score: 15, lossBonus: 2 },
   round: { number: 31, phase: 'live', bomb: 'planted' },
   phaseEndsIn: 95, bomb: { state: 'planted', countdown: 27, pos: { x:-200, y:-700 } }, phase: 'live',
   grenades: [
@@ -1204,6 +1211,7 @@ const DEMO = {
   ]
 };
 DEMO.players.forEach((p, i) => { if (p.slot == null) p.slot = i; });   // demo spectate slots → radar numbers
+DEMO.players.forEach((p, i) => { if (p.alive && p.armor == null) { p.armor = i % 3 ? 100 : 0; p.helmet = i % 2 === 0; } if (p.mvps == null) p.mvps = [2, 0, 1, 0, 3, 1, 0, 0, 2, 1][i] || 0; });   // preview armour + MVPs
 DEMO.killfeed = [   // preview the kill feed (live feed comes from the server)
   { killer:'Player 9', killerTeam:'T',  victim:'Player 3', victimTeam:'CT', weapon:'awp',   hs:false, ts: 1 },
   { killer:'Player 1', killerTeam:'CT', victim:'Player 8', victimTeam:'T',  weapon:'ak47',  hs:true,  ts: 2 },
@@ -1251,7 +1259,8 @@ function createRow(){
   const bomb = document.createElement('div'); bomb.className = 'pbomb';
   const status = document.createElement('div'); status.className = 'pstatus';
   const prk = document.createElement('div'); prk.className = 'prk';   // kills this round
-  l1.appendChild(pnum); l1.appendChild(name); l1.appendChild(prk); l1.appendChild(bomb); l1.appendChild(status);
+  const mvp = document.createElement('div'); mvp.className = 'pmvp';  // round MVPs this map
+  l1.appendChild(pnum); l1.appendChild(name); l1.appendChild(prk); l1.appendChild(mvp); l1.appendChild(bomb); l1.appendChild(status);
   // Line 2: K/D (kill icon + skull icon) + money — icons built once, numbers update each tick
   const sub = document.createElement('div'); sub.className = 'psub';
   const kad = document.createElement('div'); kad.className = 'pkad';
@@ -1260,9 +1269,12 @@ function createRow(){
   const kadD = document.createElement('span');
   kad.appendChild(utilImg('elimination', 16, 'kad-ic')); kad.appendChild(kadK);
   kad.appendChild(kadSkull); kad.appendChild(kadD);
+  const kadA = document.createElement('span'); kadA.className = 'kad-a';   // assists
+  kad.appendChild(kadA);
+  const arm = utilImg('armor', 14, 'parm');                                 // armour / armour+helmet
   const money = document.createElement('div'); money.className = 'pmoney';
   const dmg = document.createElement('div'); dmg.className = 'pdmg';   // dead rows only
-  sub.appendChild(kad); sub.appendChild(money); sub.appendChild(dmg);
+  sub.appendChild(kad); sub.appendChild(arm); sub.appendChild(money); sub.appendChild(dmg);
   info.appendChild(l1); info.appendChild(sub);
   const wpn = document.createElement('div'); wpn.className = 'pwpn';   // loadout
   body.appendChild(info); body.appendChild(wpn);
@@ -1275,7 +1287,7 @@ function createRow(){
   const cond = document.createElement('div'); cond.className = 'pcond';
   // fx first → behind; body/HP carry z-index so the text stays crisp over the tint.
   el.appendChild(fx); el.appendChild(body); el.appendChild(cond); el.appendChild(hpbox); el.appendChild(hpbar);
-  return { el, side: '', wasAlive: true, refs: { hpbox, name, money, dmg, status, kadK, kadD, wpn, hpfill, bomb, fx, cond, pnum, prk } };
+  return { el, side: '', wasAlive: true, refs: { hpbox, name, money, dmg, status, kadK, kadD, kadA, arm, mvp, wpn, hpfill, bomb, fx, cond, pnum, prk } };
 }
 
 function updateRow(entry, p, activeId, number){
@@ -1297,6 +1309,11 @@ function updateRow(entry, p, activeId, number){
   setText(refs.dmg, (dead && (p.roundDmg || 0) > 0) ? ('DMG ' + p.roundDmg) : '');
   setText(refs.kadK, p.kills);
   setText(refs.kadD, p.deaths);
+  setText(refs.kadA, 'A' + (p.assists || 0));
+  setText(refs.mvp, (p.mvps || 0) > 0 ? '\u2605' + p.mvps : '');
+  const armSrc = '/assets/csgo/' + (p.helmet ? 'armor_helmet' : 'armor') + '.svg';
+  refs.arm.classList.toggle('on', !dead && (p.armor || 0) > 0);
+  if ((p.armor || 0) > 0 && refs.arm.getAttribute('src') !== armSrc) refs.arm.src = armSrc;
   const hp = Math.max(0, Math.min(100, p.health || 0));
   refs.hpfill.style.width = (dead ? 0 : hp) + '%';
   // HP-by-health colouring (warn when low) — applied to bar + number.
@@ -1489,8 +1506,12 @@ let facecams = [], facecamsEnabled = true;
 const _camFrames = new Map();   // link → iframe
 function findCsFacecam(p){
   if (!p || !facecams.length) return null;
-  return facecams.find(fc => fc.platformId && fc.platformId === p.steamid)
-      || facecams.find(fc => fc.name === p.name) || null;
+  // Bots report steamid "0": shared by every bot, so never a key. Names ignore case and spacing.
+  const id = p.steamid && !/^0*$/.test(String(p.steamid)) ? String(p.steamid) : '';
+  const key = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  return (id && facecams.find(fc => fc.platformId && String(fc.platformId) === id))
+      || facecams.find(fc => fc.name === p.name)
+      || (key(p.name) && facecams.find(fc => key(fc.name) === key(p.name))) || null;
 }
 function syncFocusCam(obs){
   const box = el('focus-cam'); if (!box) return;
@@ -1792,7 +1813,7 @@ function renderBuyPhase(cs){
   const t  = all.filter(p => p.team === 'T');
   // Rebuild only when buy-relevant data changes (players keep buying through freezetime).
   const sig = JSON.stringify(all.map(p => [p.steamid, p.money, p.equip, shownWeapon(p).name, p.hasKit, p.hasBomb, p.helmet, p.armor, (p.nades||[]).join(','), p.kills, p.deaths, p.assists, p.alive])
-    .concat([cs.ct.score, cs.t.score, cs.round.number, appTeams.blue.name, appTeams.orange.name,
+    .concat([cs.ct.score, cs.t.score, cs.round.number, cs.ct.lossBonus, cs.t.lossBonus, appTeams.blue.name, appTeams.orange.name,
       (appTeams.blue.logo || '').slice(20, 44), (appTeams.orange.logo || '').slice(20, 44)]));
   if (sig === _buySig) return;
   _buySig = sig;
@@ -1801,6 +1822,8 @@ function renderBuyPhase(cs){
   const ctLogoCls = appTeams.blue.logo ? '' : ' cs-fallback', tLogoCls = appTeams.orange.logo ? '' : ' cs-fallback';
   const rn = cs.round.number || 1;
   const bz = cs.phaseEndsIn != null ? ('BUY ' + fmtClock(cs.phaseEndsIn)) : 'BUY PHASE';
+  // What the team earns if it LOSES this round: $1,400, +$500 per consecutive loss, capped at $3,400.
+  const lossBonus = (n) => '<span class="cb-loss">LOSS BONUS $' + (1400 + 500 * Math.min(4, Math.max(0, n || 0))).toLocaleString('en-US') + '</span>';
 
   // Round-history strip: team-tinted win-method icon + round number, with a halftime split.
   const hist = (cs.roundHistory || []);
@@ -1819,11 +1842,11 @@ function renderBuyPhase(cs){
   box.innerHTML = `
     <div class="cb-header">
       <div class="cb-team ct">
-        <img class="cb-logo${ctLogoCls}" src="${ctLogo}" alt=""><span class="cb-tname">${_esc(appTeams.blue.name || 'CT')}</span><span class="cb-score">${cs.ct.score}</span>
+        <img class="cb-logo${ctLogoCls}" src="${ctLogo}" alt=""><span class="cb-tname">${_esc(appTeams.blue.name || 'CT')}${lossBonus(cs.ct.lossBonus)}</span><span class="cb-score">${cs.ct.score}</span>
       </div>
       <div class="cb-mid"><div class="r">ROUND</div><div class="rn">${String(rn).padStart(2,'0')}</div><div class="bz">${bz}</div></div>
       <div class="cb-team t">
-        <img class="cb-logo${tLogoCls}" src="${tLogo}" alt=""><span class="cb-tname">${_esc(appTeams.orange.name || 'T')}</span><span class="cb-score">${cs.t.score}</span>
+        <img class="cb-logo${tLogoCls}" src="${tLogo}" alt=""><span class="cb-tname">${_esc(appTeams.orange.name || 'T')}${lossBonus(cs.t.lossBonus)}</span><span class="cb-score">${cs.t.score}</span>
       </div>
     </div>
     <div class="cb-rounds">${rounds}</div>
@@ -2322,5 +2345,6 @@ render(null);
 applyBrand();   // preview the demo brand's sponsor rail until live state arrives
 connect();
 </script>
+<script src="cs2-assist.js"></script>
 </body>
 </html>

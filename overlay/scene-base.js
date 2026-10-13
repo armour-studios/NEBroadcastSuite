@@ -639,16 +639,30 @@
       // verifyClient) — fetched once from the HTTP API this page was itself loaded from (same
       // trust boundary as the overlay HTML/CSS) and cached for reconnects.
       let _wsToken = null;
+      // Reconnect delay: 800ms, growing to 5s while the app stays down (a restarting app was hit by
+      // every source every 800ms), back to 800ms once connected. Jitter spreads many sources apart.
+      let _retryMs = 800;
+      const retry = () => {
+        const wait = _retryMs + Math.round(Math.random() * 300);
+        _retryMs = Math.min(5000, Math.round(_retryMs * 1.6));
+        setTimeout(() => { open().catch(retry); }, wait);
+      };
       const open = async () => {
         if (!_wsToken) {
+          // Deadline on the token fetch: a stalled app must not stall reconnection forever.
+          let ac = null, t = null;
           try {
-            const r = await fetch(HTTP_BASE + '/api/ws-token');
+            ac = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            if (ac) t = setTimeout(() => ac.abort(), 4000);
+            const r = await fetch(HTTP_BASE + '/api/ws-token', ac ? { signal: ac.signal } : undefined);
             const j = await r.json();
             _wsToken = j.token || '';
           } catch (e) { _wsToken = ''; }
+          finally { if (t) clearTimeout(t); }
         }
         ws = new WebSocket(WS_URL + (_wsToken ? ('?token=' + encodeURIComponent(_wsToken)) : ''));
         ws.onopen = () => {
+          _retryMs = 800;
           // Identify as a live overlay browser source (feeds the pre-flight "overlays reachable" check).
           try { ws.send(JSON.stringify({ type: 'register', role: 'overlay', page: global.location.pathname })); } catch (e) {}
           ws.send(JSON.stringify({ type: 'request_state' }));
@@ -656,7 +670,15 @@
           // clock drifts, would otherwise keep an hours-old skew for the rest of the broadcast.
           this.syncClock();
         };
-        ws.onmessage = ({ data }) => {
+        ws.onmessage = ({ data }) => handleFrame(data);
+        // A refused handshake can mean a stale token (the app regenerated it): fetch a fresh one.
+        let _opened = false;
+        const _onopen = ws.onopen;
+        ws.onopen = (ev) => { _opened = true; _onopen(ev); };
+        ws.onclose = () => { if (!_opened) _wsToken = null; retry(); };
+        ws.onerror = () => { try { ws.close(); } catch {} };
+      };
+      const handleFrame = (data) => {
           let msg;
           try { msg = JSON.parse(data); } catch { return; }
           // Overlay code changed on disk (or a producer hit "Reload OBS"). Reloading blanks the
@@ -718,11 +740,50 @@
             _liveKeys.forEach((k) => { if (k in msg.data) { _lastFull[k] = msg.data[k]; touched = true; } });
             if (touched) { try { onState(_lastFull); } catch (e) { console.error('[scene] live render error', e); } refreshInk(); }
           }
-        };
-        ws.onclose = () => setTimeout(open, 800);
-        ws.onerror = () => { try { ws.close(); } catch {} };
       };
-      open();
+      // Inside a wrapper source that shares its socket (gfx.html sets data-ne-bridge and exposes
+      // window.__neBridge): ride that ONE socket instead of opening another. The wrapper's socket
+      // already restores images (sticky-logos.js) and its frames reach us as raw strings, so each page
+      // parses its own copy. scene-bg.js only watches sockets a page opens itself, so it is fed here.
+      const bridgeParent = (() => {
+        try {
+          if (global.parent === global) return null;
+          const pd = global.parent.document;
+          return pd && pd.documentElement && pd.documentElement.getAttribute('data-ne-bridge') === '1' ? global.parent : null;
+        } catch (e) { return null; }   // cross-origin parent: not ours
+      })();
+      const viaBridge = (bridge) => {
+        // Unsubscribe when this page goes away (a reload_overlays reload, "Reload OBS"), or its
+        // handler stays in the wrapper's list, parsing every frame into a detached page.
+        const unsub = bridge.subscribe((kind, data) => {
+          if (kind === 'open') {
+            bridge.send({ type: 'register', role: 'overlay', page: global.location.pathname });
+            bridge.send({ type: 'request_state' });
+            this.syncClock();
+          } else if (kind === 'message') {
+            try { handleFrame(data); } catch (e) { console.error('[scene] frame error', e); }
+            if (global.SceneBg && typeof data === 'string' && data.indexOf('sceneBg') >= 0) {
+              try { const m = JSON.parse(data); if (m && m.type === 'full_state') global.SceneBg.fromState(m.data); } catch (e) {}
+            }
+          }
+        });
+        if (typeof unsub === 'function') global.addEventListener('pagehide', unsub);
+      };
+      if (bridgeParent) {
+        // The wrapper's script may run a moment after this page: wait up to 3s, then fall back.
+        let waited = 0;
+        const tryBridge = () => {
+          let b = null;
+          try { b = bridgeParent.__neBridge; } catch (e) {}
+          if (b && typeof b.subscribe === 'function') return viaBridge(b);
+          if ((waited += 100) > 3000) return open().catch(retry);
+          setTimeout(tryBridge, 100);
+        };
+        tryBridge();
+      } else {
+        // open() throwing (a bad URL, a failed fetch) must not end the reconnect chain.
+        open().catch(retry);
+      }
     }
   };
 

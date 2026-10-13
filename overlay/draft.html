@@ -153,6 +153,95 @@
       background:rgba(10,13,20,.8); border:1px solid rgba(255,255,255,.14); font-variant-numeric:tabular-nums; line-height:1.1; }
     .d-bb-score span:nth-child(2) { color:rgba(255,255,255,.35); }
     .d-bb-score-lbl { font-size:.8em; font-weight:700; letter-spacing:.3em; color:#7b818c; text-transform:uppercase; margin-top:-8px; }
+
+    /* ── Broadcast strip (MOBA drafts: Dota 2, Mobile Legends, Honor of Kings; opt-in for any game
+       with picks). One full-width band on the top or bottom edge, so the game's own draft screen or a
+       camera shot stays visible under it: team identity + bans across the header, tall pick portraits
+       below, and a centre column with the series score, whose turn it is and the shot clock.
+       --ta / --tb = team colours, --hot = the brand accent used for whoever is on the clock. */
+    #draft-stage.strip-mode .d-head, #draft-stage.strip-mode .d-phase, #draft-stage.strip-mode .d-cols, #draft-stage.strip-mode .d-maphero { display:none; }
+    .ds { display:none; position:absolute; left:0; right:0; height:368px; --ta:#2f8dff; --tb:#f0444e; --hot:#f5c451;
+      background:linear-gradient(90deg, rgba(8,12,20,.94), rgba(6,8,14,.97) 50%, rgba(8,12,20,.94));
+      box-shadow:0 18px 60px rgba(0,0,0,.55); font-family:'Rajdhani', var(--main-font); overflow:hidden; }
+    #draft-stage.strip-mode .ds { display:block; }
+    .ds.pos-top { top:0; } .ds.pos-bottom { bottom:0; }
+    .ds-glow { position:absolute; top:0; bottom:0; width:46%; pointer-events:none; opacity:.30; }
+    .ds-glow.a { left:0; background:radial-gradient(70% 120% at 0% 30%, var(--ta), transparent 70%); }
+    .ds-glow.b { right:0; background:radial-gradient(70% 120% at 100% 30%, var(--tb), transparent 70%); }
+    .ds-edge { position:absolute; left:0; right:0; height:4px; background:linear-gradient(90deg, var(--ta), rgba(255,255,255,.18) 50%, var(--tb)); }
+    .ds.pos-top .ds-edge { bottom:0; } .ds.pos-bottom .ds-edge { top:0; }
+    .ds-grid { position:relative; display:grid; grid-template-columns:725px 470px 725px; grid-template-rows:92px 276px; height:100%; }
+    /* header: team block at the outer edge, bans running in towards the centre */
+    .ds-team { display:flex; align-items:center; gap:14px; padding:0 18px; min-width:0; }
+    .ds-team.b { flex-direction:row-reverse; }
+    .ds-logo { width:56px; height:56px; object-fit:contain; flex-shrink:0; filter:drop-shadow(0 4px 12px rgba(0,0,0,.6)); }
+    .ds-id { min-width:0; width:200px; flex-shrink:0; }
+    .ds-team.b .ds-id { text-align:right; }
+    .ds-order { font-size:12px; font-weight:700; letter-spacing:.28em; color:rgba(255,255,255,.55); text-transform:uppercase; line-height:1; }
+    .ds-name { font-size:30px; font-weight:700; color:#fff; text-transform:uppercase; line-height:1.05; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .ds-bans { flex:1; display:flex; gap:6px; justify-content:flex-end; min-width:0; }
+    .ds-team.b .ds-bans { justify-content:flex-start; flex-direction:row-reverse; }
+    .ds-ban { position:relative; flex:0 1 64px; height:62px; overflow:hidden; background:rgba(255,255,255,.05);
+      clip-path:polygon(14% 0, 100% 0, 86% 100%, 0 100%); }
+    .ds-ban img { width:100%; height:100%; object-fit:cover; filter:grayscale(1) brightness(.5); }
+    .ds-ban .ds-txt { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:0 10px; text-align:center;
+      font-size:12px; font-weight:700; color:rgba(255,255,255,.8); text-transform:uppercase; line-height:1; }
+    .ds-ban.filled::after { content:''; position:absolute; left:6%; right:6%; top:50%; height:3px; background:#ff4d57;
+      transform:rotate(-28deg); box-shadow:0 0 8px rgba(255,77,87,.9); }
+    .ds-ban .ds-idx { position:absolute; right:12px; bottom:3px; font-size:11px; font-weight:700; color:rgba(255,255,255,.28); }
+    .ds-ban.active { background:rgba(255,255,255,.10); }
+    .ds-ban.active::before { content:''; position:absolute; inset:0; background:linear-gradient(0deg, var(--hot), transparent 85%);
+      animation:dsBanHot 1.4s ease-in-out infinite; }
+    @keyframes dsBanHot { 0%,100% { opacity:.35; } 50% { opacity:.85; } }
+    .ds-ban.active .ds-idx { color:#fff; z-index:1; }
+    .ds-title { display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:0 10px; min-width:0; }
+    .ds-title-main { font-size:24px; font-weight:700; letter-spacing:.16em; color:#fff; text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
+    .ds-title-sub { font-size:13px; font-weight:700; letter-spacing:.3em; color:var(--hot); text-transform:uppercase; margin-top:3px; }
+    /* picks */
+    .ds-picks { display:flex; gap:4px; padding:0 4px 4px; }
+    .ds-picks.b { flex-direction:row-reverse; }
+    .ds-pick { flex:1 1 0; min-width:0; display:flex; flex-direction:column; position:relative; }
+    .ds-art { position:relative; flex:1; overflow:hidden; clip-path:polygon(6% 0, 100% 0, 94% 100%, 0 100%);
+      background:radial-gradient(90% 60% at 50% 0%, var(--tc), transparent 75%), linear-gradient(180deg, #121a2a, #070a12); }
+    .ds-art img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; object-position:center 18%; }
+    .ds-art .ds-txt { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:0 12px; text-align:center;
+      font-size:22px; font-weight:700; color:#fff; text-transform:uppercase; }
+    .ds-pick.empty .ds-art { opacity:.55; }
+    .ds-slot { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+      font-size:15px; font-weight:700; letter-spacing:.24em; color:rgba(255,255,255,.28); text-transform:uppercase; }
+    .ds-plate { height:52px; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:0 8px; text-align:center;
+      background:rgba(10,14,22,.96); box-shadow:inset 0 -18px 24px -16px var(--tc); border-top:2px solid var(--tc); }
+    .ds-hero { font-size:18px; font-weight:700; color:#fff; text-transform:uppercase; line-height:1.05; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .ds-player { font-size:12px; font-weight:700; letter-spacing:.14em; color:rgba(255,255,255,.55); text-transform:uppercase; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .ds-pick.empty .ds-plate { border-top-color:rgba(255,255,255,.12); }
+    .ds-pick.empty .ds-hero { color:rgba(255,255,255,.3); }
+    .ds-pick.active .ds-art { opacity:1; animation:dsHot 1.8s ease-in-out infinite; }
+    .ds-pick.active .ds-slot { color:var(--hot); }
+    .ds-pick.active .ds-plate { border-top-color:var(--hot); }
+    @keyframes dsHot { 0%,100% { box-shadow:inset 0 0 0 2px var(--hot), inset 0 -30px 40px -24px var(--hot); }
+      50% { box-shadow:inset 0 0 0 3px var(--hot), inset 0 -60px 70px -26px var(--hot); } }
+    .ds-new { animation:dsIn .6s cubic-bezier(.2,1.3,.4,1) both; }
+    @keyframes dsIn { 0% { transform:scale(1.12); filter:brightness(2.4); opacity:0; } 60% { opacity:1; } 100% { transform:none; filter:none; } }
+    /* centre */
+    .ds-center { grid-row:2; grid-column:2; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:0 18px 10px; }
+    .ds-score { display:flex; align-items:center; gap:18px; }
+    .ds-clogo { width:78px; height:78px; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,.05);
+      clip-path:polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%); }
+    .ds-clogo img { width:62px; height:62px; object-fit:contain; }
+    .ds-clogo .ds-txt { font-size:22px; font-weight:700; color:#fff; }
+    .ds-num { font-size:60px; font-weight:700; color:#fff; line-height:1; min-width:44px; text-align:center; font-variant-numeric:tabular-nums; }
+    .ds-num.a { text-shadow:0 0 22px var(--ta); } .ds-num.b { text-shadow:0 0 22px var(--tb); }
+    .ds-vs { font-size:16px; font-weight:700; letter-spacing:.2em; color:rgba(255,255,255,.4); }
+    .ds-phase { width:100%; display:flex; align-items:center; justify-content:center; gap:10px; padding:6px 0;
+      background:linear-gradient(90deg, transparent, rgba(255,255,255,.07), transparent);
+      font-size:17px; font-weight:700; letter-spacing:.2em; color:#fff; text-transform:uppercase; }
+    .ds-phase-dot { width:11px; height:11px; border-radius:50%; flex-shrink:0; }
+    .ds-clock { display:flex; align-items:center; gap:14px; width:100%; justify-content:center; }
+    .ds-track { width:330px; height:6px; border-radius:3px; background:rgba(255,255,255,.1); overflow:hidden; }
+    .ds-fill { height:100%; width:100%; background:linear-gradient(90deg, var(--ta), var(--hot), var(--tb)); box-shadow:0 0 12px var(--hot); transition:width .25s linear; }
+    .ds-time { font-size:26px; font-weight:700; color:var(--hot); min-width:66px; font-variant-numeric:tabular-nums; }
+    .ds-time.low { color:#ff5a5a; }
+    .ds-clock.off { display:none; }
   </style>
 </head>
 <body>
@@ -167,6 +256,7 @@
       <div class="d-col blue" id="col-a"></div>
       <div class="d-col red"  id="col-b"></div>
     </div>
+    <div class="ds pos-top" id="d-strip"></div>
   </div>
 
   <script src="scene-base.js"></script>
@@ -337,10 +427,150 @@
       txt.textContent = (t.name || (d.turn.team === 'a' ? 'Blue' : 'Red')) + ' — ' + (d.turn.action === 'ban' ? 'Banning' : 'Picking');
     }
 
+    // ── Broadcast strip ──────────────────────────────────────────────────────────────────
+    // Games whose draft is shown as the full-width strip unless the producer picks the board.
+    const STRIP_GAMES = ['dota2', 'mobile-legends', 'honor-of-kings'];
+    function useStrip(d, banOnly) {
+      if (banOnly) return false;
+      const q = SceneBase.qp('layout');
+      if (q === 'strip') return true;
+      if (q === 'board') return false;
+      if (d.layout === 'strip') return true;
+      if (d.layout === 'board') return false;
+      return STRIP_GAMES.includes(d.game);
+    }
+    // Seconds on the shot clock for the turn now running. turnSeconds: >0 fixed, -1 off, 0 = the
+    // game's own clock (Dota bans are 15s in Captains Mode, everything else 30s).
+    function turnLength(d) {
+      const t = Number(d && d.turnSeconds) || 0;
+      if (t < 0) return 0;
+      if (t > 0) return t;
+      return d && d.game === 'dota2' && d.turn && d.turn.action === 'ban' ? 15 : PER_PICK_SECONDS;
+    }
+    let _seenStrip = new Set();
+    function mk(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+    // A portrait, or the hero's name when there is no picture (or it fails to load).
+    function art(op, cls) {
+      const box = mk('div', cls);
+      if (op && op.image) {
+        const im = mk('img'); im.src = op.image; im.alt = '';
+        im.onerror = () => { im.remove(); box.insertBefore(mk('div', 'ds-txt', op.name), box.firstChild); };
+        box.appendChild(im);
+      } else if (op) box.appendChild(mk('div', 'ds-txt', op.name));
+      return box;
+    }
+    function buildStrip(data, d) {
+      const root = document.getElementById('d-strip');
+      const A = SceneBase.teamSide(data, 'blue'), B = SceneBase.teamSide(data, 'orange');
+      root.className = 'ds ' + (d.stripPos === 'bottom' ? 'pos-bottom' : 'pos-top');
+      root.style.setProperty('--ta', A.color || '#2f8dff');
+      root.style.setProperty('--tb', B.color || '#f0444e');
+      root.style.setProperty('--hot', SceneBase.brandAccent(data) || '#f5c451');
+      const ops = d.ops || [], seq = d.sequence || [];
+      const nowSeen = new Set();
+      const first = d.teamStart === 'b' ? 'b' : 'a';
+      // Slot k of a side's bans / picks = its k-th step of that kind in the order.
+      const slots = (side, action) => seq.map((s, i) => ({ s, i })).filter((x) => x.s.by === side && x.s.action === action);
+      const isTurn = (i) => !d.complete && !!d.turn && ops.length === i;
+      const mark = (node, side, i, op) => { const k = side + i + ':' + op.name; nowSeen.add(k); if (!_seenStrip.has(k)) node.classList.add('ds-new'); };
+
+      const grid = mk('div', 'ds-grid');
+      const team = (side) => {
+        const t = side === 'a' ? A : B;
+        const box = mk('div', 'ds-team ' + side);
+        if (t.logo) { const lg = mk('img', 'ds-logo'); lg.src = t.logo; lg.alt = ''; lg.onerror = () => lg.remove(); box.appendChild(lg); }
+        const id = mk('div', 'ds-id');
+        id.appendChild(mk('div', 'ds-order', side === first ? 'First pick' : 'Second pick'));
+        const nm = mk('div', 'ds-name', t.name || (side === 'a' ? 'Blue' : 'Red'));
+        nm.style.color = SceneBase.liftForDark(t.color || '#ffffff', 0.12);
+        id.appendChild(nm); box.appendChild(id);
+        const bans = mk('div', 'ds-bans');
+        slots(side, 'ban').forEach(({ i }, k) => {
+          const op = ops[i];
+          const b = art(op, 'ds-ban' + (op ? ' filled' : '') + (isTurn(i) ? ' active' : ''));
+          if (op) mark(b, side, i, op);
+          b.appendChild(mk('span', 'ds-idx', String(k + 1)));
+          bans.appendChild(b);
+        });
+        box.appendChild(bans);
+        return box;
+      };
+      const title = mk('div', 'ds-title');
+      title.appendChild(mk('div', 'ds-title-main', (d.title && d.title.trim()) || 'Pick & Ban'));
+      const sub = (d.subtitle && d.subtitle.trim()) || (data.games && data.games[d.game] && data.games[d.game].name) || '';
+      if (sub) title.appendChild(mk('div', 'ds-title-sub', sub));
+      grid.appendChild(team('a')); grid.appendChild(title); grid.appendChild(team('b'));
+
+      const picks = (side) => {
+        const t = side === 'a' ? A : B;
+        const row = mk('div', 'ds-picks ' + side);
+        row.style.setProperty('--tc', t.color || (side === 'a' ? '#2f8dff' : '#f0444e'));
+        slots(side, 'pick').forEach(({ i }, k) => {
+          const op = ops[i];
+          const card = mk('div', 'ds-pick' + (op ? '' : ' empty') + (isTurn(i) ? ' active' : ''));
+          const a = art(op, 'ds-art');
+          if (!op) a.appendChild(mk('div', 'ds-slot', isTurn(i) ? 'Picking' : 'Pick ' + (k + 1)));
+          else mark(a, side, i, op);
+          card.appendChild(a);
+          const plate = mk('div', 'ds-plate');
+          plate.appendChild(mk('div', 'ds-hero', op ? op.name : '—'));
+          if (op && op.player) plate.appendChild(mk('div', 'ds-player', op.player));
+          card.appendChild(plate);
+          row.appendChild(card);
+        });
+        return row;
+      };
+      const center = mk('div', 'ds-center');
+      const score = mk('div', 'ds-score');
+      const initials = (t) => mk('div', 'ds-txt', String(t.name || '').slice(0, 3).toUpperCase());
+      const clogo = (t) => {
+        const c = mk('div', 'ds-clogo');
+        if (t.logo) { const im = mk('img'); im.src = t.logo; im.alt = ''; im.onerror = () => { im.remove(); c.appendChild(initials(t)); }; c.appendChild(im); }
+        else c.appendChild(initials(t));
+        return c;
+      };
+      const ser = data.series || {};
+      score.appendChild(clogo(A));
+      score.appendChild(mk('div', 'ds-num a', String(Number(ser.blue) || 0)));
+      score.appendChild(mk('div', 'ds-vs', 'VS'));
+      score.appendChild(mk('div', 'ds-num b', String(Number(ser.orange) || 0)));
+      score.appendChild(clogo(B));
+      center.appendChild(score);
+      const phase = mk('div', 'ds-phase');
+      if (d.complete) {
+        const dot = mk('span', 'ds-phase-dot'); dot.style.background = '#46d17a'; phase.appendChild(dot);
+        phase.appendChild(mk('span', '', 'Draft complete'));
+      } else if (d.turn) {
+        const t = d.turn.team === 'b' ? B : A;
+        const dot = mk('span', 'ds-phase-dot'); dot.style.background = t.color || '#fff'; dot.style.boxShadow = '0 0 12px ' + (t.color || '#fff'); phase.appendChild(dot);
+        phase.appendChild(mk('span', '', (t.name || (d.turn.team === 'b' ? 'Red' : 'Blue')) + (d.turn.action === 'ban' ? ' banning' : ' picking')));
+      }
+      center.appendChild(phase);
+      const clock = mk('div', 'ds-clock'); clock.id = 'ds-clock';
+      const track = mk('div', 'ds-track'); const fill = mk('div', 'ds-fill'); fill.id = 'ds-fill'; track.appendChild(fill);
+      clock.appendChild(track); const time = mk('div', 'ds-time'); time.id = 'ds-time'; clock.appendChild(time);
+      center.appendChild(clock);
+      grid.appendChild(picks('a')); grid.appendChild(center); grid.appendChild(picks('b'));
+
+      root.replaceChildren(mk('div', 'ds-glow a'), mk('div', 'ds-glow b'), mk('div', 'ds-edge'), grid);
+      _seenStrip = nowSeen;
+    }
+
     function tickTimer(d) {
       const el = document.getElementById('d-timer');
       // Ban boards drop the shot clock: nobody enforces it for a couple of bans, and a red 0:00 on air reads as a fault.
-      if (!_timerGame || !d || !d.turn || d.complete || stage.classList.contains('ban-mode')) { el.style.display = 'none'; return; }
+      const sc = document.getElementById('ds-clock');
+      const total = turnLength(d);
+      if (!_timerGame || !d || !d.turn || d.complete || stage.classList.contains('ban-mode') || !total) {
+        el.style.display = 'none'; if (sc) sc.classList.add('off'); return;
+      }
+      if (sc) {
+        sc.classList.remove('off');
+        const left = Math.max(0, (_deadline - Date.now()) / 1000);
+        const fl = document.getElementById('ds-fill'), tm = document.getElementById('ds-time');
+        if (fl) fl.style.width = Math.max(0, Math.min(100, left / total * 100)) + '%';
+        if (tm) { const r = Math.ceil(left); tm.textContent = Math.floor(r / 60) + ':' + String(r % 60).padStart(2, '0'); tm.classList.toggle('low', r <= 5); }
+      }
       el.style.display = '';
       let rem = Math.max(0, Math.round((_deadline - Date.now()) / 1000));
       const m = Math.floor(rem / 60), s = rem % 60;
@@ -357,11 +587,31 @@
         { name: 'Widowmaker', action: 'ban', by: 'b', image: '/assets/overwatch/heroes/widowmaker.png' }
       ] };
 
+    const DEMO_STRIP = {
+      dota2: { visible: true, title: 'Grand Final', game: 'dota2', teamStart: 'a', complete: false,
+        heroes: ['Pudge', 'Invoker', 'Tiny', 'Mars', 'Lion', 'Juggernaut', 'Phoenix', 'Rubick', 'Sniper', 'Magnus', 'Enigma'],
+        dir: '/assets/heroes/dota2/', ext: '.png' },
+      'mobile-legends': { visible: true, title: 'Grand Final', game: 'mobile-legends', teamStart: 'a', complete: false,
+        heroes: ['Fanny', 'Ling', 'Lancelot', 'Joy', 'Valentina', 'Tigreal', 'Chou', 'Claude', 'Pharsa', 'Brody', 'Khufra', 'Mathilda'],
+        dir: '/assets/heroes/mobile-legends/', ext: '.jpg' }
+    };
+    // A believable mid-draft board for previews, built from the real order.
+    function stripDemo(game, data) {
+      const g = DEMO_STRIP[game]; if (!g) return null;
+      const order = game === 'dota2'
+        ? 'AbAbBbBbAbBbBbApBpAbAbBbBpApApBpBpApAbBbAbBbApBp'
+        : 'AbBbAbBbAbBbApBpBpApApBpBbAbBbAbBpApApBp';
+      const sequence = order.match(/../g).map((x) => ({ by: x[0].toLowerCase(), action: x[1] === 'b' ? 'ban' : 'pick' }));
+      const slug = (n) => n.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      const ops = g.heroes.map((h, i) => ({ name: h, action: sequence[i].action, by: sequence[i].by, image: g.dir + slug(h) + g.ext }));
+      const next = sequence[ops.length];
+      return { ...g, sequence, ops, turn: next ? { team: next.by, action: next.action } : null };
+    }
     function render(data) {
       let d = data.draft || {};
       // Preview with no draft running: show the sample board, so the Scenes launcher thumbnail and
       // the Preview window aren't a blank page (the live state's empty draft used to win).
-      if (SceneBase.preview && !(Array.isArray(d.sequence) && d.sequence.length)) d = DEMO_DRAFT;
+      if (SceneBase.preview && !(Array.isArray(d.sequence) && d.sequence.length)) d = stripDemo(SceneBase.qp('demo') || data.activeGame, data) || DEMO_DRAFT;
       _lastDraft = d;
       // Nothing pushed live yet (or the board was reset/cleared) — hide the whole stage instead
       // of showing an empty/stale board of heroes.
@@ -372,9 +622,14 @@
       // Timer: reset the countdown whenever the turn advances.
       const turnKey = (d.ops ? d.ops.length : 0) + ':' + (d.turn ? d.turn.team + d.turn.action : 'none');
       _timerGame = !!(d.turn && !d.complete);
-      if (turnKey !== _turnKey) { _turnKey = turnKey; _deadline = Date.now() + PER_PICK_SECONDS * 1000; }
+      if (turnKey !== _turnKey) { _turnKey = turnKey; _deadline = Date.now() + turnLength(d) * 1000; }
+      // A live game feed (Dota 2 GSI) carries the real time left on the clock: follow it while fresh.
+      const gsiDraft = d.game === 'dota2' && data.dota && data.dota.connected && data.dota.live && data.dota.live.draft;
+      if (gsiDraft && d.turn && !d.complete && Date.now() - (data.dota.live.at || 0) < 5000) {
+        _deadline = (data.dota.live.at || Date.now()) + Math.max(0, Number(gsiDraft.remaining) || 0) * 1000;
+      }
 
-      const sig = JSON.stringify({ ops: d.ops, turn: d.turn, t: d.title, sub: d.subtitle, seq: d.sequence,
+      const sig = JSON.stringify({ ops: d.ops, turn: d.turn, t: d.title, sub: d.subtitle, seq: d.sequence, look: [d.layout, d.stripPos, d.turnSeconds, d.game, d.teamStart, SceneBase.brandAccent(data)],
         c: [data.teams?.blue?.color, data.teams?.orange?.color, data.teams?.blue?.name, data.teams?.orange?.name],
         sc: data?.match?.score, ser: data?.series, map: currentMap(data), lg: [data.teams?.blue?.logo, data.teams?.orange?.logo] });
       if (sig === _sig) { tickTimer(d); return; }
@@ -398,7 +653,13 @@
       const cols = document.querySelector('.d-cols');
       cols.classList.toggle('ban-only', banOnly);
       stage.classList.toggle('ban-mode', banOnly);
-      if (banOnly) {
+      const strip = useStrip(d, banOnly);
+      stage.classList.toggle('strip-mode', strip);
+      if (strip) {
+        buildStrip(data, d);
+        cols.replaceChildren();
+        tickTimer(d);
+      } else if (banOnly) {
         cols.replaceChildren(buildBanBoard(data, d));
       } else {
         const newA = buildCol('a', data, d); newA.id = 'col-a';
@@ -407,6 +668,8 @@
       }
     }
 
+    // 'dota' ticks (several a second while Dota 2 GSI is live) only move the shot clock.
+    SceneBase.liveUpdates('dota');
     SceneBase.connect((data) => { SceneBase.applySceneConfig('draft', data); render(data); });
     setInterval(() => { if (_lastDraft) tickTimer(_lastDraft); }, 1000);
 

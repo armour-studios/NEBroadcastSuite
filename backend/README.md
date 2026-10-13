@@ -1,16 +1,14 @@
-# Backend Module Skeleton
+# Backend modules
 
-This folder contains the Phase 1 modular backend scaffold.
+Everything under `backend/` is required by `server.js` (which runs inside the Electron main
+process) or by `main.js`. There is no separate backend entry point.
 
-Current modules:
-- core/state-store.js
-- core/ws-hub.js
-- integrations/rl-stats-api.js
-- integrations/startgg-client.js
-- integrations/startgg-sync.js
-- triggers/rules-engine.js
-- scenes/scene-router.js
-- themes/theme-registry.js
+Folders:
+- `cloud/` - Nameless cloud client, breaker and session.
+- `integrations/` - OBS, start.gg, RL Stats API and the other platform clients.
+- `director/` - the AI director and its per-game adapters.
+- `scenes/overlay-editor.js` - the live overlay HTML editor behind `/api/overlay/*`.
+- Single-file modules (`veto.js`, `sheets.js`, `team-db.js`, ...) are documented at the top of each file.
 
-These files are intentionally minimal and are not yet wired into server.js runtime.
-They provide a safe migration target for incremental refactors.
+The Phase 1 "modular backend scaffold" (`core/`, `triggers/`, `themes/`, `scenes/scene-router.js`,
+`index.js`) was removed in 2026-10: nothing required it and it had drifted from the real server.

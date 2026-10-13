@@ -1,4 +1,10 @@
 const { makeEvent, targetPlayer, targetArea } = require('../events');
+const { createDuelPredictor } = require('../cs2-duel');
+
+// Gunfight prediction (see ../cs2-duel.js): the fight about to happen, from positions + view lineups.
+const duels = createDuelPredictor();
+const duelSent = new Map();   // watch steamid -> { at, score }: re-sent at most every DUEL_RESEND_MS unless it got hotter
+const DUEL_RESEND_MS = 1200;
 
 const PRIORITY = {
   ace: 98,
@@ -7,6 +13,7 @@ const PRIORITY = {
   defuse: 88,
   bomb_planted: 82,
   low_hp_duel: 75,
+  duel: 70,          // + up to 22 by how sure the prediction is
   trade: 70,
   lurk: 55,
   economy: 40,
@@ -173,6 +180,29 @@ function extractEvents(prev, cur) {
     }
   }
 
+  // Predicted gunfight — only while the round is live (not freezetime, warmup or round end).
+  const livePhase = cur.phase === 'live' || cur.phase === 'bomb' || cur.phase === 'defuse';
+  if (livePhase) {
+    const now = Date.now();
+    const best = duels.predict(players, { now, observedId: cur.observed && cur.observed.steamid })[0];
+    if (best) {
+      const w = best.watch;
+      const last = duelSent.get(w.steamid);
+      if (!last || now - last.at > DUEL_RESEND_MS || best.score - last.score > 0.1) {
+        duelSent.set(w.steamid, { at: now, score: best.score });
+        events.push(makeEvent({
+          type: 'duel',
+          game: 'csgo',
+          target: targetPlayer(w.steamid, w.name),
+          priority: PRIORITY.duel + Math.round(best.score * 22),
+          reason: best.reason,
+          gameTime,
+          ttl: 2500
+        }));
+      }
+    }
+  } else if (duelSent.size) { duelSent.clear(); duels.reset(); }
+
   // Lurk detection — far from teammates
   players.filter((p) => p.alive && p.pos).forEach((p) => {
     const mates = players.filter((m) => m.team === p.team && m.alive && m.steamid !== p.steamid && m.pos);
@@ -246,6 +276,8 @@ function onUpdate(state) {
 
 function reset() {
   prevSnapshot = null;
+  duelSent.clear();
+  duels.reset();
 }
 
 module.exports = { id: 'csgo', gameId: 'csgo', PRIORITY, extractEvents, getBaseline, onUpdate, reset };

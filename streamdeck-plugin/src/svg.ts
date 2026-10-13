@@ -33,6 +33,7 @@ export const GLYPHS: Record<string, string> = {
   "desk-topic":     `<g fill="none" stroke="{c}" stroke-width="2" stroke-linecap="round"><path d="M4 6h10M4 12h10M4 18h10"/><path d="M17 9l4 3-4 3"/></g>`,
   "run-of-show":    `<g fill="none" stroke="{c}" stroke-width="2" stroke-linecap="round"><path d="M4 5h16M4 11h9M4 17h9"/><path d="M16 14l5 3-5 3z" fill="{c}"/></g>`,
   "countdown-controls": `<g fill="none" stroke="{c}" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2"/><path d="M9 2h6"/><path d="M19 4l2 2"/></g>`,
+  "output-control": `<g fill="none" stroke="{c}" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="2.5" fill="{c}"/><path d="M8.2 7.8a6 6 0 0 0 0 8.4M15.8 7.8a6 6 0 0 1 0 8.4M5.2 4.8a10 10 0 0 0 0 14.4M18.8 4.8a10 10 0 0 1 0 14.4"/></g>`,
   "offline":        `<g stroke="{c}" stroke-width="4" stroke-linecap="round" fill="none"><path d="M26 46 46 26"/><path d="M30 26h-8v8"/><path d="M42 46h8v-8"/></g>`
 };
 

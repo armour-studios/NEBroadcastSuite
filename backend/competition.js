@@ -215,7 +215,13 @@ function validateDoc(input) {
     const key = normName(name) || name.toLowerCase();
     if (seenTeam.has(key)) { warnings.push(`teams[${i}] "${name}" is listed twice — kept the first.`); return; }
     seenTeam.add(key);
-    doc.teams.push({ id: str(t.id, 120), name, abbr: str(t.abbr || t.tag, 12), logo: str(t.logo, 2048), color: /^#?[0-9a-f]{6}$/i.test(str(t.color)) ? ('#' + str(t.color).replace('#', '')) : '', division: str(t.division, 60) });
+    // players is optional: a source that sends it owns the roster (the website does); one that
+    // omits it leaves the league's own roster alone.
+    const players = Array.isArray(t.players) ? t.players.slice(0, 20).map((p) => ({
+      id: str(p && p.id, 120), name: str(p && (p.name || p.gamertag || p.handle), 60), role: str(p && p.role, 40),
+      photo: str(p && (p.photo || p.avatar), 2048), country: str(p && p.country, 8),
+    })).filter((p) => p.name) : null;
+    doc.teams.push({ id: str(t.id, 120), name, abbr: str(t.abbr || t.tag, 12), logo: str(t.logo, 2048), color: /^#?[0-9a-f]{6}$/i.test(str(t.color)) ? ('#' + str(t.color).replace('#', '')) : '', division: str(t.division, 60), players });
   });
 
   (Array.isArray(d.matches) ? d.matches : []).slice(0, 2000).forEach((m, i) => {
@@ -236,6 +242,8 @@ function validateDoc(input) {
       id: str(m.id, 120), teamA: a, teamB: b, date, time,
       week: str(m.week, 20), round: str(m.round || m.stage, 60), bestOf: parseBestOf(m.bestOf) || null,
       status, scoreA, scoreB, games, overtime: !!m.overtime, stream: str(m.stream, 2048),
+      // Stream-queue flags (the Nameless website sends them): on a channel's queue, its place, featured.
+      onStream: !!m.onStream, queuePos: numOrNull(m.queuePos), featured: !!m.featured, streamName: str(m.streamName, 60),
     });
   });
 
@@ -315,6 +323,14 @@ function applyDoc(lg, doc, opts = {}) {
     if (t.abbr && !tm.abbr) set('abbr', t.abbr);
     if (t.color && !tm.color) set('color', t.color);
     if (t.division) set('divisionId', ensureDivision(t.division));
+    if (Array.isArray(t.players)) {
+      const prev = Array.isArray(tm.players) ? tm.players : [];
+      const next = t.players.map((p) => {
+        const old = prev.find((x) => (p.id && x.extId === p.id) || normName(x.name) === normName(p.name)) || {};
+        return { ...old, id: old.id || uid('pl'), extId: p.id || old.extId || '', name: p.name, role: p.role || old.role || '', photo: p.photo || old.photo || '', country: p.country || old.country || '' };
+      });
+      if (JSON.stringify(next) !== JSON.stringify(prev)) { tm.players = next; report.changed = true; }
+    }
     return tm;
   };
   (doc.teams || []).forEach(upsertTeam);
@@ -351,7 +367,19 @@ function applyDoc(lg, doc, opts = {}) {
     if (dm.round) m.round = dm.round;
     if (dm.bestOf) m.format = 'bo' + dm.bestOf;
     if (dm.stream) m.stream = dm.stream;
+    const q = { onStream: dm.onStream || undefined, queuePos: dm.queuePos != null ? dm.queuePos : undefined, featured: dm.featured || undefined, streamName: dm.streamName || undefined };
+    for (const k of Object.keys(q)) {
+      if (q[k] === undefined) { if (k in m) { delete m[k]; report.changed = true; } }
+      else if (m[k] !== q[k]) { m[k] = q[k]; report.changed = true; }
+    }
     m.result = m.result || { scoreA: null, scoreB: null, ot: false };
+    // The app just recorded this match and sent it to the source; a document fetched before that
+    // report landed must not roll the result back (standings went backwards until the next change).
+    // Held only while the source has fewer games than we do; once it catches up it wins again.
+    const localGames = (m.games || []).length;
+    const docGames = (dm.games || []).length;
+    const held = opts.protect && m.id && opts.protect(m) && docGames < localGames;
+    if (held) { seen.add(m.id); report.held = (report.held || 0) + 1; return; }
     if (dm.games && dm.games.length) {
       m.games = dm.games.map((g) => (flipped ? { scoreA: g.scoreB, scoreB: g.scoreA } : { scoreA: g.scoreA, scoreB: g.scoreB }));
     }
@@ -537,7 +565,7 @@ function buildFeed(lg, opts = {}) {
 const SCHEMA = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'ne-competition/v1',
-  title: 'NE Broadcast Suite competition document',
+  title: 'Broadcast Studio competition document',
   type: 'object',
   properties: {
     format: { const: FORMAT },

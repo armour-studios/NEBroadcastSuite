@@ -1,20 +1,30 @@
-/* ─── gameconfig.js — Game Config Builder (extend an existing game's maps/roles/characters) ──────
-   Loads after leagues.js. One active config per game (state.gameConfigs, keyed by gameId); the
-   bundle being edited lives entirely client-side (gcBundle) until Save / Import / Reset round-trips
-   it through the server — same pattern as the League Editor holding lgLeagues locally.
+/* ─── gameconfig.js — Custom game content (Settings > Games > <game> > Custom content) ──────────
+   Shows EVERYTHING the app knows for a game (built-in + the producer's own) as a picture grid.
+   Click a card to change its picture, name or role; Add creates a new one; pictures dropped on
+   the list are added in bulk. Every change saves itself (save_game_config, debounced), so there is
+   no Save button to forget.
 
-   Save & apply makes the bundle live (server normalises ids — see backend/game-config.js); Export
-   only writes a shareable .zip. Rows whose id matches a built-in item are OVERRIDES: they replace
-   that item's image / name / type without duplicating it. */
+   Data model is unchanged: one config bundle per game (state.gameConfigs[gameId]) holding only the
+   producer's rows. A row whose id is a built-in item is an EDIT of it (the server stores only the
+   fields that differ, see backend/game-config.js); any other row is an ADDED item. The server
+   merges them into currentState.draftRosters / vetoPools, which is what this page reads. Modes
+   are kept in the bundle untouched (they have no UI and no game logic). */
 
 (function () {
-  const GC_TABS = ['maps', 'modes', 'roles', 'characters'];
-  // Longest side an upload is downscaled to before it becomes base64 in state.
   const GC_MAX_DIM = { maps: 1280, characters: 320, roles: 128 };
-  let gcActiveTab = 'maps';
-  let gcBundle = null;      // in-progress edit state for the currently-selected game
-  let gcDirty = false;      // unsaved edits — never overwritten by an incoming state update
-  let gcReloadPending = false;
+  const KIND = {
+    characters: { noun: 'character', extra: 'role', extraLabel: 'Role', uid: 'char', src: 'draftRosters' },
+    maps:       { noun: 'map',       extra: 'type', extraLabel: 'Mode', uid: 'map',  src: 'vetoPools' },
+  };
+  const SAVE_DELAY_MS = 500;
+
+  let gcBundle = null;        // the producer's rows for the selected game (working copy)
+  let gcTab = 'characters';
+  let gcQuery = '';
+  let gcEdit = null;          // { kind, id | null (new), draft: {name, image, extra} }
+  let gcSaveTimer = null, gcSaving = false, gcSaveAgain = false, gcReloadPending = false;
+  let gcLoadedGame = '';
+  let gcRenderSig = '';
 
   const gcEsc = (s) => esc(s);
   const gcUid = (p) => (p || 'id') + Math.random().toString(36).slice(2, 9);
@@ -22,94 +32,401 @@
   const gcImg = (src) => (src && src.charAt(0) === '/') ? 'http://localhost:3000' + src : (src || '');
   const gcNameFromFile = (f) => String((f && f.name) || '').replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ')
     .replace(/\s+/g, ' ').trim().replace(/\b[a-z]/g, (c) => c.toUpperCase());
+  const lc = (s) => String(s || '').trim().toLowerCase();
+  const gcImageFiles = (list) => Array.from(list || []).filter((f) => /^image\//i.test(f.type || ''));
 
   function gcBlankBundle(gameId) {
-    return {
-      format: 'ne-game-config', version: 1,
-      configId: '', author: '', gameVersion: '', exportedAt: null,
-      game: gameId || '',
-      maps: [], roles: [], roleIcons: {}, characters: [], modes: []
-    };
+    return { format: 'ne-game-config', version: 1, configId: '', author: '', gameVersion: '', exportedAt: null,
+      game: gameId || '', maps: [], roles: [], roleIcons: {}, characters: [], modes: [] };
   }
-
   function gcCurrentGame() { return el('gc-game') ? el('gc-game').value : ''; }
+  function gcGameName() { const g = (currentState.games || {})[gcCurrentGame()]; return (g && g.name) || gcCurrentGame(); }
+  function gcActive() { return (currentState.gameConfigs || {})[gcCurrentGame()] || null; }
+  // A config can exist only to hold drop-map POIs; "changes" means custom content.
+  function gcHasChanges(cfg) {
+    cfg = cfg || {};
+    return ['maps', 'characters', 'roles', 'modes'].some((k) => (cfg[k] || []).length > 0) || Object.keys(cfg.roleIcons || {}).length > 0;
+  }
+  function gcVersions() { return (currentState.gameConfigVersions || {})[gcCurrentGame()] || []; }
+  function gcFrom() { return (currentState.gameConfigFrom || {})[gcCurrentGame()] || null; }
+  // What is in use right now: a saved version's name, '__unsaved' (changes not saved as a
+  // version) or '__original' (the content the app ships with).
+  function gcCurrentVersion() {
+    const from = gcFrom();
+    if (from && from.name && gcVersions().some((v) => v.name === from.name)) return from.name;
+    return gcHasChanges(gcActive()) ? '__unsaved' : '__original';
+  }
 
-  // What the app currently serves for this game (built-in + active config, merged server-side).
-  function gcLiveList(kind) {
-    const game = gcBundle && gcBundle.game;
-    const src = kind === 'maps' ? currentState.vetoPools : currentState.draftRosters;
-    return (src && src[game]) || [];
+  // What the app serves right now (built-in merged with the SAVED config). undefined = this game
+  // has no characters / maps at all (no draft or veto support), as opposed to an empty list.
+  function gcLive(kind) {
+    if (!KIND[kind]) return undefined;
+    const src = currentState[KIND[kind].src];
+    return src ? src[gcCurrentGame()] : undefined;
   }
-  function gcBuiltinRoles() {
-    const game = gcBundle && gcBundle.game;
-    return (typeof ROLES_BY_GAME !== 'undefined' && ROLES_BY_GAME[game]) || [];
-  }
+  function gcSupports(kind) { return Array.isArray(gcLive(kind)) || ((gcBundle && gcBundle[kind]) || []).length > 0; }
+
+  function gcBuiltinRoles() { return (typeof ROLES_BY_GAME !== 'undefined' && ROLES_BY_GAME[gcCurrentGame()]) || []; }
   function gcAllRoles() {
     const seen = new Set(); const out = [];
-    gcBuiltinRoles().concat(gcBundle.roles || []).forEach((r) => { const k = String(r).toLowerCase(); if (r && !seen.has(k)) { seen.add(k); out.push(r); } });
+    gcBuiltinRoles().concat((gcBundle && gcBundle.roles) || []).forEach((r) => { const k = lc(r); if (r && !seen.has(k)) { seen.add(k); out.push(r); } });
+    return out;
+  }
+  // Roles a character can have: the roles the game's characters already use (Overwatch's heroes
+  // say "Damage" while its player roles say "DPS"), then the game's roles and the producer's own.
+  function gcCharacterRoleOptions() {
+    const seen = new Set(); const out = [];
+    (gcLive('characters') || []).map((c) => c.role || '').concat(gcAllRoles())
+      .forEach((r) => { if (r && !seen.has(lc(r))) { seen.add(lc(r)); out.push(r); } });
+    return out;
+  }
+  function gcModeOptions() {
+    const meta = (currentState.vetoMeta || {})[gcCurrentGame()] || {};
+    const seen = new Set(); const out = [];
+    (meta.modes || []).concat((gcLive('maps') || []).map((m) => m.type || m.tier || ''))
+      .forEach((t) => { if (t && !seen.has(lc(t))) { seen.add(lc(t)); out.push(t); } });
     return out;
   }
 
-  function gcMarkDirty() { gcDirty = true; gcRenderStatus(); }
+  // ── The merged view: live list with unsaved local edits on top ─────────────────────────────
+  // Each entry: { id, name, image, extra, state: 'builtin' | 'edited' | 'added', row }.
+  function gcView(kind) {
+    const K = KIND[kind];
+    const live = gcLive(kind) || [];
+    const rows = (gcBundle && gcBundle[kind]) || [];
+    const rowById = {}; rows.forEach((r) => { rowById[r.id] = r; });
+    const rowByName = {}; rows.forEach((r) => { if (r.name) rowByName[lc(r.name)] = r; });
+    const used = new Set();
+    const out = [];
+    live.forEach((x) => {
+      let row = rowById[x.id];
+      if (!row && x.custom) row = rowByName[lc(x.name)];   // a new row saved under its normalised id
+      if (x.custom && !row) return;                         // removed locally, save on its way
+      if (row) used.add(row);
+      out.push({
+        id: x.id,
+        name: (row && row.name) || x.name || '',
+        image: (row && row.image) || x.image || '',
+        extra: (row && row[K.extra]) || x[K.extra] || x.tier || '',
+        state: x.custom ? 'added' : (row ? 'edited' : 'builtin'),
+        row: row || null,
+      });
+    });
+    rows.forEach((r) => {
+      if (used.has(r)) return;
+      out.push({ id: r.id, name: r.name || '', image: r.image || '', extra: r[K.extra] || '', state: 'added', row: r });
+    });
+    return out;
+  }
 
-  // Loads whichever bundle should be shown for the selected game: the active config if one
-  // exists, otherwise a blank bundle to build from scratch. Never touches other games' configs.
+  // ── Loading / saving ───────────────────────────────────────────────────────────────────────
   function gcLoadForGame(gameId) {
     const active = (currentState.gameConfigs || {})[gameId];
     gcBundle = active ? Object.assign(gcBlankBundle(gameId), JSON.parse(JSON.stringify(active))) : gcBlankBundle(gameId);
-    gcDirty = false; gcReloadPending = false;
-    // A saved override only stores what it changes — show the built-in's name/type for the rest.
-    ['maps', 'characters'].forEach((kind) => {
-      const extra = GC_KIND[kind].extra;
-      const liveById = {}; gcLiveList(kind).forEach((x) => { liveById[x.id] = x; });
-      gcBundle[kind] = (gcBundle[kind] || []).map((r) => {
-        const b = liveById[r.id] || {};
-        return { id: r.id, name: r.name || b.name || '', image: r.image || '', [extra]: r[extra] || b[extra] || '' };
-      });
-    });
+    gcBundle.game = gameId;
+    ['maps', 'characters', 'roles', 'modes'].forEach((k) => { if (!Array.isArray(gcBundle[k])) gcBundle[k] = []; });
+    if (!gcBundle.roleIcons || typeof gcBundle.roleIcons !== 'object') gcBundle.roleIcons = {};
+    gcReloadPending = false;
     if (el('gc-author')) el('gc-author').value = gcBundle.author || '';
     if (el('gc-version')) el('gc-version').value = gcBundle.gameVersion || '';
     if (el('gc-config-id')) el('gc-config-id').value = gcBundle.configId || '';
-    gcRenderStatus();
-    gcRenderAll();
+    if (gcTab !== 'roles' && !gcSupports(gcTab)) gcTab = gcSupports('characters') ? 'characters' : gcSupports('maps') ? 'maps' : 'roles';
+    gcRenderSig = '';
+    gcRender();
   }
 
-  function gcRenderStatus() {
-    const line = el('gc-status-line'); if (!line) return;
-    const active = (currentState.gameConfigs || {})[gcCurrentGame()];
-    const resetBtn = el('btn-gc-reset');
-    const hasContent = active && ((active.maps || []).length || (active.characters || []).length
-      || (active.roles || []).length || Object.keys(active.roleIcons || {}).length || (active.modes || []).length);
-    if (hasContent) {
-      const n = (k, word) => { const c = (active[k] || []).length; return c ? `${c} ${word}${c === 1 ? '' : 's'}` : ''; };
-      line.textContent = 'Custom content is live: ' + ([n('maps', 'map'), n('characters', 'character'), n('roles', 'role'), n('modes', 'mode')].filter(Boolean).join(', ') || 'role icons')
-        + (active.configId ? ` — ${active.configId}` : '') + (active.author ? ` by ${active.author}` : '') + (active.gameVersion ? ` (${active.gameVersion})` : '');
+  function gcStatus(text, tone) {
+    const s = el('gcb-status'); if (!s) return;
+    s.textContent = text || '';
+    s.dataset.tone = tone || '';
+  }
+
+  function gcQueueSave() {
+    gcStatus('Saving…');
+    clearTimeout(gcSaveTimer);
+    gcSaveTimer = setTimeout(gcSaveNow, SAVE_DELAY_MS);
+  }
+  function gcSaveNow() {
+    gcSaveTimer = null;
+    if (!gcBundle || !gcBundle.game) return;
+    if (gcSaving) { gcSaveAgain = true; return; }
+    gcSaving = true;
+    send('save_game_config', { bundle: gcBundle });
+  }
+
+  function gcResult(msg, ok) {
+    const r = el('gc-result'); if (!r) return;
+    r.textContent = msg || '';
+    r.style.color = ok === false ? '#f56565' : (ok ? 'var(--good,#48bb78)' : 'var(--muted)');
+  }
+
+  // app.js routes import-export-result messages with context 'game-config' here. A result for one
+  // of our own autosaves goes to the quiet status line; import / export / reset results are shown.
+  // The state broadcast carrying the change is coalesced and can land AFTER this result, so the
+  // reload waits for it (gcReloadPending → _gcRefresh), with a timer as the fallback.
+  window._gcHandleImportExportResult = function (message, ok) {
+    if (gcSaving) {
+      gcSaving = false;
+      if (!ok) { gcStatus(message || 'Could not save', 'bad'); return; }
+      if (gcSaveAgain || gcSaveTimer) { gcSaveAgain = false; gcSaveNow(); return; }
+      gcStatus('Saved', 'good');
+      setTimeout(() => { const s = el('gcb-status'); if (s && s.textContent === 'Saved') gcStatus(''); }, 2500);
     } else {
-      line.textContent = 'No custom content active for this game — using built-in content only.';
+      gcResult(message, ok);
+      if (!ok || /exported/i.test(message || '')) return;   // an export changes nothing server-side
     }
-    if (resetBtn) resetBtn.style.display = active ? '' : 'none';
-    const dirty = el('gc-dirty'); if (dirty) dirty.style.display = gcDirty ? '' : 'none';
-  }
+    gcReloadPending = true;
+    setTimeout(() => { if (gcReloadPending && !gcEdit && !gcSaveTimer && !gcSaving) gcLoadForGame(gcCurrentGame()); }, 600);
+  };
 
-  function gcRenderBadges() {
+  // ── Rendering ──────────────────────────────────────────────────────────────────────────────
+  function gcRender() {
     if (!gcBundle) return;
-    const counts = {
-      maps: (gcBundle.maps || []).length, modes: (gcBundle.modes || []).length, characters: (gcBundle.characters || []).length,
-      roles: (gcBundle.roles || []).length + Object.keys(gcBundle.roleIcons || {}).length
+    const name = gcGameName();
+    const intro = el('gcb-intro');
+    if (intro) intro.textContent = `Everything this app knows for ${name}. Click a card to change its picture, name or role, or add a new one. Changes apply straight away.`;
+    // Tabs: only what this game actually has.
+    const support = { characters: gcSupports('characters'), maps: gcSupports('maps'), roles: true };
+    document.querySelectorAll('#gc-tabs .lg2-tab').forEach((b) => {
+      const t = b.dataset.tab;
+      b.hidden = !support[t];
+      b.classList.toggle('active', t === gcTab);
+    });
+    const counts = { characters: gcView('characters').length, maps: gcView('maps').length, roles: gcAllRoles().length };
+    Object.keys(counts).forEach((k) => { const e = el('gc-badge-' + k); if (e) e.textContent = counts[k]; });
+
+    const isRoles = gcTab === 'roles';
+    const add = el('gcb-add'), up = el('gcb-upload'), search = el('gcb-search'), hint = el('gcb-drop-hint');
+    if (add) add.textContent = isRoles ? 'Add role' : 'Add ' + KIND[gcTab].noun;
+    if (up) up.hidden = isRoles;
+    if (search) { search.hidden = isRoles; if (search.value !== gcQuery) search.value = gcQuery; }
+    if (hint) hint.hidden = isRoles;
+    const reset = el('btn-gc-reset'); if (reset) reset.style.display = gcHasChanges(gcActive()) ? '' : 'none';
+
+    gcRenderVersions();
+    gcRenderEditor();
+    if (isRoles) gcRenderRoles(); else gcRenderGrid(gcTab);
+  }
+
+  function gcRenderGrid(kind) {
+    const body = el('gcb-body'); if (!body) return;
+    const K = KIND[kind];
+    const all = gcView(kind);
+    const q = lc(gcQuery);
+    const items = q ? all.filter((x) => lc(x.name).includes(q) || lc(x.extra).includes(q)) : all;
+    const label = { edited: 'Changed', added: 'Added by you' };
+    if (!all.length) {
+      body.innerHTML = `<div class="gcb-empty">No ${K.noun}s for ${gcEsc(gcGameName())} yet.<br>Press <b>Add ${K.noun}</b>, or drop pictures here.</div>`;
+      return;
+    }
+    if (!items.length) { body.innerHTML = `<div class="gcb-empty">Nothing matches "${gcEsc(gcQuery)}".</div>`; return; }
+    body.innerHTML = `<div class="gcb-grid gcb-grid-${kind}">${items.map((x) => {
+      const img = gcImg(x.image);
+      return `<button type="button" class="gcb-card${gcEdit && gcEdit.kind === kind && gcEdit.id === x.id ? ' is-open' : ''}" data-id="${gcEsc(x.id)}" title="Edit ${gcEsc(x.name)}">
+        <span class="gcb-pic">${img ? `<img src="${gcEsc(img)}" alt="" loading="lazy" onerror="this.remove()">` : ''}<span class="gcb-nopic">No picture</span></span>
+        <span class="gcb-name">${gcEsc(x.name || 'Unnamed')}</span>
+        <span class="gcb-meta">${x.extra ? gcEsc(x.extra) : '&nbsp;'}</span>
+        ${label[x.state] ? `<span class="gcb-badge gcb-badge-${x.state}">${label[x.state]}</span>` : ''}
+      </button>`;
+    }).join('')}</div>`;
+  }
+
+  function gcRoleIcon(role) {
+    const own = (gcBundle.roleIcons || {})[lc(role)];
+    if (own) return own;
+    const active = gcActive();
+    // roleIconUrl() resolves the SAVED config first; skip that so a removed icon reads as removed.
+    if (active && active.roleIcons && active.roleIcons[lc(role)]) return '';
+    return typeof roleIconUrl === 'function' ? roleIconUrl(gcCurrentGame(), role) : '';
+  }
+  function gcRenderRoles() {
+    const body = el('gcb-body'); if (!body) return;
+    const builtin = new Set(gcBuiltinRoles().map(lc));
+    const roles = gcAllRoles();
+    body.innerHTML = (roles.length ? `<div class="gcb-roles">${roles.map((r) => {
+      const img = gcRoleIcon(r);
+      const own = !!(gcBundle.roleIcons || {})[lc(r)];
+      return `<div class="gcb-role" data-role="${gcEsc(r)}">
+        <button type="button" class="gcb-role-icon${img ? '' : ' is-empty'}" data-act="icon" title="${img ? 'Change icon' : 'Add an icon'}">${img ? `<img src="${gcEsc(gcImg(img))}" alt="" onerror="this.remove()">` : '<span>+</span>'}</button>
+        <span class="gcb-role-name">${gcEsc(r)}</span>
+        ${own ? '<button type="button" class="btn btn-ghost btn-xs" data-act="clear-icon">Remove icon</button>' : ''}
+        ${builtin.has(lc(r)) ? '' : '<button type="button" class="btn btn-ghost btn-xs gcb-danger" data-act="del">Delete</button>'}
+      </div>`;
+    }).join('')}</div>` : `<div class="gcb-empty">${gcEsc(gcGameName())} has no roles yet. Press <b>Add role</b>.</div>`)
+      + '<p class="gcb-note">Click an icon box to add or change the icon. A light icon on a clear background reads best. Icons show in the player role picker and on overlays that print a role.</p>';
+  }
+
+  // ── Versions bar ───────────────────────────────────────────────────────────────────────────
+  function gcRenderVersions() {
+    const sel = el('gcb-version-sel'); if (!sel) return;
+    const vs = gcVersions();
+    const from = gcFrom();
+    const cur = gcCurrentVersion();
+    const has = gcHasChanges(gcActive());
+    const day = (t) => { try { return new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); } catch (e) { return ''; } };
+    sel.innerHTML = (cur === '__unsaved' ? '<option value="__unsaved">My changes (not saved as a version)</option>' : '')
+      + '<option value="__original">Original (as the app ships it)</option>'
+      + vs.map((v) => `<option value="${gcEsc(v.name)}">${gcEsc(v.name)} · saved ${gcEsc(day(v.savedAt))}</option>`).join('');
+    sel.value = cur;
+    const isVersion = cur !== '__unsaved' && cur !== '__original';
+    const changed = isVersion && from && !from.clean;
+    const st = el('gcb-version-state');
+    if (st) {
+      st.textContent = changed ? 'Changed since you saved it'
+        : cur === '__unsaved' ? 'Save these as a version to keep them, then build on them later'
+        : cur === '__original' && vs.length ? 'Pick a saved version to go back to it'
+        : 'Your edits can be saved as a named version, like "Season 20", to switch back to later';
+      st.dataset.tone = changed || cur === '__unsaved' ? 'warn' : '';
+    }
+    const upd = el('gcb-version-update');
+    if (upd) { upd.hidden = !changed; upd.textContent = `Update "${cur}"`; }
+    const nu = el('gcb-version-new'); if (nu) nu.hidden = !has;
+    const del = el('gcb-version-del'); if (del) del.hidden = !isVersion;
+  }
+  // Send any pending autosave now, so a version captures the latest edits (the socket keeps order).
+  function gcFlushSave() {
+    if (!gcSaveTimer) return;
+    clearTimeout(gcSaveTimer); gcSaveTimer = null;
+    if (gcBundle && gcBundle.game) { gcSaving = true; send('save_game_config', { bundle: gcBundle }); }
+  }
+  function gcDropPendingSave() { clearTimeout(gcSaveTimer); gcSaveTimer = null; gcSaveAgain = false; gcStatus(''); }
+
+  el('gcb-version-sel')?.addEventListener('change', (e) => {
+    const v = e.target.value;
+    const cur = gcCurrentVersion();
+    if (v === cur || v === '__unsaved') return;
+    const from = gcFrom();
+    const unsaved = cur === '__unsaved' || (from && !from.clean && cur !== '__original');
+    const go = () => {
+      gcDropPendingSave(); gcEdit = null;
+      send('game_config_version_load', { gameId: gcCurrentGame(), name: v === '__original' ? '' : v });
     };
-    GC_TABS.forEach((k) => { const e = el('gc-badge-' + k); if (e) e.textContent = counts[k]; });
+    if (!unsaved && !gcSaveTimer) { go(); return; }
+    const label = v === '__original' ? 'the original content' : `"${v}"`;
+    appConfirm(`Your latest changes are not saved as a version. Switch to ${label} and lose them?`, 'Switch', true)
+      .then((ok) => { if (ok) go(); else gcRenderVersions(); });
+  });
+  el('gcb-version-new')?.addEventListener('click', () => {
+    const suggest = (gcBundle && gcBundle.gameVersion) || '';
+    customPrompt('Save as a version', `Name this version of your ${gcGameName()} content, for example "Season 20". You can switch back to it, or start from it, any time.`, suggest, 'Save')
+      .then((name) => {
+        name = String(name || '').trim(); if (!name) return;
+        const exists = gcVersions().some((v) => v.name.toLowerCase() === name.toLowerCase());
+        const save = () => { gcFlushSave(); send('game_config_version_save', { gameId: gcCurrentGame(), name }); };
+        if (!exists) { save(); return; }
+        appConfirm(`There is already a version called "${name}". Replace it with what you have now?`, 'Replace').then((ok) => { if (ok) save(); });
+      });
+  });
+  el('gcb-version-update')?.addEventListener('click', () => {
+    const name = gcCurrentVersion();
+    appConfirm(`Replace "${name}" with what you have now?`, 'Update').then((ok) => {
+      if (ok) { gcFlushSave(); send('game_config_version_save', { gameId: gcCurrentGame(), name }); }
+    });
+  });
+  el('gcb-version-del')?.addEventListener('click', () => {
+    const name = gcCurrentVersion();
+    appConfirm(`Delete the saved version "${name}"? What you are using now stays as it is.`, 'Delete', true).then((ok) => {
+      if (ok) send('game_config_version_delete', { gameId: gcCurrentGame(), name });
+    });
+  });
+
+  // ── Editor (one card at a time, opens above the grid) ──────────────────────────────────────
+  function gcOpenEditor(kind, id) {
+    const K = KIND[kind];
+    if (id == null) {
+      gcEdit = { kind, id: null, draft: { name: '', image: '', extra: '' } };
+    } else {
+      const x = gcView(kind).find((v) => v.id === id); if (!x) return;
+      gcEdit = { kind, id, state: x.state, draft: { name: x.name, image: x.image, extra: x.extra }, orig: { name: x.name, image: x.image, extra: x.extra } };
+    }
+    gcRender();
+    const box = el('gcb-editor');
+    if (box) { box.scrollIntoView({ block: 'nearest' }); const n = box.querySelector('[data-f="name"]'); if (n && id == null) n.focus(); }
+    void K;
+  }
+  function gcCloseEditor() {
+    gcEdit = null;
+    if (gcReloadPending && !gcSaveTimer && !gcSaving) { gcLoadForGame(gcCurrentGame()); return; }
+    gcRender();
   }
 
-  function gcSwitchTab(name) {
-    gcActiveTab = name;
-    document.querySelectorAll('#gc-tabs .lg2-tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
-    GC_TABS.forEach((t) => { const p = el('gc-panel-' + t); if (p) p.style.display = t === name ? '' : 'none'; });
+  function gcRenderEditor() {
+    const box = el('gcb-editor'); if (!box) return;
+    if (!gcEdit || gcEdit.kind !== gcTab) { box.hidden = true; box.innerHTML = ''; return; }
+    const K = KIND[gcEdit.kind];
+    const d = gcEdit.draft;
+    const isNew = gcEdit.id == null;
+    const opts = gcEdit.kind === 'characters' ? gcCharacterRoleOptions() : gcModeOptions();
+    const known = !d.extra || opts.some((o) => lc(o) === lc(d.extra));
+    const img = gcImg(d.image);
+    box.hidden = false;
+    box.innerHTML = `
+      <div class="gcb-ed-head">${isNew ? 'New ' + K.noun : 'Edit ' + gcEsc(gcEdit.orig.name || K.noun)}${gcEdit.state === 'edited' ? '<span class="gcb-badge gcb-badge-edited">Changed</span>' : ''}</div>
+      <div class="gcb-ed-body">
+        <button type="button" class="gcb-ed-pic gcb-grid-${gcEdit.kind}${img ? '' : ' is-empty'}" data-act="pick" title="Choose a picture, or drop one here">
+          ${img ? `<img src="${gcEsc(img)}" alt="">` : ''}<span>${img ? 'Change picture' : 'Add a picture'}</span>
+        </button>
+        <div class="gcb-ed-fields">
+          <div class="field-row"><label class="field-label">Name</label>
+            <input type="text" class="input-text" data-f="name" value="${gcEsc(d.name)}" placeholder="${K.noun.charAt(0).toUpperCase() + K.noun.slice(1)} name" maxlength="60"></div>
+          <div class="field-row"><label class="field-label">${K.extraLabel}</label>
+            <select class="input-select" data-f="extra-sel">
+              <option value="">None</option>
+              ${opts.map((o) => `<option value="${gcEsc(o)}"${lc(o) === lc(d.extra) ? ' selected' : ''}>${gcEsc(o)}</option>`).join('')}
+              <option value="__other"${known ? '' : ' selected'}>Other…</option>
+            </select>
+            <input type="text" class="input-text gcb-ed-other" data-f="extra-other" value="${known ? '' : gcEsc(d.extra)}" placeholder="Type the ${K.extraLabel.toLowerCase()}"${known ? ' hidden' : ''}></div>
+          <p class="gcb-ed-err" data-f="err"></p>
+        </div>
+      </div>
+      <div class="gcb-ed-actions">
+        <button type="button" class="btn btn-primary btn-sm" data-act="done">${isNew ? 'Add ' + K.noun : 'Done'}</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-act="cancel">Cancel</button>
+        <span style="flex:1;"></span>
+        ${gcEdit.state === 'edited' ? '<button type="button" class="btn btn-ghost btn-sm" data-act="restore">Restore original</button>' : ''}
+        ${gcEdit.state === 'added' ? `<button type="button" class="btn btn-ghost btn-sm gcb-danger" data-act="delete">Delete ${K.noun}</button>` : ''}
+      </div>`;
   }
 
-  function gcRenderAll() { gcRenderItems('maps'); gcRenderItems('characters'); gcRenderModes(); gcRenderRoles(); gcRenderBadges(); }
+  function gcEditorCommit() {
+    const box = el('gcb-editor'); if (!gcEdit || !box) return;
+    const K = KIND[gcEdit.kind];
+    const d = gcEdit.draft;
+    d.name = (box.querySelector('[data-f="name"]').value || '').trim();
+    const sel = box.querySelector('[data-f="extra-sel"]').value;
+    d.extra = sel === '__other' ? (box.querySelector('[data-f="extra-other"]').value || '').trim() : sel;
+    const err = box.querySelector('[data-f="err"]');
+    if (!d.name) { err.textContent = 'Give it a name first.'; box.querySelector('[data-f="name"]').focus(); return; }
+    const rows = gcBundle[gcEdit.kind];
+    const clash = gcView(gcEdit.kind).find((x) => lc(x.name) === lc(d.name) && x.id !== gcEdit.id);
+    if (clash) { err.textContent = `There is already a ${K.noun} called ${clash.name}. Click its card to change it instead.`; return; }
+    if (gcEdit.id == null) {
+      rows.push({ id: gcUid(K.uid), name: d.name, image: d.image || '', [K.extra]: d.extra || '' });
+    } else {
+      const o = gcEdit.orig;
+      if (d.name === o.name && d.image === o.image && d.extra === o.extra) { gcCloseEditor(); return; }
+      let row = rows.find((r) => r.id === gcEdit.id) || rows.find((r) => lc(r.name) === lc(o.name));
+      if (!row) { row = { id: gcEdit.id }; rows.push(row); }
+      row.name = d.name;
+      if (d.image !== o.image || row.image) row.image = d.image;
+      row[K.extra] = d.extra;
+    }
+    if (d.extra && gcEdit.kind === 'characters' && !gcAllRoles().some((r) => lc(r) === lc(d.extra))) gcBundle.roles.push(d.extra);
+    gcEdit = null;
+    gcQueueSave();
+    gcRender();
+  }
+  function gcEditorRemoveRow() {
+    if (!gcEdit) return;
+    const o = gcEdit.orig || {};
+    gcBundle[gcEdit.kind] = gcBundle[gcEdit.kind].filter((r) => r.id !== gcEdit.id && !(o.name && lc(r.name) === lc(o.name)));
+    gcEdit = null;
+    gcQueueSave();
+    gcRender();
+  }
 
-  // ── Image picking — one hidden <input type=file> shared by every upload button ──
-  let gcPickTarget = null;   // (files) => void
+  // ── Pictures ───────────────────────────────────────────────────────────────────────────────
+  let gcPickTarget = null;
   function gcPickImages(multiple, onFiles) {
     const inp = el('gc-file'); if (!inp) return;
     gcPickTarget = onFiles; inp.multiple = !!multiple; inp.value = ''; inp.click();
@@ -120,233 +437,174 @@
     });
     return downscaleDataUrl(raw, file.type, GC_MAX_DIM[kind]);
   }
-  const gcImageFiles = (list) => Array.from(list || []).filter((f) => /^image\//i.test(f.type || ''));
-
-  // ── Maps + Characters (same row shape: thumb · name · type|role) ──
-  const GC_KIND = {
-    maps:       { noun: 'map',       extra: 'type', extraPh: 'Mode / type', uid: 'map' },
-    characters: { noun: 'character', extra: 'role', extraPh: 'Role',        uid: 'char' }
-  };
-  function gcExtraOptions(kind) {
-    if (kind === 'characters') return gcAllRoles();
-    const game = gcBundle.game;
-    const meta = (currentState.vetoMeta || {})[game] || {};
-    const seen = new Set(); const out = [];
-    (meta.modes || []).concat(gcLiveList('maps').map((m) => m.type || m.tier || '')).concat((gcBundle.modes || []).map((m) => m.name))
-      .forEach((t) => { if (t && !seen.has(t)) { seen.add(t); out.push(t); } });
-    return out;
+  async function gcSetEditorImage(file) {
+    if (!gcEdit || !file) return;
+    gcEdit.draft.image = await gcReadImage(file, gcEdit.kind);
+    // Keep whatever was typed while the picture loaded.
+    const box = el('gcb-editor');
+    if (box) {
+      const n = box.querySelector('[data-f="name"]'); if (n) gcEdit.draft.name = n.value;
+      if (!gcEdit.draft.name) gcEdit.draft.name = gcNameFromFile(file);
+    }
+    gcRenderEditor();
   }
-
-  function gcRenderItems(kind) {
-    const wrap = el('gc-list-' + kind); if (!wrap || !gcBundle) return;
-    const K = GC_KIND[kind];
-    const rows = gcBundle[kind] || [];
-    const live = gcLiveList(kind);
-    const liveById = {}; live.forEach((x) => { if (!x.custom) liveById[x.id] = x; });   // built-ins only
-    const mine = new Set(rows.map((r) => r.id));
-    const builtin = live.filter((x) => !mine.has(x.id));
-    const dlId = 'gc-dl-' + kind;
-
-    const rowHtml = rows.map((m, i) => {
-      const base = liveById[m.id];
-      const img = gcImg(m.image || (base && base.image) || '');
-      return `<div class="gc-row" data-idx="${i}">
-        <button type="button" class="gc-thumb${img ? '' : ' is-empty'}" data-act="img" title="${m.image ? 'Replace image' : 'Upload image'}">
-          ${img ? `<img src="${gcEsc(img)}" alt="" onerror="this.remove()">` : ''}<span class="gc-thumb-plus">+</span>
-        </button>
-        <div class="gc-row-fields">
-          <input type="text" class="input-text" data-f="name" value="${gcEsc(m.name || '')}" placeholder="${K.noun.charAt(0).toUpperCase() + K.noun.slice(1)} name" style="flex:2;">
-          <input type="text" class="input-text" data-f="${K.extra}" list="${dlId}" value="${gcEsc(m[K.extra] || '')}" placeholder="${K.extraPh}" style="flex:1;">
-          ${base ? '<span class="gc-chip" title="Replaces a built-in item of the same name">Override</span>' : (m.image ? '' : '<span class="gc-chip gc-chip-warn">No image</span>')}
-        </div>
-        <button type="button" class="lg-del" data-act="del" title="Remove">×</button>
-      </div>`;
-    }).join('');
-
-    wrap.innerHTML =
-      `<datalist id="${dlId}">${gcExtraOptions(kind).map((t) => `<option value="${gcEsc(t)}">`).join('')}</datalist>`
-      + (rows.length ? `<div class="gc-row-list">${rowHtml}</div>`
-        : `<p class="empty-msg">Nothing added yet — upload ${K.noun} images above. File names become the ${K.noun} names.</p>`)
-      + (builtin.length ? `<details class="gc-builtin"${wrap.dataset.open === '1' ? ' open' : ''}>
-          <summary>Already in the app (${builtin.length}) — click one to replace its image or rename it</summary>
-          <div class="gc-builtin-grid">${builtin.map((b) => `<button type="button" class="gc-builtin-item" data-id="${gcEsc(b.id)}" title="Override ${gcEsc(b.name)}">
-            <img src="${gcEsc(gcImg(b.image))}" alt="" loading="lazy" onerror="this.style.visibility='hidden'"><span>${gcEsc(b.name)}</span></button>`).join('')}</div>
-        </details>` : '');
-
-    const det = wrap.querySelector('.gc-builtin');
-    if (det) det.addEventListener('toggle', () => { wrap.dataset.open = det.open ? '1' : ''; });
-  }
-
-  // Delegated — the lists re-render often, so one listener per container instead of per row.
-  function gcWireList(kind) {
-    const wrap = el('gc-list-' + kind); if (!wrap) return;
-    const K = GC_KIND[kind];
-    const rowOf = (t) => { const r = t.closest('.gc-row'); return r ? Number(r.dataset.idx) : -1; };
-    const setImage = async (idx, file) => {
-      const row = gcBundle[kind][idx]; if (!row || !file) return;
-      row.image = await gcReadImage(file, kind);
-      if (!row.name) row.name = gcNameFromFile(file);
-      gcMarkDirty(); gcRenderItems(kind);
-    };
-    wrap.addEventListener('click', (e) => {
-      if (!gcBundle) return;
-      const b = e.target.closest('.gc-builtin-item');
-      if (b) {
-        const src = gcLiveList(kind).find((x) => x.id === b.dataset.id); if (!src) return;
-        gcBundle[kind].push({ id: src.id, name: src.name || '', image: '', [K.extra]: src[K.extra] || '' });
-        gcMarkDirty(); gcRenderItems(kind); gcRenderBadges();
-        return;
-      }
-      const act = e.target.closest('[data-act]'); if (!act) return;
-      const idx = rowOf(act); if (idx < 0) return;
-      if (act.dataset.act === 'del') { gcBundle[kind].splice(idx, 1); gcMarkDirty(); gcRenderItems(kind); gcRenderBadges(); }
-      else if (act.dataset.act === 'img') gcPickImages(false, (files) => setImage(idx, files[0]));
-    });
-    wrap.addEventListener('change', (e) => {
-      const f = e.target.dataset && e.target.dataset.f; if (!f || !gcBundle) return;
-      const idx = rowOf(e.target); if (idx < 0) return;
-      gcBundle[kind][idx][f] = e.target.value.trim(); gcMarkDirty();
-    });
-    // Dropping an image straight onto a row replaces that row's image.
-    wrap.addEventListener('dragover', (e) => { if (e.target.closest('.gc-row')) { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; } });
-    wrap.addEventListener('drop', (e) => {
-      const idx = rowOf(e.target); if (idx < 0) return;
-      e.preventDefault();
-      const f = gcImageFiles(e.dataTransfer && e.dataTransfer.files)[0]; if (f) setImage(idx, f);
-    });
-  }
-
+  // Bulk: each file becomes a card; a file named after an existing card replaces its picture.
   async function gcAddFiles(kind, files) {
-    if (!gcBundle) return;
-    const K = GC_KIND[kind];
+    if (!gcBundle || !KIND[kind]) return;
+    const K = KIND[kind];
     const imgs = gcImageFiles(files);
-    if (!imgs.length) { gcResult('Those files are not images — use PNG, JPG, WebP or SVG.', false); return; }
-    const live = gcLiveList(kind);
+    if (!imgs.length) { gcResult('Those files are not pictures. Use PNG, JPG, WebP or SVG.', false); return; }
+    let added = 0, replaced = 0;
     for (const f of imgs) {
       const name = gcNameFromFile(f);
       const image = await gcReadImage(f, kind);
-      // A file named after something that already exists updates that item instead of duplicating it.
-      const mine = gcBundle[kind].find((r) => (r.name || '').toLowerCase() === name.toLowerCase());
-      if (mine) { mine.image = image; continue; }
-      const base = live.find((x) => !x.custom && (x.name || '').toLowerCase() === name.toLowerCase());
-      gcBundle[kind].push(base ? { id: base.id, name: base.name, image, [K.extra]: base[K.extra] || '' }
-        : { id: gcUid(K.uid), name, image, [K.extra]: '' });
-    }
-    gcMarkDirty(); gcRenderItems(kind); gcRenderBadges(); gcResult('');
-  }
-  function gcAddBlank(kind) {
-    if (!gcBundle) return;
-    const K = GC_KIND[kind];
-    gcBundle[kind].push({ id: gcUid(K.uid), name: '', image: '', [K.extra]: '' });
-    gcMarkDirty(); gcRenderItems(kind); gcRenderBadges();
-    const last = el('gc-list-' + kind).querySelector('.gc-row:last-child input[data-f="name"]'); if (last) last.focus();
-  }
-
-  // ── Roles tab — the game's built-in roles plus extras, each with an optional icon ──
-  function gcRoleIcon(role) {
-    const own = (gcBundle.roleIcons || {})[String(role).toLowerCase()];
-    if (own) return own;
-    const active = (currentState.gameConfigs || {})[gcBundle.game];
-    // roleIconUrl() resolves the ACTIVE config first; skip that so a removed icon reads as removed.
-    if (active && active.roleIcons && active.roleIcons[String(role).toLowerCase()]) return '';
-    return typeof roleIconUrl === 'function' ? roleIconUrl(gcBundle.game, role) : '';
-  }
-  function gcRenderRoles() {
-    const wrap = el('gc-list-roles'); if (!wrap || !gcBundle) return;
-    const builtin = new Set(gcBuiltinRoles().map((r) => r.toLowerCase()));
-    const rows = gcAllRoles();
-    if (!rows.length) { wrap.innerHTML = '<p class="empty-msg">This game has no preset roles — add one above.</p>'; return; }
-    wrap.innerHTML = `<div class="gc-row-list">${rows.map((r) => {
-      const key = r.toLowerCase();
-      const own = !!(gcBundle.roleIcons || {})[key];
-      const img = gcRoleIcon(r);
-      return `<div class="gc-row" data-role="${gcEsc(r)}">
-        <button type="button" class="gc-thumb gc-thumb-icon${img ? '' : ' is-empty'}" data-act="img" title="${img ? 'Replace icon' : 'Upload icon'}">
-          ${img ? `<img src="${gcEsc(img)}" alt="" onerror="this.remove()">` : ''}<span class="gc-thumb-plus">+</span>
-        </button>
-        <div class="gc-row-fields">
-          <span style="font-weight:600;">${gcEsc(r)}</span>
-          ${builtin.has(key) ? '<span class="gc-chip">Built-in</span>' : ''}
-          ${own ? '<button type="button" class="btn btn-ghost btn-sm" data-act="clear-icon">Remove custom icon</button>' : ''}
-        </div>
-        ${builtin.has(key) ? '' : '<button type="button" class="lg-del" data-act="del" title="Remove role">×</button>'}
-      </div>`;
-    }).join('')}</div>`;
-  }
-  function gcWireRoles() {
-    const wrap = el('gc-list-roles'); if (!wrap) return;
-    const setIcon = async (role, file) => {
-      if (!file) return;
-      gcBundle.roleIcons = gcBundle.roleIcons || {};
-      gcBundle.roleIcons[role.toLowerCase()] = await gcReadImage(file, 'roles');
-      gcMarkDirty(); gcRenderRoles(); gcRenderBadges();
-    };
-    wrap.addEventListener('click', (e) => {
-      const act = e.target.closest('[data-act]'); if (!act || !gcBundle) return;
-      const role = act.closest('.gc-row').dataset.role; const key = role.toLowerCase();
-      if (act.dataset.act === 'img') { gcPickImages(false, (files) => setIcon(role, files[0])); return; }
-      if (act.dataset.act === 'clear-icon') delete gcBundle.roleIcons[key];
-      if (act.dataset.act === 'del') {
-        gcBundle.roles = (gcBundle.roles || []).filter((r) => r.toLowerCase() !== key);
-        if (gcBundle.roleIcons) delete gcBundle.roleIcons[key];
+      const view = gcView(kind).find((x) => lc(x.name) === lc(name));
+      if (view) {
+        let row = gcBundle[kind].find((r) => r.id === view.id) || gcBundle[kind].find((r) => lc(r.name) === lc(name));
+        if (!row) { row = { id: view.id, name: view.name, [K.extra]: view.extra || '' }; gcBundle[kind].push(row); }
+        row.image = image; replaced++;
+      } else {
+        gcBundle[kind].push({ id: gcUid(K.uid), name, image, [K.extra]: '' }); added++;
       }
-      gcMarkDirty(); gcRenderRoles(); gcRenderBadges();
+    }
+    gcResult([added ? `Added ${added} ${K.noun}${added === 1 ? '' : 's'}` : '', replaced ? `updated ${replaced} picture${replaced === 1 ? '' : 's'}` : ''].filter(Boolean).join(', ')
+      + (added && kind === 'characters' ? '. Click a new card to set its role.' : '.'), true);
+    gcQueueSave();
+    gcRender();
+  }
+
+  // ── Wiring ─────────────────────────────────────────────────────────────────────────────────
+  el('gc-game')?.addEventListener('change', () => {
+    gcLoadedGame = gcCurrentGame();
+    gcEdit = null; gcQuery = '';
+    gcResult('');
+    gcLoadForGame(gcLoadedGame);
+  });
+  el('gc-tabs')?.addEventListener('click', (e) => {
+    const t = e.target.closest('.lg2-tab'); if (!t) return;
+    gcTab = t.dataset.tab; gcEdit = null; gcQuery = ''; gcResult('');
+    gcRender();
+  });
+  el('gcb-search')?.addEventListener('input', (e) => { gcQuery = e.target.value; if (gcTab !== 'roles') gcRenderGrid(gcTab); });
+  el('gcb-add')?.addEventListener('click', () => {
+    if (!gcBundle) return;
+    if (gcTab === 'roles') { gcAddRole(); return; }
+    gcOpenEditor(gcTab, null);
+  });
+  el('gcb-upload')?.addEventListener('click', () => { const kind = gcTab; gcPickImages(true, (files) => gcAddFiles(kind, files)); });
+  el('gc-file')?.addEventListener('change', () => {
+    const files = gcImageFiles(el('gc-file').files); const cb = gcPickTarget; gcPickTarget = null;
+    if (cb && files.length) cb(files);
+  });
+
+  el('gcb-body')?.addEventListener('click', (e) => {
+    if (!gcBundle) return;
+    const card = e.target.closest('.gcb-card');
+    if (card) { gcOpenEditor(gcTab, card.dataset.id); return; }
+    const act = e.target.closest('[data-act]'); if (!act) return;
+    const role = act.closest('.gcb-role') && act.closest('.gcb-role').dataset.role; if (!role) return;
+    const key = lc(role);
+    if (act.dataset.act === 'icon') {
+      gcPickImages(false, async (files) => {
+        gcBundle.roleIcons[key] = await gcReadImage(files[0], 'roles');
+        gcQueueSave(); gcRender();
+      });
+      return;
+    }
+    if (act.dataset.act === 'clear-icon') delete gcBundle.roleIcons[key];
+    if (act.dataset.act === 'del') {
+      gcBundle.roles = gcBundle.roles.filter((r) => lc(r) !== key);
+      delete gcBundle.roleIcons[key];
+    }
+    gcQueueSave(); gcRender();
+  });
+
+  function gcAddRole() {
+    const body = el('gcb-body'); if (!body || body.querySelector('.gcb-role-new')) { const i = body && body.querySelector('.gcb-role-new input'); if (i) i.focus(); return; }
+    const row = document.createElement('div');
+    row.className = 'gcb-role-new';
+    row.innerHTML = '<input type="text" class="input-text" placeholder="Role name, e.g. Flex" maxlength="40"><button type="button" class="btn btn-primary btn-sm">Add</button><button type="button" class="btn btn-ghost btn-sm">Cancel</button>';
+    body.prepend(row);
+    const inp = row.querySelector('input');
+    const [ok, cancel] = row.querySelectorAll('button');
+    const commit = () => {
+      const v = (inp.value || '').trim(); if (!v) { inp.focus(); return; }
+      if (!gcAllRoles().some((r) => lc(r) === lc(v))) { gcBundle.roles.push(v); gcQueueSave(); }
+      gcRender();
+    };
+    ok.addEventListener('click', commit);
+    cancel.addEventListener('click', () => row.remove());
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') row.remove(); });
+    inp.focus();
+  }
+
+  el('gcb-editor')?.addEventListener('click', (e) => {
+    const act = e.target.closest('[data-act]'); if (!act || !gcEdit) return;
+    const a = act.dataset.act;
+    if (a === 'pick') gcPickImages(false, (files) => gcSetEditorImage(files[0]));
+    else if (a === 'done') gcEditorCommit();
+    else if (a === 'cancel') gcCloseEditor();
+    else if (a === 'restore' || a === 'delete') {
+      const what = a === 'restore' ? `Put ${gcEdit.orig.name} back to how it came with the app?` : `Delete ${gcEdit.orig.name}?`;
+      appConfirm(what, a === 'restore' ? 'Restore' : 'Delete').then((ok) => { if (ok) gcEditorRemoveRow(); });
+    }
+  });
+  el('gcb-editor')?.addEventListener('change', (e) => {
+    if (e.target.dataset.f !== 'extra-sel') return;
+    const other = el('gcb-editor').querySelector('[data-f="extra-other"]');
+    if (other) { other.hidden = e.target.value !== '__other'; if (!other.hidden) other.focus(); }
+  });
+  el('gcb-editor')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.matches('input')) { e.preventDefault(); gcEditorCommit(); }
+    if (e.key === 'Escape') gcCloseEditor();
+  });
+
+  // Drag pictures onto the list (bulk add) or onto the open editor's picture (replace it). The
+  // window-wide file-drop-navigation guard is installed once by wireAssetDrop() in app.js.
+  (function wireDrops() {
+    const zone = el('gcb-body'), ed = el('gcb-editor');
+    if (zone) {
+      let depth = 0;
+      const show = (on) => zone.classList.toggle('drag-over', on);
+      zone.addEventListener('dragenter', (e) => { if (gcTab === 'roles') return; e.preventDefault(); depth++; show(true); });
+      zone.addEventListener('dragover', (e) => { if (gcTab === 'roles') return; e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; });
+      zone.addEventListener('dragleave', () => { if (--depth <= 0) { depth = 0; show(false); } });
+      zone.addEventListener('drop', (e) => {
+        if (gcTab === 'roles') return;
+        e.preventDefault(); depth = 0; show(false);
+        gcAddFiles(gcTab, e.dataTransfer && e.dataTransfer.files);
+      });
+    }
+    if (ed) {
+      ed.addEventListener('dragover', (e) => { if (gcEdit) { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; } });
+      ed.addEventListener('drop', (e) => {
+        if (!gcEdit) return;
+        e.preventDefault();
+        gcSetEditorImage(gcImageFiles(e.dataTransfer && e.dataTransfer.files)[0]);
+      });
+    }
+  })();
+
+  // Share / reset
+  [['gc-author', 'author'], ['gc-version', 'gameVersion'], ['gc-config-id', 'configId']].forEach(([id, key]) => {
+    el(id)?.addEventListener('change', () => { if (gcBundle) { gcBundle[key] = el(id).value.trim(); gcQueueSave(); } });
+  });
+  el('btn-gc-export')?.addEventListener('click', () => {
+    if (!gcBundle || !gcBundle.game) return;
+    gcBundle.exportedAt = Date.now();
+    send('export_game_config', { gameId: gcBundle.game, bundle: gcBundle });
+  });
+  el('btn-gc-import')?.addEventListener('click', () => {
+    const go = () => send('import_game_config');
+    if (!gcHasChanges(gcActive())) { go(); return; }
+    appConfirm(`Importing replaces what you are using now for ${gcGameName()}. Saved versions are kept. Continue?`, 'Import').then((ok) => { if (ok) go(); });
+  });
+  el('btn-gc-reset')?.addEventListener('click', () => {
+    const gameId = gcCurrentGame(); if (!gameId) return;
+    appConfirm(`Go back to the original ${gcGameName()} content? Characters, maps and roles you added are removed and every picture goes back to the original. Saved versions are kept, so you can switch back to one later.`, 'Undo all').then((ok) => {
+      if (ok) { gcEdit = null; send('clear_game_config', { gameId }); }
     });
-    wrap.addEventListener('dragover', (e) => { if (e.target.closest('.gc-row')) { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; } });
-    wrap.addEventListener('drop', (e) => {
-      const row = e.target.closest('.gc-row'); if (!row) return;
-      e.preventDefault();
-      setIcon(row.dataset.role, gcImageFiles(e.dataTransfer && e.dataTransfer.files)[0]);
-    });
-  }
-
-  // ── Modes tab (name + description; mode names feed the map "type" suggestions) ──
-  function gcRenderModes() {
-    const wrap = el('gc-list-modes'); if (!wrap || !gcBundle) return;
-    const rows = gcBundle.modes || [];
-    if (!rows.length) { wrap.innerHTML = '<p class="empty-msg">No modes added yet.</p>'; return; }
-    wrap.innerHTML = `<div class="gc-row-list">${rows.map((m, i) => `
-      <div class="gc-row"><div class="gc-row-fields">
-          <span style="font-weight:600;">${gcEsc(m.name)}</span>
-          ${m.description ? `<span style="color:var(--muted);font-size:12px;">${gcEsc(m.description)}</span>` : ''}
-        </div>
-        <button class="lg-del gc-mode-del" data-idx="${i}" title="Remove">×</button></div>`).join('')}</div>`;
-    wrap.querySelectorAll('.gc-mode-del').forEach((b) => b.addEventListener('click', () => {
-      gcBundle.modes.splice(Number(b.dataset.idx), 1); gcMarkDirty(); gcRenderModes(); gcRenderBadges();
-    }));
-  }
-
-  // ── Drag-and-drop (the window-wide file-drop-navigation guard is already installed once by
-  // wireAssetDrop() in app.js — every dropzone in the app, including these, is covered by it). ──
-  function gcWireDropzone(id, kind) {
-    const dz = el(id); if (!dz) return;
-    let depth = 0;
-    const show = (on) => dz.classList.toggle('drag-over', on);
-    dz.addEventListener('dragenter', (e) => { e.preventDefault(); depth++; show(true); });
-    dz.addEventListener('dragover', (e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; });
-    dz.addEventListener('dragleave', (e) => { e.preventDefault(); if (--depth <= 0) { depth = 0; show(false); } });
-    dz.addEventListener('drop', (e) => {
-      e.preventDefault(); depth = 0; show(false);
-      gcAddFiles(kind, e.dataTransfer && e.dataTransfer.files);
-    });
-  }
-
-  function gcResult(msg, ok) {
-    const r = el('gc-result'); if (!r) return;
-    r.textContent = msg || '';
-    r.style.color = ok === false ? '#f56565' : (ok ? 'var(--good,#48bb78)' : 'var(--muted)');
-  }
-
-  // Called from app.js's WS message handler when an import-export-result arrives with
-  // context:'game-config' — keeps Game Config's status separate from Producer Profile's.
-  // The state broadcast carrying the new config is coalesced and can land AFTER this result, so
-  // the reload waits for it (gcReloadPending → _gcRefresh) with a timer as the fallback.
-  window._gcHandleImportExportResult = function (message, ok) {
-    gcResult(message, ok);
-    if (!ok || /exported/i.test(message || '')) return;   // an export changes nothing server-side
-    gcDirty = false; gcReloadPending = true;
-    setTimeout(() => { if (gcReloadPending) gcLoadForGame(gcCurrentGame()); }, 500);
-  };
+  });
 
   function gcPopulateGameSelect() {
     const sel = el('gc-game'); if (!sel) return;
@@ -357,92 +615,29 @@
     const prev = sel.value;
     sel.innerHTML = Object.keys(games).map((id) => `<option value="${gcEsc(id)}">${gcEsc(games[id].name || id)}</option>`).join('');
     if (prev && games[prev]) sel.value = prev;
-    if (!gcBundle) gcLoadForGame(sel.value);
+    if (!gcBundle) { gcLoadedGame = sel.value; gcLoadForGame(sel.value); }
   }
 
-  // Switching game (the Games hub does this as you browse) parks unsaved edits per game instead
-  // of discarding them, and restores them when you come back.
-  const gcDrafts = {};
-  let gcLoadedGame = '';
-  function gcOnGameChange() {
-    const next = el('gc-game').value;
-    if (gcBundle && gcDirty && gcLoadedGame && gcLoadedGame !== next) gcDrafts[gcLoadedGame] = gcBundle;
-    gcLoadedGame = next;
-    gcLoadForGame(next);
-    if (gcDrafts[next]) { gcBundle = gcDrafts[next]; delete gcDrafts[next]; gcDirty = true; gcRenderStatus(); gcRenderAll(); }
-    gcResult('');
+  // Cheap fingerprint of what this page shows, so a state update only re-renders when it changed.
+  function gcSig() {
+    const g = gcCurrentGame();
+    const part = (list) => (list || []).map((x) => x.id + ':' + (x.name || '') + ':' + String(x.image || '').length + ':' + (x.role || x.type || '')).join(',');
+    const a = (currentState.gameConfigs || {})[g];
+    return g + '|' + part((currentState.draftRosters || {})[g]) + '|' + part((currentState.vetoPools || {})[g])
+      + '|' + (a ? JSON.stringify(a.roles || []) + Object.keys(a.roleIcons || {}).join(',') : '') + '|' + JSON.stringify(gcBuiltinRoles())
+      + '|' + JSON.stringify(gcFrom()) + '|' + gcVersions().map((v) => v.name + '@' + v.savedAt).join(',');
   }
-
-  // ── Wiring ──
-  el('gc-game')?.addEventListener('change', gcOnGameChange);
-  el('gc-tabs')?.addEventListener('click', (e) => { const t = e.target.closest('.lg2-tab'); if (t) gcSwitchTab(t.dataset.tab); });
-
-  [['gc-author', 'author'], ['gc-version', 'gameVersion'], ['gc-config-id', 'configId']].forEach(([id, key]) => {
-    el(id)?.addEventListener('input', () => { if (gcBundle) { gcBundle[key] = el(id).value; gcMarkDirty(); } });
-  });
-
-  el('gc-file')?.addEventListener('change', () => {
-    const files = gcImageFiles(el('gc-file').files); const cb = gcPickTarget; gcPickTarget = null;
-    if (cb && files.length) cb(files);
-  });
-  ['maps', 'characters'].forEach((kind) => {
-    gcWireDropzone('gc-dropzone-' + kind, kind);
-    gcWireList(kind);
-    el('gc-upload-' + kind)?.addEventListener('click', () => gcPickImages(true, (files) => gcAddFiles(kind, files)));
-    el('gc-add-' + kind)?.addEventListener('click', () => gcAddBlank(kind));
-  });
-  gcWireRoles();
-
-  el('gc-add-role')?.addEventListener('click', () => {
-    if (!gcBundle) return;
-    const inp = el('gc-role-name'); const v = (inp.value || '').trim(); if (!v) return;
-    if (!gcAllRoles().some((r) => r.toLowerCase() === v.toLowerCase())) { gcBundle.roles.push(v); gcMarkDirty(); }
-    inp.value = '';
-    gcRenderRoles(); gcRenderBadges();
-  });
-  el('gc-role-name')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') el('gc-add-role').click(); });
-  el('gc-add-mode')?.addEventListener('click', () => {
-    if (!gcBundle) return;
-    const nameInp = el('gc-mode-name'); const descInp = el('gc-mode-desc');
-    const name = (nameInp.value || '').trim(); if (!name) return;
-    gcBundle.modes.push({ id: gcUid('mode'), name, description: (descInp.value || '').trim() });
-    nameInp.value = ''; descInp.value = '';
-    gcMarkDirty(); gcRenderModes(); gcRenderBadges();
-  });
-
-  const gcReady = () => {
-    if (gcBundle && gcBundle.game) return true;
-    gcResult('Pick a game first.', false); return false;
-  };
-  el('btn-gc-save')?.addEventListener('click', () => {
-    if (!gcReady()) return;
-    const unnamed = ['maps', 'characters'].reduce((n, k) => n + gcBundle[k].filter((r) => !(r.name || '').trim()).length, 0);
-    if (unnamed) { gcResult(`${unnamed} row(s) have no name — name or remove them before saving.`, false); return; }
-    send('save_game_config', { bundle: gcBundle });
-  });
-  el('btn-gc-export')?.addEventListener('click', () => {
-    if (!gcReady()) return;
-    gcBundle.exportedAt = Date.now();
-    send('export_game_config', { gameId: gcBundle.game, bundle: gcBundle });
-  });
-  el('btn-gc-import')?.addEventListener('click', () => {
-    const go = () => send('import_game_config');
-    if (!gcDirty) { go(); return; }
-    appConfirm('Importing replaces the content you are editing. Continue?', 'Import').then((ok) => { if (ok) go(); });
-  });
-  el('btn-gc-reset')?.addEventListener('click', () => {
-    const gameId = gcCurrentGame(); if (!gameId) return;
-    const gameName = (currentState.games && currentState.games[gameId] && currentState.games[gameId].name) || gameId;
-    appConfirm(`Reset ${gameName} to its built-in content? This removes all custom content for this game.`, 'Reset').then((ok) => {
-      if (ok) send('clear_game_config', { gameId });
-    });
-  });
 
   // Called from app.js's applyState on every state update.
   window._gcRefresh = function () {
     gcPopulateGameSelect();
-    if (!gcLoadedGame) gcLoadedGame = gcCurrentGame();
-    if (gcReloadPending) { gcLoadForGame(gcCurrentGame()); return; }
-    gcRenderStatus();
+    if (!gcBundle) return;
+    if (gcReloadPending && !gcEdit && !gcSaveTimer && !gcSaving) { gcLoadForGame(gcCurrentGame()); return; }
+    const sec = el('section-game-config');
+    if (!sec || !sec.offsetParent) return;   // not on screen: nothing to repaint
+    const sig = gcSig();
+    if (sig === gcRenderSig) return;
+    gcRenderSig = sig;
+    if (!gcEdit) gcRender();
   };
 })();

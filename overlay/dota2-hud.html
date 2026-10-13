@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<!--
+  dota2-hud.html — Dota 2 in-game HUD, fed by Valve's Game State Integration (state.dota, parsed by
+  backend/dota-gsi.js). It frames the game's own top bar instead of covering it: team plates in the
+  top corners (logo, name, series pips, live net-worth lead) and, when the producer turns it on, a
+  ten-player scoreboard (hero, level, K/D/A, last hits, GPM, net worth, items).
+  Radiant / Dire map onto the app's two sides by state.dota.radiantSide. Without a GSI feed the
+  plates still show (names + series); the live parts hide themselves.
+  ?board=1 forces the scoreboard on (e.g. a separate "break" source).
+-->
+<head>
+  <meta charset="UTF-8">
+  <title>NE Broadcast Suite — Dota 2 HUD</title>
+  <link rel="stylesheet" href="scene.css" />
+  <style>
+    body { background:transparent; }
+    #hud { position:absolute; inset:0; font-family:'Rajdhani', var(--main-font); --ta:#2f8dff; --tb:#f0444e; --hot:#f5c451; }
+    .plate { position:absolute; top:0; height:60px; width:520px; display:flex; align-items:center; gap:12px; padding:0 18px;
+      background:linear-gradient(180deg, rgba(12,16,26,.95), rgba(6,8,14,.97)); box-shadow:0 10px 30px rgba(0,0,0,.5); }
+    .plate.a { left:0; border-radius:0 0 16px 0; border-bottom:3px solid var(--ta); }
+    .plate.b { right:0; border-radius:0 0 0 16px; border-bottom:3px solid var(--tb); flex-direction:row-reverse; }
+    .logo { width:42px; height:42px; object-fit:contain; flex-shrink:0; }
+    .id { flex:1; min-width:0; }
+    .plate.b .id { text-align:right; }
+    .side-lbl { font-size:11px; font-weight:700; letter-spacing:.3em; color:rgba(255,255,255,.5); text-transform:uppercase; line-height:1; }
+    .name { font-size:26px; font-weight:700; text-transform:uppercase; line-height:1.05; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .pips { display:flex; gap:5px; }
+    .plate.b .pips { flex-direction:row-reverse; }
+    .pip { width:16px; height:6px; border-radius:2px; background:rgba(255,255,255,.16); }
+    .plate.a .pip.on { background:var(--ta); } .plate.b .pip.on { background:var(--tb); }
+    .lead { min-width:86px; text-align:center; font-size:20px; font-weight:700; color:#ffd56b; font-variant-numeric:tabular-nums;
+      padding:3px 8px; border-radius:6px; background:rgba(255,213,107,.10); }
+    .lead.none { visibility:hidden; }
+    .lead small { font-size:12px; letter-spacing:.14em; color:rgba(255,213,107,.7); margin-left:4px; }
+    /* scoreboard */
+    .board { position:absolute; left:50%; top:150px; transform:translateX(-50%); width:1560px; display:flex; flex-direction:column; gap:14px;
+      opacity:0; transition:opacity .35s ease; pointer-events:none; }
+    .board.on { opacity:1; }
+    .tbl { background:linear-gradient(180deg, rgba(12,16,26,.95), rgba(6,8,14,.97)); border-radius:14px; overflow:hidden; box-shadow:0 18px 50px rgba(0,0,0,.55); }
+    .thead { display:flex; align-items:center; gap:14px; padding:10px 18px; border-bottom:2px solid var(--tc); }
+    .thead img { width:34px; height:34px; object-fit:contain; }
+    .tname { font-size:24px; font-weight:700; color:#fff; text-transform:uppercase; flex:1; }
+    .tsum { font-size:18px; font-weight:700; color:rgba(255,255,255,.75); letter-spacing:.06em; font-variant-numeric:tabular-nums; }
+    .tsum b { color:#ffd56b; }
+    .row, .cols { display:grid; grid-template-columns:110px 220px 60px 150px 120px 90px 120px 1fr; align-items:center; gap:10px; padding:0 18px; }
+    .cols { height:30px; font-size:12px; font-weight:700; letter-spacing:.2em; color:rgba(255,255,255,.4); text-transform:uppercase; }
+    .row { height:58px; border-top:1px solid rgba(255,255,255,.06); font-size:21px; font-weight:700; color:#fff; font-variant-numeric:tabular-nums; }
+    .row.dead { opacity:.55; }
+    .hero { width:100px; height:56px; object-fit:cover; border-radius:4px; }
+    .pname { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .hname { font-size:13px; letter-spacing:.12em; color:rgba(255,255,255,.5); text-transform:uppercase; font-weight:700; }
+    .lvl { text-align:center; color:var(--hot); }
+    .items { display:flex; gap:5px; }
+    .items i { width:46px; height:34px; border-radius:4px; background:rgba(255,255,255,.06) center/cover no-repeat; display:block; }
+    .muted { color:rgba(255,255,255,.55); }
+  </style>
+</head>
+<body>
+  <div id="hud"></div>
+  <script src="scene-base.js"></script>
+  <script>
+  (function () {
+    const root = document.getElementById('hud');
+    const FORCE_BOARD = SceneBase.qp('board') === '1';
+    let _sig = '';
+    function mk(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+    const k = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n));
+
+    // Sample frame for ?preview=1 (Scenes launcher, thumbnails).
+    function demoLive() {
+      const heroes = [['invoker', 'Miracle-'], ['juggernaut', 'Yatoro'], ['tiny', 'Collapse'], ['rubick', 'Mira'], ['lion', 'Larl'],
+        ['phantom-assassin', 'Ame'], ['magnus', 'Ceb'], ['puck', 'Topson'], ['snapfire', 'Saksa'], ['earthshaker', 'N0tail']];
+      const mkP = ([hero, name], i) => ({ slot: i, name, hero, level: 12 + (i % 6), alive: i !== 7, kills: (i * 3) % 9, deaths: i % 4, assists: (i * 5) % 11,
+        lastHits: 40 + i * 17, denies: i * 2, gpm: 380 + i * 23, netWorth: 6200 + i * 1350, items: ['', '', '', '', '', ''] });
+      const r = heroes.slice(0, 5).map(mkP), d = heroes.slice(5).map((h, i) => mkP(h, i + 5));
+      const sum = (a, f) => a.reduce((s, p) => s + p[f], 0);
+      return { at: Date.now(), spectating: true, map: { state: 'live', clock: 1294 },
+        players: { radiant: r, dire: d }, teams: { radiant: { netWorth: sum(r, 'netWorth'), kills: sum(r, 'kills') }, dire: { netWorth: sum(d, 'netWorth'), kills: sum(d, 'kills') } } };
+    }
+
+    function render(data) {
+      const dota = data.dota || {};
+      let live = dota.connected ? dota.live : null;
+      if (!live && SceneBase.preview) live = demoLive();
+      const A = SceneBase.teamSide(data, 'blue'), B = SceneBase.teamSide(data, 'orange');
+      const radiantIs = dota.radiantSide === 'b' ? 'b' : 'a';
+      const teamOf = (side) => (side === radiantIs ? 'radiant' : 'dire');
+      const ser = data.series || {};
+      const bo = Math.max(1, Number(data.bestOf) || 3);
+      const showBoard = FORCE_BOARD || !!dota.showBoard || (SceneBase.preview && SceneBase.qp('board') !== '0');
+      const sig = JSON.stringify([A.name, A.logo, A.color, B.name, B.logo, B.color, ser.blue, ser.orange, bo, radiantIs, showBoard,
+        live && live.teams, live && live.players, SceneBase.brandAccent(data)]);
+      if (sig === _sig) return;
+      _sig = sig;
+      root.style.setProperty('--ta', A.color || '#2f8dff');
+      root.style.setProperty('--tb', B.color || '#f0444e');
+      root.style.setProperty('--hot', SceneBase.brandAccent(data) || '#f5c451');
+      const nw = (side) => (live && live.teams && live.teams[teamOf(side)] ? live.teams[teamOf(side)].netWorth : 0);
+      const leadA = nw('a') - nw('b');
+
+      const plate = (t, side) => {
+        const p = mk('div', 'plate ' + side);
+        if (t.logo) { const im = mk('img', 'logo'); im.src = t.logo; im.alt = ''; im.onerror = () => im.remove(); p.appendChild(im); }
+        const id = mk('div', 'id');
+        id.appendChild(mk('div', 'side-lbl', teamOf(side) === 'radiant' ? 'Radiant' : 'Dire'));
+        const nm = mk('div', 'name', t.name || (side === 'a' ? 'Blue' : 'Red'));
+        nm.style.color = SceneBase.liftForDark(t.color || '#ffffff', 0.12);
+        id.appendChild(nm); p.appendChild(id);
+        const need = Math.ceil(bo / 2), won = Number(ser[side === 'a' ? 'blue' : 'orange']) || 0;
+        const pr = mk('div', 'pips');
+        for (let i = 0; i < need; i++) pr.appendChild(mk('span', 'pip' + (i < won ? ' on' : '')));
+        p.appendChild(pr);
+        // Net-worth lead shows on the team that has it.
+        const mine = side === 'a' ? leadA : -leadA;
+        const lead = mk('div', 'lead' + (live && mine > 0 ? '' : ' none'));
+        lead.textContent = '+' + k(Math.abs(mine));
+        lead.appendChild(mk('small', '', 'NW'));
+        p.appendChild(lead);
+        return p;
+      };
+
+      const board = mk('div', 'board' + (showBoard && live && live.players ? ' on' : ''));
+      if (live && live.players) {
+        ['a', 'b'].forEach((side) => {
+          const t = side === 'a' ? A : B;
+          const team = teamOf(side);
+          const list = live.players[team] || [];
+          const tbl = mk('div', 'tbl'); tbl.style.setProperty('--tc', t.color || (side === 'a' ? '#2f8dff' : '#f0444e'));
+          const head = mk('div', 'thead');
+          if (t.logo) { const im = mk('img'); im.src = t.logo; im.alt = ''; im.onerror = () => im.remove(); head.appendChild(im); }
+          head.appendChild(mk('div', 'tname', (t.name || '') + '  ·  ' + (team === 'radiant' ? 'Radiant' : 'Dire')));
+          const sum = mk('div', 'tsum'); sum.innerHTML = 'Kills <b></b>  ·  Net worth <b></b>';
+          sum.children[0].textContent = (live.teams[team] || {}).kills || 0;
+          sum.children[1].textContent = k((live.teams[team] || {}).netWorth || 0);
+          head.appendChild(sum); tbl.appendChild(head);
+          const cols = mk('div', 'cols');
+          ['Hero', 'Player', 'Lvl', 'K / D / A', 'LH / DN', 'GPM', 'Net worth', 'Items'].forEach((c) => cols.appendChild(mk('div', '', c)));
+          tbl.appendChild(cols);
+          list.forEach((p) => {
+            const r = mk('div', 'row' + (p.alive === false ? ' dead' : ''));
+            const hi = mk('img', 'hero'); hi.alt = ''; hi.src = '/assets/heroes/dota2/' + (p.hero || 'unknown') + '.png'; hi.onerror = () => { hi.style.visibility = 'hidden'; };
+            r.appendChild(hi);
+            const nm = mk('div', 'pname'); nm.appendChild(document.createTextNode(p.name || '—'));
+            const hn = mk('div', 'hname', p.heroName || String(p.hero || '').replace(/-/g, ' ')); nm.appendChild(hn);
+            r.appendChild(nm);
+            r.appendChild(mk('div', 'lvl', String(p.level || 0)));
+            r.appendChild(mk('div', '', p.kills + ' / ' + p.deaths + ' / ' + p.assists));
+            r.appendChild(mk('div', 'muted', p.lastHits + ' / ' + p.denies));
+            r.appendChild(mk('div', 'muted', String(p.gpm || 0)));
+            r.appendChild(mk('div', '', k(p.netWorth || 0)));
+            const its = mk('div', 'items');
+            (p.items || []).slice(0, 6).forEach((u) => { const i = mk('i'); if (u) i.style.backgroundImage = 'url("' + String(u).replace(/"/g, '%22') + '")'; its.appendChild(i); });
+            r.appendChild(its);
+            tbl.appendChild(r);
+          });
+          board.appendChild(tbl);
+        });
+      }
+      root.replaceChildren(plate(A, 'a'), plate(B, 'b'), board);
+    }
+    SceneBase.liveUpdates('dota');
+    SceneBase.connect((data) => render(data));
+  })();
+  </script>
+</body>
+</html>

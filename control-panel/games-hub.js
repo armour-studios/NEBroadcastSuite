@@ -1,9 +1,11 @@
 /* ─── games-hub.js — one way to browse and set up games ───────────────────────
-   Two surfaces share the same pieces:
-     • Settings ▸ Games (#integration-games): one-time setup. Picker → header card → standard tabs
-       Connection · Overlay · Automation · Scoring · Teams · Options · Custom content.
-     • Dashboard ▸ Game Settings (#game-settings-section): per-match choices (Look · Sponsors ·
-       Players · Format) PLUS every setup tab above, so a game can be fully set up without Settings.
+   EVERY game has the same six tabs, in the same order, on both surfaces, so switching games never
+   moves anything:  Setup · Match · Overlay · Cameras · Automation · Content.
+   A tab with nothing for a game stays in place, dimmed, with a one-line note saying where that thing
+   lives instead. (Producers lost their place when each game had its own tab set.)
+     • Settings ▸ Games (#integration-games): the setup panes (.gh-pane[data-gtab]).
+     • Dashboard ▸ Game Settings (#game-settings-section): the same tabs; a tab shows this game's
+       per-match panes (.gs-pane, mapped by DASH_PANES) followed by its setup panes.
    The setup tabs are ONE element (.gh-body) with two homes: it is MOVED (never cloned) into the
    Dashboard while a setup tab is picked there, and back into Settings whenever Settings ▸ Games shows.
    Both open on the active game; picking another game only VIEWS it (Make active switches the show).
@@ -19,10 +21,10 @@
 
   // Registry id -> Settings section key (games-section-<key>). Order = picker order after the active game.
   const SECTION = { 'rocket-league': 'rl', csgo: 'cs2', valorant: 'valorant', league: 'league', apex: 'apex',
-    fortnite: 'fortnite', rainbow6: 'rainbow6', bedwars: 'bedwars' };
+    fortnite: 'fortnite', rainbow6: 'rainbow6', bedwars: 'bedwars', dota2: 'dota2' };
   const FROM_SECTION = Object.fromEntries(Object.entries(SECTION).map(([k, v]) => [v, k]));
   const FEED = { 'rocket-league': 'Stats API', csgo: 'Game State Integration', valorant: 'Local client API',
-    league: 'Live Client Data API', apex: 'LiveAPI', fortnite: 'Manual scoring', rainbow6: 'Overwolf relay', bedwars: 'Server plugin' };
+    league: 'Live Client Data API', apex: 'LiveAPI', fortnite: 'Manual scoring', rainbow6: 'Overwolf relay', bedwars: 'Server plugin', dota2: 'Game State Integration' };
   const SHORT = { csgo: 'CS2', league: 'League', rainbow6: 'Rainbow Six', bedwars: 'Bedwars', 'marvel-rivals': 'Rivals',
     'mobile-legends': 'MLBB', 'honor-of-kings': 'HoK', overwatch: 'Overwatch', ggstrive: 'GG Strive', 'marvel-tokon': 'Tokon',
     'the-finals': 'The Finals', sf6: 'SF6', eafc: 'EA FC', smash: 'Smash', brawlhalla: 'Brawlhalla' };
@@ -45,16 +47,31 @@
     if (!out.length && g.overlay) add(g.overlay, 'Scoreboard');
     return out;
   }
-  const SET_TABS = [['connection', 'Connection'], ['overlay', 'Overlay'], ['automation', 'Automation'], ['scoring', 'Scoring'],
-    ['teams', 'Teams'], ['options', 'Options'], ['content', 'Custom content']];
-  // Dashboard: [tab, label, pane]. Standard vocabulary, fixed order.
-  const DASH_TABS = {
-    'rocket-league': [['look', 'Look', 'look'], ['sponsors', 'Sponsors', 'sponsors'], ['players', 'Players', 'playercams']],
-    csgo: [['players', 'Players', 'playercams']],
-    smash: [['players', 'Players', 'smash']],
-    brawlhalla: [['players', 'Players', 'brawlhalla']],
-    'marvel-tokon': [['format', 'Format', 'tokon']],
+  // The six tabs. 'connection' keeps its old key (deep links) and reads "Setup".
+  const SET_TABS = [['connection', 'Setup'], ['match', 'Match'], ['overlay', 'Overlay'], ['cameras', 'Cameras'], ['automation', 'Automation'], ['content', 'Content']];
+  // Old tab names (saved choices, deep links) -> the unified tab.
+  const TAB_ALIAS = { observer: 'cameras', players: 'cameras', options: 'automation', scoring: 'match', teams: 'match', format: 'match', look: 'overlay', sponsors: 'overlay' };
+  const tabKey = (t) => TAB_ALIAS[t] || t;
+  // Dashboard-only per-match panes (.gs-pane[data-gspane]) and the tab each sits on.
+  const DASH_PANES = {
+    'rocket-league': { overlay: ['look', 'sponsors'], cameras: ['playercams'] },
+    csgo: { cameras: ['playercams'] },
+    smash: { match: ['smash'] },
+    brawlhalla: { match: ['brawlhalla'] },
+    'marvel-tokon': { match: ['tokon'] },
   };
+  const dashPanes = (id, tab) => ((DASH_PANES[id] || {})[tab]) || [];
+  const TAB_LABEL = (t) => (SET_TABS.find((x) => x[0] === t) || [])[1] || t;
+  // What an empty tab says instead.
+  function emptyNote(tab, name, onDash) {
+    if (onDash) return 'This is on the Dashboard: Game Settings, ' + TAB_LABEL(tab) + ' tab (per-match controls for ' + name + ').';
+    switch (tab) {
+      case 'match': return name + ' has no extra match format. Teams, the score and the best-of work the same for every game, on the Match page and the Dashboard.';
+      case 'cameras': return name + ' has no player cams or observer tools. Talent and caster cameras are on Talent, Cameras.';
+      case 'automation': return 'Nothing in ' + name + ' switches scenes or keeps score by itself yet.';
+      default: return 'Nothing to set for ' + name + ' on this tab.';
+    }
+  }
 
   const games = (d) => d.games || {};
   const nameOf = (d, id) => (games(d)[id] && games(d)[id].name) || id;
@@ -72,6 +89,7 @@
       case 'rainbow6': { const g = d.r6 && d.r6.gepData; return (g && g.gepConnected && fresh(g)) ? on('Relay connected') : off('Relay not connected'); }
       case 'bedwars': { const b = d.bedwars && d.bedwars.data; return (b && b.connected && fresh(b)) ? on('Server connected') : off('No server data'); }
       case 'fortnite': return { st: 'none', text: 'Manual scoring' };
+      case 'dota2': return (d.dota && d.dota.connected) ? on((d.dota.live && d.dota.live.spectating) ? 'Connected' : 'Connected (not spectating)') : off(d.dota && d.dota.cfgPath ? 'Waiting for game' : 'Not set up');
       default: return { st: 'none', text: 'No live data' };
     }
   }
@@ -199,11 +217,21 @@
   // ── Settings ▸ Games ──────────────────────────────────────────────────────
   let sView = null, sTab = 'connection';
 
-  function settingsTabsFor(key) {
+  // Tabs the game has setup panes for (the other tabs still show, dimmed).
+  function setupTabsOf(key) {
     const sec = $('games-section-' + key);
-    const have = new Set(['connection', 'overlay', 'content']);
+    const have = new Set(['connection', 'overlay', 'content']);   // overlay: the shared layout picker + browser sources
     if (sec) sec.querySelectorAll('.gh-pane[data-gtab]').forEach((p) => have.add(p.dataset.gtab));
-    return SET_TABS.filter(([k]) => have.has(k));
+    return have;
+  }
+  const tabBtns = (attr, cur, filled) => SET_TABS.map(([k, label]) =>
+    '<button type="button" class="ev-subnav-btn' + (k === cur ? ' active' : '') + (filled.has(k) ? '' : ' is-empty') + '" ' + attr + '="' + k + '"'
+    + (filled.has(k) ? '' : ' title="Nothing here for this game"') + '>' + label + '</button>').join('');
+  // A note shown at the top of the body when the tab has nothing (or its content is on the Dashboard).
+  function bodyNote(b, text) {
+    let n = b.querySelector(':scope > .gh-tab-note');
+    if (!n) { n = document.createElement('p'); n.className = 'gh-tab-note'; b.prepend(n); }
+    n.hidden = !text; n.textContent = text || '';
   }
 
   function renderSettings() {
@@ -216,19 +244,21 @@
     const isActive = paintHead({ logo: 'gh-logo', name: 'gh-name', status: 'gh-status', badge: 'gh-active-badge', make: 'gh-make-active' }, id, d);
     const sub = $('gh-sub'); if (sub) sub.textContent = FEED[id] || 'No live data feed';
 
-    const tabs = settingsTabsFor(key);
-    if (!tabs.some(([k]) => k === sTab)) sTab = 'connection';
+    sTab = tabKey(sTab);
+    if (!SET_TABS.some(([k]) => k === sTab)) sTab = 'connection';
+    const have = setupTabsOf(key);
+    const filled = new Set([...have, ...Object.keys(DASH_PANES[id] || {})]);
     const bar = $('gh-tabs');
-    const tsig = key + '|' + tabs.map((t) => t[0]).join(',') + '|' + sTab;
-    if (bar && bar.dataset.sig !== tsig) {
-      bar.dataset.sig = tsig;
-      bar.innerHTML = tabs.map(([k, label]) => `<button type="button" class="ev-subnav-btn${k === sTab ? ' active' : ''}" data-gtab="${k}">${label}</button>`).join('');
-    }
+    const tsig = id + '|' + [...filled].join(',') + '|' + sTab;
+    if (bar && bar.dataset.sig !== tsig) { bar.dataset.sig = tsig; bar.innerHTML = tabBtns('data-gtab', sTab, filled); }
 
     // Settings takes the setup body back whenever it is on screen; otherwise the Dashboard may hold it.
     if (settingsOnGames()) {
       const b = claimBody(root.querySelector('.gh-card'));
-      if (b) renderBody(b, id, key, sTab, isActive, d);
+      if (b) {
+        renderBody(b, id, key, sTab, isActive, d);
+        bodyNote(b, have.has(sTab) ? '' : emptyNote(sTab, nameOf(d, id), dashPanes(id, sTab).length > 0));
+      }
     }
   }
 
@@ -313,7 +343,7 @@
 
   // ── Dashboard ▸ Game Settings ─────────────────────────────────────────────
   let dView = null, dActiveSeen = null;
-  const D_TAB_KEY = 'ne_gs_tab_v2';
+  const D_TAB_KEY = 'ne_gs_tab_v3';
   const savedTabs = () => { try { return JSON.parse(localStorage.getItem(D_TAB_KEY)) || {}; } catch (_) { return {}; } };
 
   function renderDash() {
@@ -326,34 +356,30 @@
     sec.classList.toggle('gs-not-active', !isActive);
     sec.dataset.game = id;   // CSS gates game-specific rows (e.g. .gs-rl-only)
     const key = SECTION[id] || 'generic';
-    // Per-match tabs first, then this game's setup tabs (the same ones Settings ▸ Games shows).
-    const match = DASH_TABS[id] || [];
-    const tabs = id ? match.concat(settingsTabsFor(key).map(([k, label]) => ['set-' + k, label, 'setup'])) : [];
-    const saved = savedTabs()[id];
-    const cur = tabs.find((t) => t[0] === (sec.dataset.tab || saved)) ? (sec.dataset.tab || saved) : (tabs[0] && tabs[0][0]);
+    // The same six tabs as Settings ▸ Games. A tab shows this game's per-match panes first, then
+    // its setup panes. A first visit opens on the game's match controls when it has them, else Setup.
+    const have = setupTabsOf(key);
+    const dp = DASH_PANES[id] || {};
+    const filled = new Set([...have, ...Object.keys(dp)]);
+    const want = tabKey(sec.dataset.tab || savedTabs()[id] || '');
+    const cur = SET_TABS.some(([k]) => k === want) ? want : (dp.match ? 'match' : dp.cameras ? 'cameras' : 'connection');
     const bar = $('gs-tabs');
-    const tsig = id + '|' + tabs.map((t) => t[0]).join(',') + '|' + cur;
-    if (bar && bar.dataset.sig !== tsig) {
-      bar.dataset.sig = tsig;
-      const btn = ([k, label]) => `<button type="button" class="ev-subnav-btn${k === cur ? ' active' : ''}" data-gstab="${k}">${label}</button>`;
-      bar.innerHTML = match.map(btn).join('')
-        + (match.length ? '<span class="gs-tab-sep" aria-hidden="true">Setup</span>' : '')
-        + tabs.slice(match.length).map(btn).join('');
-      bar.hidden = tabs.length < 2;
-    }
-    const pane = (tabs.find((t) => t[0] === cur) || [])[2];
+    const tsig = id + '|' + [...filled].join(',') + '|' + cur;
+    if (bar && bar.dataset.sig !== tsig) { bar.dataset.sig = tsig; bar.innerHTML = id ? tabBtns('data-gstab', cur, filled) : ''; bar.hidden = !id; }
+    const mine = dashPanes(id, cur);
     const notice = $('gs-notice');
-    if (notice) { notice.hidden = isActive || pane === 'setup' || !match.length; notice.textContent = nameOf(d, id) + ' is not on air. Changes here are saved and used when you make it the active game.'; }
-    sec.querySelectorAll('.gs-pane').forEach((p) => { p.hidden = p.dataset.gspane !== pane; });
-    if (pane === 'setup' && !settingsOnGames()) {
+    if (notice) { notice.hidden = isActive || !mine.length; notice.textContent = nameOf(d, id) + ' is not on air. Changes here are saved and used when you make it the active game.'; }
+    const showSetup = !!id && have.has(cur) && !settingsOnGames();
+    sec.querySelectorAll('.gs-pane').forEach((p) => { p.hidden = p.dataset.gspane === 'setup' ? !showSetup : !mine.includes(p.dataset.gspane); });
+    if (showSetup) {
       const b = claimBody($('gs-setup-slot'));
-      if (b) renderBody(b, id, key, cur.slice(4), isActive, d);
+      if (b) { renderBody(b, id, key, cur, isActive, d); bodyNote(b, ''); }
     }
     const empty = $('gs-empty');
     if (empty) {
-      empty.hidden = tabs.length > 0;
-      empty.textContent = !id ? 'Pick a game to see its settings.'
-        : 'Nothing to set up for ' + nameOf(d, id) + '.';
+      const none = !!id && !mine.length && !have.has(cur);
+      empty.hidden = !!id && !none;
+      empty.textContent = !id ? 'Pick a game to see its settings.' : emptyNote(cur, nameOf(d, id), false);
     }
     const pc = $('msp-playercams'), pcNote = $('gs-pc-off');
     if (pcNote) pcNote.hidden = !(pc && pc.style.display === 'none');
@@ -362,7 +388,7 @@
   function openSetup(id, tab) {
     // openSettings('games') snaps the view back to the active game, so pick the game AFTER it.
     if (typeof openSettings === 'function') openSettings('games');
-    sView = id; if (tab) sTab = tab;
+    sView = id; if (tab) sTab = tabKey(tab);
     renderSettings();
   }
 
