@@ -78,7 +78,8 @@ const startggImport = require('./backend/startgg-import');
 const twitchStats = require('./backend/twitch-stats');
 const playerDb   = require('./backend/player-db');
 const teamDb     = require('./backend/team-db');
-const competition = require('./backend/competition');           // league data interchange (docs/competition-api.md)
+const competition = require('./backend/competition');
+const siteComp = require('./backend/competition-site');   // website match-day extras + which match this desk follows           // league data interchange (docs/competition-api.md)
 const competitionSources = require('./backend/competition-sources');   // Google Sheet / JSON feed pull sources
 
 const { generateSceneCollection } = require('./obs/build-scene-collection');
@@ -2477,8 +2478,9 @@ async function validateCloudSession(trigger) {
   } catch (e) {
     if (e && (e.status === 403 || e.status === 401)) {
       const backendMsg = (e.data && e.data.error && e.data.error.message) || e.message || '';
+      const revoked = e.status === 401 && e.data && e.data.error && e.data.error.code === 'session_revoked';
       forceCloudSignOut(
-        e.status === 403 ? backendMsg : 'Your session expired — sign in again.'
+        e.status === 403 ? backendMsg : revoked ? 'This PC was signed out from the website. Sign in again.' : 'Your session expired — sign in again.'
       );
     } else if (e && /No refresh token/i.test(e.message || '')) {
       // Local-dev Discord login (no cloud session) — nothing to enforce.
@@ -6892,7 +6894,8 @@ cloudLoop('org-competitions', () => pullOrgCompetitions(), 60000, { startAfterMs
 // auto-follow on, loads whichever match the website marks live onto the scoreboard. The series the
 // desk records is reported back so the website's bracket and standings move on their own.
 function siteEventState() {
-  const d = { id: '', leagueId: '', autoFollow: true, autoReport: true, matchId: '', lastReport: '', lastReportOk: true };
+  // streamId: the website stream this desk produces ('' = any); auto-follow takes that stream's queue.
+  const d = { id: '', leagueId: '', autoFollow: true, autoReport: true, matchId: '', lastReport: '', lastReportOk: true, streamId: '' };
   if (!state.siteEvent || typeof state.siteEvent !== 'object') state.siteEvent = d;
   for (const k of Object.keys(d)) if (state.siteEvent[k] === undefined) state.siteEvent[k] = d[k];
   return state.siteEvent;
@@ -7008,31 +7011,59 @@ function putSiteMatchOnAir(matchId) {
   broadcastFullState();
   return m;
 }
-// The match the website says belongs on this stream right now: one being played (live), else the
-// one the organiser featured / put first in the stream queue.
+// The match the website says belongs on this desk right now (backend/competition-site.js deskMatch):
+// with a stream picked, the one being played on it, else the next one queued on it; with none, a
+// live match that is queued / featured, else the only live match. { match, why: 'live' | 'next' }.
 function siteOnStreamMatch(lg) {
-  const live = ((lg && lg.schedule) || []).filter((m) => m.status === 'live');
-  if (!live.length) return null;
-  // A tournament plays many matches at once: the one on a stream queue (first in line) or featured
-  // is the broadcast's. With no queue set on the website, follow only when exactly one is live.
-  const queued = live.filter((m) => m.onStream || m.featured)
-    .sort((a, b) => (a.queuePos == null ? 99 : a.queuePos) - (b.queuePos == null ? 99 : b.queuePos));
-  if (queued.length) return queued[0];
-  return live.length === 1 ? live[0] : null;
+  const r = siteComp.deskMatch((lg && lg.schedule) || [], siteEventState().streamId || '');
+  return r ? r.match : null;
 }
+function siteDeskPick(lg) { return siteComp.deskMatch((lg && lg.schedule) || [], siteEventState().streamId || ''); }
 // Auto-follow: the website marks a match live → it goes on the scoreboard. A series the desk is in
 // the middle of recording is never yanked away; the switch waits until it finishes.
 function siteEventFollow(lg) {
   const se = siteEventState();
   if (!se.autoFollow || !lg || se.leagueId !== lg.id) return;
-  const live = siteOnStreamMatch(lg);
-  if (!live || live.id === se.matchId) return;
+  const pick = siteDeskPick(lg);
+  if (!pick || pick.match.id === se.matchId) return;
   const cap = state.leagueCapture;
   const busy = cap && cap.active && cap.leagueId === lg.id && cap.matchId === se.matchId && (cap.games || []).length > 0;
   if (busy) return;
-  try { putSiteMatchOnAir(live.id); logAuto('event', 'The website marked a match live: loaded onto the scoreboard.'); }
+  // "Up next" on this desk's stream is pre-loaded only once the match on air is finished (or none is).
+  if (pick.why === 'next' && se.matchId) {
+    const cur = (lg.schedule || []).find((m) => m.id === se.matchId);
+    const curDone = !cur || cur.status === 'cancelled' || (cur.result && cur.result.scoreA != null && cur.result.scoreB != null && cur.status !== 'live');
+    if (!curDone) return;
+  }
+  const live = pick.match;
+  try { putSiteMatchOnAir(live.id); logAuto('event', pick.why === 'live' ? 'The website marked a match live: loaded onto the scoreboard.' : 'Loaded the next match on this stream onto the scoreboard.'); }
   catch (e) { console.warn('[site-event] auto-follow failed:', (e && e.message) || e); }
 }
+// A producer action on one of the event's matches (the website's producer API): call, start,
+// queue / move on a stream, feature, game details, VOD, a line in the match chat. A/B in the body
+// mean the league's teamA / teamB; they are turned to the website's sides when the league lists
+// the website's team B first. The event is re-synced afterwards so the panel shows the result.
+async function siteEventAct(matchId, body) {
+  if (!cloud.authed()) throw new Error('Sign in to the Nameless website first (Settings > Profile).');
+  const se = siteEventState();
+  const lg = siteEventLeague();
+  if (!lg || !se.id) throw new Error('Load a website event first.');
+  const m = (lg.schedule || []).find((x) => x.id === matchId || (x.extId && x.extId === matchId));
+  if (!m || !m.extId) throw new Error('That match is not on the website.');
+  const b = { ...(body || {}) };
+  if (m.site && m.site.flipped) {
+    const f = (s) => (s === 'A' ? 'B' : s === 'B' ? 'A' : s);
+    if (b.pickedBy) b.pickedBy = f(b.pickedBy);
+    if (b.characters && typeof b.characters === 'object') b.characters = { A: b.characters.B || [], B: b.characters.A || [] };
+  }
+  const out = await cloud.actOnCompetitionMatch(se.id, m.extId, b);
+  delete _compEtags[lg.id];
+  try { await syncLeagueSource(lg.id); } catch (e) { console.warn('[site-event] re-sync after action failed:', (e && e.message) || e); }
+  siteEventFollow(lg);
+  broadcastFullState();
+  return out;
+}
+
 // Report the recorded series for a website fixture. final=false after each game, true when it clinches.
 // Score reports to the website, one match at a time and in order. Each finished game sends the
 // whole series so far; they used to be fire-and-forget, so a slow "game 2" could land after the
@@ -16153,7 +16184,7 @@ registerWsHandlers(require('./backend/ws/tournaments')({
   refreshChallongeLive, refreshFaceitLive, refreshMyEvent, refreshNxgenLive, riot,
   saveAppState, saveTeams, sendWs, setActivePlatform, setChallengermodePolling,
   setChallongePolling, setFaceitPolling, setNxgenPolling, setStartggQueuePolling, sheets,
-  sheetsConnect, siteEventFollow, siteEventLeague, siteEventState, state,
+  sheetsConnect, siteEventAct, siteEventFollow, siteEventLeague, siteEventState, state,
   syncLinkedChallongeTournament, syncSheets, touchMyEvents, wsSend,
   get challengermodeRefreshKey() { return challengermodeRefreshKey; }, set challengermodeRefreshKey(v) { challengermodeRefreshKey = v; },
   get challongeApiKey() { return challongeApiKey; }, set challongeApiKey(v) { challongeApiKey = v; },

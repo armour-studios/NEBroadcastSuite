@@ -13,7 +13,7 @@ let
   refreshChallongeLive, refreshFaceitLive, refreshMyEvent, refreshNxgenLive, riot,
   saveAppState, saveTeams, sendWs, setActivePlatform, setChallengermodePolling,
   setChallongePolling, setFaceitPolling, setNxgenPolling, setStartggQueuePolling, sheets,
-  sheetsConnect, siteEventFollow, siteEventLeague, siteEventState, state,
+  sheetsConnect, siteEventAct, siteEventFollow, siteEventLeague, siteEventState, state,
   syncLinkedChallongeTournament, syncSheets, touchMyEvents, wsSend;
 let ctx;
 
@@ -34,8 +34,21 @@ const handlers = {
     const d = msg.data || {}, se = siteEventState();
     if (typeof d.autoFollow === 'boolean') se.autoFollow = d.autoFollow;
     if (typeof d.autoReport === 'boolean') se.autoReport = d.autoReport;
+    // The website stream this desk produces ('' = follow any live match on stream).
+    if (typeof d.streamId === 'string') se.streamId = d.streamId.slice(0, 120);
     if (se.autoFollow) siteEventFollow(siteEventLeague());
     saveAppState(); broadcastFullState();
+  },
+
+  // { matchId, action, ...fields } (the website's producer actions; see siteEventAct in server.js)
+  async site_event_action(msg, ws) {
+    const { matchId, reqId, ...body } = msg.data || {};
+    try {
+      const result = await siteEventAct(String(matchId || ''), body);
+      wsSend(ws, 'site-event-action-result', { ok: true, reqId, matchId, action: body.action, result });
+    } catch (e) {
+      wsSend(ws, 'site-event-action-result', { ok: false, reqId, matchId, action: body.action, message: (e && e.message) || 'The website did not answer.' });
+    }
   },
 
   site_event_refresh(msg, ws) {

@@ -10,6 +10,7 @@
 // Pure module: no server state, no I/O. server.js passes in what it needs (id minting, the team
 // library resolver), which is also what makes this testable (test/competition.test.js).
 'use strict';
+const site = require('./competition-site');   // website match-day extras (streams, lobby, veto, maps, bracket)
 
 const FORMAT = 'ne-competition';
 const VERSION = 1;
@@ -207,6 +208,8 @@ function validateDoc(input) {
     competition: { id: str(c.id, 120), name: str(c.name, 120), season: str(c.season, 60), game: str(c.game, 60), logo: str(c.logo, 2048), website: str(c.website, 2048) },
     teams: [], matches: [], standings: null,
   };
+  // The Nameless website lists the event's broadcast channels; a desk follows one of them.
+  if (Array.isArray(d.streams)) doc.streams = site.streams(d.streams);
 
   const seenTeam = new Set();
   (Array.isArray(d.teams) ? d.teams : []).slice(0, 500).forEach((t, i) => {
@@ -244,6 +247,8 @@ function validateDoc(input) {
       status, scoreA, scoreB, games, overtime: !!m.overtime, stream: str(m.stream, 2048),
       // Stream-queue flags (the Nameless website sends them): on a channel's queue, its place, featured.
       onStream: !!m.onStream, queuePos: numOrNull(m.queuePos), featured: !!m.featured, streamName: str(m.streamName, 60),
+      // Producer extras from the website (null for other sources): competition-site.js.
+      site: site.matchExtras(m),
     });
   });
 
@@ -278,6 +283,7 @@ function applyDoc(lg, doc, opts = {}) {
   if (!lg || !doc) return report;
   lg.teams = Array.isArray(lg.teams) ? lg.teams : [];
   lg.schedule = Array.isArray(lg.schedule) ? lg.schedule : [];
+  if (doc.streams && JSON.stringify(lg.streams || []) !== JSON.stringify(doc.streams)) { lg.streams = doc.streams; report.changed = true; }
 
   const c = doc.competition || {};
   if (opts.updateMeta !== false) {
@@ -367,10 +373,12 @@ function applyDoc(lg, doc, opts = {}) {
     if (dm.round) m.round = dm.round;
     if (dm.bestOf) m.format = 'bo' + dm.bestOf;
     if (dm.stream) m.stream = dm.stream;
-    const q = { onStream: dm.onStream || undefined, queuePos: dm.queuePos != null ? dm.queuePos : undefined, featured: dm.featured || undefined, streamName: dm.streamName || undefined };
+    const q = { onStream: dm.onStream || undefined, queuePos: dm.queuePos != null ? dm.queuePos : undefined, featured: dm.featured || undefined, streamName: dm.streamName || undefined,
+      // flipped: the league lists the website's team B first (actions sent back are turned around).
+      site: dm.site ? { ...(flipped ? site.flipExtras(dm.site) : dm.site), flipped: !!flipped } : undefined };
     for (const k of Object.keys(q)) {
       if (q[k] === undefined) { if (k in m) { delete m[k]; report.changed = true; } }
-      else if (m[k] !== q[k]) { m[k] = q[k]; report.changed = true; }
+      else if (k === 'site' ? JSON.stringify(m.site) !== JSON.stringify(q.site) : m[k] !== q[k]) { m[k] = q[k]; report.changed = true; }
     }
     m.result = m.result || { scoreA: null, scoreB: null, ot: false };
     // The app just recorded this match and sent it to the source; a document fetched before that

@@ -14,7 +14,8 @@
    are MOVED into the right pane, never rebuilt, so every handler keeps working. Narrow: stacked.
    Server: loadSiteEvent / putSiteMatchOnAir / siteEventFollow / siteReportCapture in server.js.
    WS: site_event_load {id}, site_event_match {matchId}, site_event_settings, site_event_refresh,
-   site_event_unload. Works in both interface styles. */
+   site_event_unload, site_event_action {matchId, action, ...} (the website's producer actions: call,
+   start, queue, feature, vod, message). Works in both interface styles. */
 (function () {
   'use strict';
   function $(id) { return document.getElementById(id); }
@@ -366,11 +367,15 @@
       if (st === 'live') tags.push('<span class="sev-badge live">Live</span>');
       if (m.onStream || m.featured) tags.push('<span class="sev-badge stream">' + esc(m.streamName || 'On stream') + (m.queuePos ? ' #' + esc(m.queuePos) : '') + '</span>');
       var isOn = onAir === m.id;
+      var x = m.site || {};
+      if (x.calledAt && st !== 'completed') tags.push('<span class="sev-badge">Called</span>');
+      if (x.station) tags.push('<span class="sev-badge">' + esc(x.station) + '</span>');
       return '<div class="sev-m' + (isOn ? ' is-on' : '') + '">'
         + '<div class="sev-m-teams"><span class="sev-m-t">' + logo(a) + esc(tName(a)) + '</span>' + score + '<span class="sev-m-t sev-m-t--b">' + esc(tName(b)) + logo(b) + '</span></div>'
         + '<div class="sev-m-meta">' + esc([m.round, matchWhen(m), m.format ? m.format.toUpperCase() : ''].filter(Boolean).join(' · ')) + tags.join('') + '</div>'
         + (isOn ? '<span class="sev-m-on">On the scoreboard' + (cap.games && cap.games.length ? ' · game ' + (cap.games.length + 1) : '') + '</span>'
                 : st !== 'completed' ? '<button type="button" class="btn btn-secondary btn-sm" data-sev="match" data-id="' + esc(m.id) + '">Put on scoreboard</button>' : '')
+        + (st !== 'completed' && m.extId ? matchActions(m, st, se) : '')
         + '</div>';
     };
     var group = function (title, rows, empty, max) {
@@ -390,9 +395,84 @@
       + '<label class="sev-sw"><label class="switch"><input type="checkbox" data-sevset="autoFollow"' + (se.autoFollow !== false ? ' checked' : '') + '><span class="slider"></span></label><span><b>Auto-follow</b> When the website marks a match on your stream live, it goes on the scoreboard. A series you are in the middle of is never switched away.</span></label>'
       + '<label class="sev-sw"><label class="switch"><input type="checkbox" data-sevset="autoReport"' + (se.autoReport !== false ? ' checked' : '') + '><span class="slider"></span></label><span><b>Send scores to the website</b> Each game result goes up as it ends, and the final score moves the bracket and standings on. Needs organizer or moderator access.</span></label>'
       + '</div>'
+      + streamPicker(lg, se)
+      + (onAir ? onAirDetails(lg, (lg.schedule || []).find(function (m) { return m.id === onAir; })) : '')
       + (se.lastReport ? '<div class="sev-note' + (se.lastReportOk === false ? ' bad' : '') + '">' + esc(se.lastReport) + '</div>' : '')
       + '<div class="sev-mgs">' + group('Live now', live, 'Nothing live. Matches the website marks in progress show here.', 6) + group('Up next', next, 'No matches scheduled.', 8) + group('Results', done, 'No results yet.', 5) + '</div>'
       + '</div>';
+  }
+
+  // ── producer tools (the website's producer actions) ───────────────────────────────────────
+  // Which of the event's streams this desk produces: auto-follow then takes that stream's queue
+  // (the live match on it, else the next one queued on it).
+  function streamPicker(lg, se) {
+    var streams = lg.streams || [];
+    if (!streams.length) return '';
+    return '<div class="sev-desk"><label><b>This desk</b><select class="sev-sel" data-sevstream>'
+      + '<option value="">Any stream (follow the live match)</option>'
+      + streams.map(function (st) { return '<option value="' + esc(st.id) + '"' + (se.streamId === st.id ? ' selected' : '') + '>' + esc(st.name) + '</option>'; }).join('')
+      + '</select></label><span>Auto-follow takes this stream\'s queue on the website: the match being played on it, else the next one lined up.</span></div>';
+  }
+  var busy = {};
+  function actBtn(label, action, m, extra, title) {
+    return '<button type="button" class="btn btn-ghost btn-xs" data-sev="act" data-act="' + action + '" data-id="' + esc(m.id) + '"' + (extra || '')
+      + (title ? ' title="' + esc(title) + '"' : '') + (busy[m.id + ':' + action] ? ' disabled' : '') + '>' + label + '</button>';
+  }
+  function matchActions(m, st, se) {
+    var x = m.site || {}, out = [];
+    out.push(actBtn(x.calledAt ? 'Call again' : 'Call', 'call', m, '', 'Ping both teams to their match on the website (in-app, email and Discord)'));
+    if (st !== 'live') out.push(actBtn('Start', 'start', m, '', 'Mark the match in progress on the website'));
+    if (se.streamId) {
+      out.push(x.streamId === se.streamId
+        ? actBtn('Off my stream', 'queue', m, ' data-stream=""', 'Take it off this desk\'s stream queue')
+        : actBtn('To my stream', 'queue', m, ' data-stream="' + esc(se.streamId) + '"', 'Add it to the end of this desk\'s stream queue'));
+    }
+    out.push(actBtn(m.featured ? 'Unfeature' : 'Feature', 'feature', m, ' data-on="' + (m.featured ? '0' : '1') + '"', 'The event\'s featured match on the website'));
+    return '<div class="sev-m-acts">' + out.join('') + '</div>';
+  }
+  // The match on the scoreboard: what the producer and the observers need from the website.
+  function onAirDetails(lg, m) {
+    if (!m || !m.site) return '';
+    var x = m.site, a = tName(teamOf(lg, m.teamA)), b = tName(teamOf(lg, m.teamB));
+    var who = function (s) { return s === 'A' ? a : s === 'B' ? b : s === 'decider' ? 'Decider' : ''; };
+    var rows = [];
+    rows.push('<div><dt>Check-in</dt><dd>' + esc(a) + (x.checkIn && x.checkIn.a ? ' ready' : ' not checked in') + ' · ' + esc(b) + (x.checkIn && x.checkIn.b ? ' ready' : ' not checked in') + '</dd></div>');
+    if (x.station) rows.push('<div><dt>Station</dt><dd>' + esc(x.station) + '</dd></div>');
+    if (x.lobby) {
+      rows.push('<div><dt>Lobby</dt><dd>'
+        + (x.lobby.code ? '<code>' + esc(x.lobby.code) + '</code> <button type="button" class="btn btn-ghost btn-xs" data-sev="copy" data-text="' + esc(x.lobby.code) + '">Copy</button>' : '')
+        + (x.lobby.password ? ' password <code>' + esc(x.lobby.password) + '</code> <button type="button" class="btn btn-ghost btn-xs" data-sev="copy" data-text="' + esc(x.lobby.password) + '">Copy</button>' : '')
+        + '</dd></div>');
+    }
+    if (x.veto && (x.veto.picks.length || x.veto.bans.length)) {
+      rows.push('<div><dt>Veto</dt><dd>' + x.veto.picks.map(function (p) {
+        return '<b>' + esc(p.map) + '</b> (' + esc(who(p.by)) + (p.side ? ', ' + esc(who(p.sideBy)) + ' ' + esc(p.side) : '') + ')';
+      }).join(', ')
+        + (x.veto.bans.length ? '<br><span class="sev-dim">Bans: ' + x.veto.bans.map(function (bn) { return esc(bn.map) + (bn.by ? ' (' + esc(who(bn.by)) + ')' : ''); }).join(', ') + '</span>' : '')
+        + '</dd></div>');
+    } else if ((x.maps || []).some(function (g) { return g.map; })) {
+      rows.push('<div><dt>Maps</dt><dd>' + x.maps.filter(function (g) { return g.map; }).map(function (g) {
+        return 'G' + g.game + ' ' + esc(g.map) + (g.pickedBy ? ' (' + esc(who(g.pickedBy)) + ')' : '');
+      }).join(', ') + '</dd></div>');
+    }
+    rows.push('<div><dt>VOD</dt><dd class="sev-inline"><input type="url" class="sev-in" data-sevvod="' + esc(m.id) + '" placeholder="https://..." value="' + esc(x.vod || '') + '">'
+      + '<button type="button" class="btn btn-ghost btn-xs" data-sev="vod" data-id="' + esc(m.id) + '">Save</button></dd></div>');
+    rows.push('<div><dt>Players</dt><dd class="sev-inline"><input type="text" class="sev-in" maxlength="300" data-sevmsg="' + esc(m.id) + '" placeholder="Message both teams in the match chat">'
+      + '<button type="button" class="btn btn-ghost btn-xs" data-sev="msg" data-id="' + esc(m.id) + '">Send</button></dd></div>');
+    return '<dl class="sev-onair">' + rows.join('') + '</dl>';
+  }
+  function runAct(matchId, body) {
+    var key = matchId + ':' + body.action;
+    busy[key] = true;
+    tx('site_event_action', Object.assign({ matchId: matchId, reqId: key }, body));
+    lastSig = ''; render(cur());
+  }
+  var ACT_DONE = { call: 'Called: both teams were pinged.', start: 'Marked in progress on the website.', queue: 'Stream queue updated.', feature: 'Featured match updated.', vod: 'VOD saved on the website.', message: 'Sent to the match chat.' };
+  function onAction(d) {
+    if (d.reqId) delete busy[d.reqId];
+    note = d.ok ? { text: ACT_DONE[d.action] || 'Done.', bad: false } : { text: d.message || 'The website said no.', bad: true };
+    lastSig = ''; render(cur());
+    setTimeout(function () { if (note.text) { note = { text: '', bad: false }; lastSig = ''; render(cur()); } }, d.ok ? 4000 : 9000);
   }
 
   // ── actions ──────────────────────────────────────────────────────────────────────────────
@@ -436,6 +516,19 @@
       renderList(s);
     } else if (act === 'match') {
       tx('site_event_match', { matchId: b.getAttribute('data-id') });
+    } else if (act === 'act') {
+      var a = b.getAttribute('data-act'), mid = b.getAttribute('data-id');
+      if (a === 'queue') runAct(mid, { action: 'queue', streamId: b.getAttribute('data-stream') || null });
+      else if (a === 'feature') runAct(mid, { action: 'feature', featured: b.getAttribute('data-on') === '1' });
+      else runAct(mid, { action: a });
+    } else if (act === 'vod') {
+      var vin = host.querySelector('[data-sevvod="' + b.getAttribute('data-id') + '"]');
+      runAct(b.getAttribute('data-id'), { action: 'vod', url: vin && vin.value.trim() ? vin.value.trim() : null });
+    } else if (act === 'msg') {
+      var min = host.querySelector('[data-sevmsg="' + b.getAttribute('data-id') + '"]');
+      if (min && min.value.trim()) { runAct(b.getAttribute('data-id'), { action: 'message', text: min.value.trim() }); min.value = ''; }
+    } else if (act === 'copy') {
+      try { navigator.clipboard.writeText(b.getAttribute('data-text') || ''); note = { text: 'Copied.', bad: false }; lastSig = ''; render(s); } catch (er) {}
     } else if (act === 'refresh') {
       note = { text: 'Checking the website...', bad: false };
       tx('site_event_refresh');
@@ -462,6 +555,7 @@
     if (t && t.classList.contains('sev-game')) { view.game = t.value; saveView(); renderList(cur()); return; }
     if (t && t.classList.contains('sev-kind')) { view.kind = t.value; saveView(); renderList(cur()); return; }
     if (t && t.classList.contains('sev-src')) { view.src = t.value; saveView(); renderList(cur()); return; }
+    if (t && t.hasAttribute('data-sevstream')) { tx('site_event_settings', { streamId: t.value }); return; }
     var k = t && t.getAttribute('data-sevset');
     if (!k) return;
     var d = {}; d[k] = !!e.target.checked;
@@ -488,7 +582,7 @@
   }, true);
 
   window.__siteEvents = {
-    render: render, onResult: onResult,
+    render: render, onResult: onResult, onAction: onAction,
     // Search ("Other platforms") lands on the loaders: open them first, or the flash hits a hidden box.
     openOther: function () { setOtherOpen(true); lastSig = ''; render(cur()); },
   };

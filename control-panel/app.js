@@ -35122,6 +35122,8 @@ async function connect() {
       }
     } else if (msg.type === 'site-event-result') {
       if (window.__siteEvents) window.__siteEvents.onResult(msg.data || {});
+    } else if (msg.type === 'site-event-action-result') {
+      if (window.__siteEvents && window.__siteEvents.onAction) window.__siteEvents.onAction(msg.data || {});
     } else if (msg.type === 'bracket-result' || msg.type === 'event-result') {
       const resultEl = el('bracket-status');
       if (resultEl) {

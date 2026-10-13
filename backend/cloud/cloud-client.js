@@ -12,21 +12,39 @@
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+const https = require('https');
+const crypto = require('crypto');
+
+// One keep-alive agent for every cloud call: Pulse polls every 3 s and show state every 12 s, and a
+// fresh TCP + TLS handshake per call was most of their cost (website DESKTOP_INTEGRATION 7.8).
+const AGENT = new https.Agent({ keepAlive: true, keepAliveMsecs: 30000, maxSockets: 8 });
+// This PC, as the website's "Signed-in devices" list shows it (7.1): a random id made once and kept
+// in userData (never the MAC or hostname), plus the PC name and OS so the producer recognises it.
+let DEVICE = { id: '', name: '', platform: '' };
 
 let BASE = '';            // BROADCAST_REMOTE_URL (no trailing slash)
 let APP_VERSION = '0.0.0';
 let sessionFile = null;
-let session = { token: '', refreshToken: '', user: null, workspaceId: null, role: null, orgName: null, expiresAt: 0 };
+let session = { token: '', refreshToken: '', user: null, workspaceId: null, role: null, orgName: null, expiresAt: 0, sessionId: '' };
 
 function init({ baseUrl, dataDir, appVersion } = {}) {
   BASE = (baseUrl || '').trim().replace(/\/+$/, '');
   if (appVersion) APP_VERSION = String(appVersion);
   if (dataDir) { sessionFile = path.join(dataDir, 'cloud-session.json'); _load(); }
+  DEVICE = { id: deviceId(dataDir), name: String(os.hostname() || '').slice(0, 80), platform: `${process.platform} ${os.release()}`.slice(0, 80) };
+}
+function deviceId(dataDir) {
+  const file = dataDir ? path.join(dataDir, 'device-id') : '';
+  try { if (file && fs.existsSync(file)) { const v = fs.readFileSync(file, 'utf8').trim(); if (/^[0-9a-f-]{36}$/i.test(v)) return v; } } catch (_) {}
+  const id = crypto.randomUUID();
+  try { if (file) fs.writeFileSync(file, id); } catch (_) {}
+  return id;
 }
 
 function configured() { return !!BASE; }
 function authed() { return configured() && !!session.token && (!session.expiresAt || session.expiresAt > Date.now()); }
-function getSession() { return { user: session.user, workspaceId: session.workspaceId, role: session.role, orgName: session.orgName, plan: _plan, authed: authed(), configured: configured() }; }
+function getSession() { return { user: session.user, workspaceId: session.workspaceId, role: session.role, orgName: session.orgName, plan: _plan, authed: authed(), configured: configured(), sessionId: session.sessionId || '', deviceName: DEVICE.name }; }
 
 // ── Studio plan (website GET /api/broadcast/me -> me.entitlements) ──────────────
 // Display only for now: the plan name and a "Founding producer" badge. NOTHING in the app is
@@ -57,7 +75,7 @@ function getPlan() { return _plan; }
 
 function _load() { try { if (sessionFile && fs.existsSync(sessionFile)) session = { ...session, ...JSON.parse(fs.readFileSync(sessionFile, 'utf8')) }; } catch (e) { /* ignore */ } }
 function _save() { try { if (sessionFile) fs.writeFileSync(sessionFile, JSON.stringify(session)); } catch (e) { /* ignore */ } }
-function clearSession() { session = { token: '', refreshToken: '', user: null, workspaceId: null, role: null, orgName: null, expiresAt: 0 }; _plan = null; _save(); }
+function clearSession() { session = { token: '', refreshToken: '', user: null, workspaceId: null, role: null, orgName: null, expiresAt: 0, sessionId: '' }; _plan = null; _save(); }
 
 function _require() { if (!configured()) throw new Error('Cloud backend not configured (set BROADCAST_REMOTE_URL).'); }
 
@@ -129,8 +147,9 @@ function health() {
 
 function _client(auth = true) {
   const headers = { 'Content-Type': 'application/json', 'x-app': 'NE-Broadcast-Suite', 'x-app-version': APP_VERSION };
+  if (DEVICE.id) { headers['x-device-id'] = DEVICE.id; headers['x-device-name'] = DEVICE.name; headers['x-device-platform'] = DEVICE.platform; }
   if (auth && session.token) headers.Authorization = `Bearer ${session.token}`;
-  const inst = axios.create({ baseURL: BASE, timeout: 12000, headers });
+  const inst = axios.create({ baseURL: BASE, timeout: 12000, headers, httpsAgent: AGENT });
   // One hook for every cloud call in the app — individual callers keep their own try/catch and
   // stay unchanged; the breaker just observes them.
   inst.interceptors.response.use(
@@ -169,7 +188,9 @@ function _setSession(d) {
     workspaceId: d.workspaceId != null ? d.workspaceId : session.workspaceId,
     role: d.role != null ? d.role : session.role,
     orgName: d.orgName != null ? d.orgName : session.orgName,
-    expiresAt: d.expiresAt || 0
+    expiresAt: d.expiresAt || 0,
+    // The website's id for this sign-in (its "Signed-in devices" list); additive, older sites omit it.
+    sessionId: d.sessionId || session.sessionId || ''
   };
   _save();
 }
@@ -307,7 +328,9 @@ async function getOrgCompetition(id, { etag = '', orgId } = {}) {
     });
     if (res.status === 304) return { notModified: true, etag };
     const h = res.headers || {};
-    return { doc: res.data, etag: h.etag || h.ETag || '' };
+    // X-Live-Seq: the live sequence the document reflects (push updates, 7.2). Older sites omit it.
+    const seq = Number(h['x-live-seq']);
+    return { doc: res.data, etag: h.etag || h.ETag || '', seq: Number.isFinite(seq) ? seq : null };
   } catch (e) { throw _err(e); }
 }
 
@@ -440,6 +463,17 @@ async function reportCompetitionMatch(id, matchId, body) {
   } catch (e) { throw _err(e); }
 }
 
+// Producer actions on a match (the website's producer API): call, start, queue, feature, game
+// details, VOD, chat line. body = { action, ... }; the website checks the person may (organizers
+// and moderators; the stream queue needs schedule rights).
+async function actOnCompetitionMatch(id, matchId, body) {
+  _require();
+  try {
+    const { data } = await _client().post(`/api/broadcast/competitions/${encodeURIComponent(id)}/matches/${encodeURIComponent(matchId)}/actions`, body);
+    return data;
+  } catch (e) { throw _err(e); }
+}
+
 // Home page content (backend/site-home.js). getSiteHome is public and edge-cached; getSiteMe is the
 // signed-in producer's own communities and events (Bearer session, never cached by the site).
 async function getSiteHome() {
@@ -476,7 +510,7 @@ module.exports = {
   pushShowState,
   pushLeague, listCloudLeagues, pullLeague,
   listOrgCompetitions, getOrgCompetition,
-  listMyCompetitions, getMyCompetition, reportCompetitionMatch,
+  listMyCompetitions, getMyCompetition, reportCompetitionMatch, actOnCompetitionMatch,
   publicUrl,
   createStation, ensureStation, createStationRoom, createCameraSession, createMatch, createTalentInvite,
   listStationsFull, patchStation, deleteStation, patchRoom, deleteRoom, addRoomSlot, patchRoomSlot, deleteRoomSlot

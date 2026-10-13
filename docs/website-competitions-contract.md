@@ -23,6 +23,28 @@ Auth: `Authorization: Bearer <sessionToken>` (`resolveApiActor`). Works for pers
 - Unplayed fixtures omit `scoreA` / `scoreB` (the database stores 0-0, which the app would read as a result). Byes and TBD slots are left out.
 - Status map: veto / in_progress / awaiting_confirmation / disputed → `live`; completed / forfeited → `completed`; cancelled → `cancelled`; the rest → `scheduled`.
 
+### Producer extras (2026-10-13, all optional)
+Website: `docForUser` in `lib/broadcast-competitions.ts`. App: `backend/competition-site.js` keeps them on the league fixture as `m.site`, turned to the fixture's orientation (`m.site.flipped` when the league lists the website's team B first).
+
+- Document: `streams: [{ id, name, url }]`, the event's broadcast channels. A desk picks one (Event page ▸ *This desk*, `state.siteEvent.streamId`) and auto-follow takes **that stream's** queue: the live match on it, else (once the match on air is finished) the next one queued on it.
+- Per match: `streamId`, `siteStatus` (the website's own status: `check_in`, `veto`, ...), `calledAt`, `startedAt`, `checkIn: { a, b }`, `station` (LAN station name), `lobby: { code, password }` (only to people with `results.override` or `schedule.manage`, never casters), `vod`, `maps: [{ game, map, pickedBy, side, status, vod, characters: { A, B } }]` (every game, played or not), `veto: { status, mapPool, bans: [{ map, by }], picks: [{ map, by, side, sideBy }], characters: [{ by, action, names }] }` (blind character picks still hidden are left out), `bracket: { stage, stageKind, side, round, match, winnerTo, loserTo }`.
+
+## Producer actions (2026-10-13)
+
+`POST /api/broadcast/competitions/:id/matches/:fixtureId/actions`, Bearer as above. One action per call; the website reuses its console's match-day engine, so rosters are pinged, chat lines posted and the event live-bumped exactly as if an organizer had done it there. Audited (event audit + Studio activity).
+
+| Body | Effect | Needs |
+|---|---|---|
+| `{ action: 'call' }` | ping both rosters (in-app, email, Discord) | `results.override` |
+| `{ action: 'start' }` | `in_progress` from scheduled / check-in / veto (already running: `unchanged`) | `results.override` |
+| `{ action: 'queue', streamId \| null, position? }` | onto / within / off a stream's queue | `schedule.manage` |
+| `{ action: 'feature', featured }` | the featured-match flag | `schedule.manage` |
+| `{ action: 'game', gameNumber, map?, pickedBy?, side?, characters?, status? }` | game details (never scores: those use `/report`) | `results.override` |
+| `{ action: 'vod', url \| null, gameNumber? }` | series or game VOD, https only | `results.override` |
+| `{ action: 'message', text }` | a "Broadcast: ..." line in the match chat (300 chars) | `results.override` |
+
+Answers `{ ok, action, ...result }`; errors `{ error: { code, message } }` with 400 (validation), 403, 404, 409 (not playable / not startable / no such game). App: `cloud.actOnCompetitionMatch`, `siteEventAct` (server.js), WS `site_event_action { matchId, action, ... }` → `site-event-action-result`; buttons on the Event page (Call, Start, To / Off my stream, Feature; VOD and a message box for the match on air). Parsing: `lib/studio/producer-actions.ts` (+ `.test.ts`).
+
 ---
 
 # v1 (org-scoped, kept as the fallback)
