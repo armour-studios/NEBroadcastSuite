@@ -10,11 +10,12 @@
     "dev:watch": "nodemon --watch server.js --watch backend --exec \"electron .\"",
     "build": "node scripts/build-streamdeck-plugin.js && node scripts/gen-prod-env.js && electron-builder --win nsis",
     "build:portable": "node scripts/build-streamdeck-plugin.js && node scripts/gen-prod-env.js && electron-builder --win portable",
-    "release": "node scripts/build-streamdeck-plugin.js && node scripts/gen-prod-env.js && node scripts/release.js"
+    "release": "node scripts/build-streamdeck-plugin.js && node scripts/gen-prod-env.js && node scripts/release.js",
+    "postinstall": "node node_modules/electron/install.js"
   },
   "dependencies": {
     "ably": "2.28.0",
-    "adm-zip": "^0.5.17",
+    "adm-zip": "^0.6.1",
     "axios": "^1.6.0",
     "cannon-es": "^0.20.0",
     "dotenv": "^17.4.2",
