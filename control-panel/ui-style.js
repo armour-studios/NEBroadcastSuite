@@ -204,6 +204,8 @@
 
   // ── Navigation model ──────────────────────────────────────────────────────────────────────
   var ICONS = {
+    tick:     '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+    check:    '<rect x="3" y="3" width="18" height="18" rx="4"/><path d="M8 12.5l2.8 2.8L16.5 9"/>',
     overlays: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/><path d="M3 17.5l9 5 9-5" opacity=".55"/>',
     home:     '<path d="M3 11l9-8 9 8"/><path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10"/>',
     live:     '<circle cx="12" cy="12" r="2.5"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M4.9 4.9a10 10 0 0 0 0 14.2M19.1 4.9a10 10 0 0 1 0 14.2"/>',
@@ -243,26 +245,19 @@
   var NAV = [
     { id: 'home', rail: 'Home', label: 'Home', icon: 'home', go: { tab: 'principal', view: 'home' },
       desc: 'Nameless Esports: what is coming up, what we do, and tonight at a glance.' },
-    { group: 'Live' },
-    { id: 'live', rail: 'Dashboard', label: 'Dashboard', icon: 'live', go: { tab: 'principal', view: 'live' },
-      desc: 'Run the show from one screen. Edit layout arranges the cards however you like.' },
-    { id: 'graphics', rail: 'Graphics', label: 'Graphics', icon: 'graphics', go: { tab: 'principal', view: 'graphics' },
-      desc: 'Edit every graphic, preview it and put it on air.' },
-    { id: 'overlays', rail: 'Overlays', label: 'Overlays', icon: 'overlays', go: { tab: 'principal', view: 'overlays' },
-      desc: 'Design your own overlays for any scene, or use the ones built into the app. Everything goes straight into OBS.' },
-    { id: 'replays', rail: 'Replay Studio', label: 'Replay Studio', icon: 'replays', go: { tab: 'replays' },
-      subs: [],
-      desc: 'Capture moments during the game, play them back on air, and build highlight reels for the breaks.' },
-    { group: 'Set up' },
-    { id: 'match', rail: 'Match', label: 'Match', icon: 'match', go: { tab: 'principal', view: 'match' },
-      desc: 'The two teams, their rosters and colours, the series and the game settings.' },
+    { group: 'Before the show' },
+    { id: 'guide', rail: 'Setup guide', label: 'Setup guide', icon: 'check', go: { tab: 'principal', view: 'live' }, mode: 'setup',
+      desc: 'Everything a show needs, in order, with the controls right there. Each step ticks off as you finish it.' },
     { id: 'event', rail: 'Event', label: 'Event', icon: 'event', go: { tab: 'principal', view: 'event' },
       // One page. Leagues and tournaments are created and run on the Nameless website; the app's own
       // Competitions / Leagues / Browse start.gg pages are retired from the nav (site-events.js).
       subs: [],
       desc: 'Your leagues and tournaments from the Nameless website, or an event on start.gg and other platforms. Load one and the teams, matches, scores and standings fill in by themselves.' },
-    { id: 'sponsors', rail: 'Brand', label: 'Brand', icon: 'sponsors', go: { tab: 'principal', view: 'sponsors' },
-      desc: 'Brand kits, sponsor logos and where they appear on air.' },
+    { id: 'match', rail: 'Match', label: 'Match', icon: 'match', go: { tab: 'principal', view: 'match' },
+      desc: 'The two teams, their rosters and colours, the series and the game settings.' },
+    { id: 'library', rail: 'Teams', label: 'Teams', icon: 'library', go: { tab: 'equipos', click: '#talent-page-nav > button[data-talentpage="teams"]' },
+      subs: [{ mirror: '#talent-page-nav > button:not([data-talentpage="showdeck"])', tab: 'equipos' }],
+      desc: 'Every team and person you have saved, ready to drop into a show.' },
     { id: 'people', rail: 'Talent', label: 'Talent', icon: 'people', go: { tab: 'equipos', click: '#talent-page-nav > button[data-talentpage="showdeck"]' },
       subs: [
         { mirror: '#talent-page-nav > button[data-talentpage="showdeck"]', tab: 'equipos' },
@@ -270,13 +265,22 @@
         { label: 'Cameras', go: { tab: 'produccion', click: '#pd-subnav > button[data-pd="cameras"]' }, pd: 'cameras' }
       ],
       desc: 'Who is on the show tonight: the desk, their cameras and the live monitor.' },
+    { id: 'sponsors', rail: 'Brand', label: 'Brand', icon: 'sponsors', go: { tab: 'principal', view: 'sponsors' },
+      desc: 'Brand kits, sponsor logos and where they appear on air.' },
+    { id: 'overlays', rail: 'Overlays', label: 'Overlays', icon: 'overlays', go: { tab: 'principal', view: 'overlays' },
+      desc: 'Design your own overlays for any scene, or use the ones built into the app. Everything goes straight into OBS.' },
+    { group: 'During the show' },
+    { id: 'live', rail: 'Dashboard', label: 'Dashboard', icon: 'live', go: { tab: 'principal', view: 'live' }, mode: 'run',
+      desc: 'Run the show from one screen. Edit layout arranges the cards however you like.' },
+    { id: 'graphics', rail: 'Graphics', label: 'Graphics', icon: 'graphics', go: { tab: 'principal', view: 'graphics' },
+      desc: 'Edit every graphic, preview it and put it on air.' },
+    { id: 'replays', rail: 'Replay Studio', label: 'Replay Studio', icon: 'replays', go: { tab: 'replays' },
+      subs: [],
+      desc: 'Capture moments during the game, play them back on air, and build highlight reels for the breaks.' },
     { id: 'show', rail: 'Rundown', label: 'Rundown', icon: 'show', go: { tab: 'produccion', click: '#pd-subnav > button[data-pd]:not([data-pd="cameras"])', keep: true },
       subs: [{ mirror: '#pd-subnav > button[data-pd]:not([data-pd="cameras"])', tab: 'produccion' }],
       desc: 'Run of show, automations, hotkeys and the AI director.' },
     { group: 'Library' },
-    { id: 'library', rail: 'Teams', label: 'Teams', icon: 'library', go: { tab: 'equipos', click: '#talent-page-nav > button[data-talentpage="teams"]' },
-      subs: [{ mirror: '#talent-page-nav > button:not([data-talentpage="showdeck"])', tab: 'equipos' }],
-      desc: 'Every team and person you have saved, ready to drop into a show.' },
     { id: 'assets', rail: 'Assets', label: 'Assets', icon: 'assets', go: { tab: 'media' },
       subs: [{ mirror: '#assets-subnav > button', tab: 'media' }],
       desc: 'Your images and every overlay browser source.' },
@@ -374,7 +378,7 @@
   function currentItem() {
     if (settingsOpen()) return 'settings';
     var tab = activeTab();
-    if (tab === 'principal') return VIEW_OF[mxView] || 'live';
+    if (tab === 'principal') { var v = VIEW_OF[mxView] || 'live'; return v === 'live' && crMode(state()) === 'setup' ? 'guide' : v; }
     if (tab === 'produccion') return pdActive() === 'cameras' ? 'people' : 'show';
     if (tab === 'equipos') {
       var tp = document.querySelector('#talent-page-nav .talent-page-btn.active');
@@ -513,7 +517,10 @@
     // or the click changed the page UNDER Settings and the app looked frozen.
     var sm = document.getElementById('tab-ajustes-content');
     if (sm && sm.classList.contains('open') && typeof window.closeSettingsModal === 'function') window.closeSettingsModal();
-    if (currentItem() !== item.id) go(item.go);
+    if (currentItem() !== item.id) {
+      if (item.mode && lsGet(CR_MODE_KEY, '') !== item.mode) setCrMode(item.mode);
+      go(item.go);
+    }
     if (document.body.classList.contains('nav-open') && typeof window.setMobileNav === 'function') window.setMobileNav(false);
   }
   function onTabClick(e) {
@@ -545,6 +552,7 @@
     if (on) b.graphics = { text: String(on), tone: 'live' };
     var q = (s && s.startgg && Array.isArray(s.startgg.queue)) ? s.startgg.queue.filter(function (m) { return m && m.state !== 3; }).length : 0;
     if (q) b.event = { text: String(q), tone: 'info' };
+    try { var p = wizProgress(s || {}); if (!p.complete) b.guide = { text: p.done + ' / ' + p.total, tone: 'todo' }; } catch (e) {}
     return b;
   }
   // The event's logo for the workspace card: the platform's own (start.gg tournament logo, FACEIT,
@@ -558,18 +566,33 @@
     if (lg && lg.logo) return lg.logo;
     return (s && s.brand && s.brand.logo) || '';
   }
+  // Which setup pages are finished, from the same checks the Setup guide uses. The guide itself
+  // carries "2 / 4" until the required steps are done.
+  var TICK_STEP = { event: 'event', match: 'teams', people: 'talent', overlays: 'obs', sponsors: 'look' };
+  function setupTicks(s) {
+    var t = {};
+    try {
+      var f = wizFlags();
+      Object.keys(TICK_STEP).forEach(function (id) {
+        var w = WIZ.filter(function (x) { return x.id === TICK_STEP[id]; })[0];
+        if (w && w.done(s, f)) t[id] = 1;
+      });
+    } catch (e) {}
+    return t;
+  }
   function renderNav() {
     if (!navEl) return;
     var s = state() || {};
     var cur = currentItem();
     var viewOnly = document.body.classList.contains('role-viewonly');
     var badges = navBadges(s);
+    var ticks = setupTicks(s);
     var gameLogo = ($('game-dd-logo') || {}).src || '';
     var evLogo = eventLogo(s);
     var logo = evLogo || gameLogo;
     var gameName = (s.games && s.games[s.activeGame] && s.games[s.activeGame].name) || '';
     var eventName = s.eventName || '';
-    var sig = JSON.stringify([cur, viewOnly, badges, logo.length > 200 ? logo.slice(0, 64) + logo.length : logo, gameName, eventName, railMin()]);
+    var sig = JSON.stringify([cur, viewOnly, badges, ticks, logo.length > 200 ? logo.slice(0, 64) + logo.length : logo, gameName, eventName, railMin()]);
     if (navEl._sig === sig) return;
     navEl._sig = sig;
     navEl.textContent = '';
@@ -596,7 +619,8 @@
       b.title = n.label + (n.desc ? '\n' + n.desc : '');
       var bd = badges[n.id];
       b.innerHTML = '<span class="mx-item-ico">' + svg(n.icon) + '</span><span class="mx-item-label"></span>'
-        + (bd ? '<span class="mx-badge mx-badge--' + bd.tone + '"></span>' : '');
+        + (bd ? '<span class="mx-badge mx-badge--' + bd.tone + '"></span>' : '')
+        + (!bd && ticks[n.id] ? '<span class="mx-tick" title="Done">' + svg('tick') + '</span>' : '');
       b.querySelector('.mx-item-label').textContent = n.label;
       if (bd) b.querySelector('.mx-badge').textContent = bd.text;
       if (n.id === cur) b.setAttribute('aria-current', 'page');
