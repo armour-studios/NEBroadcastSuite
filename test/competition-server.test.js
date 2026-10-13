@@ -26,9 +26,6 @@ function fn(name) {
 const NAMES = ['normalizeCompetitionSettings', 'competitionLeague', 'compResolveTeam', 'competitionLiveIds',
   'competitionScheduleRows', 'refreshCompetitionFeed', 'competitionGoLive', 'applyCompetitionDoc',
   'describeSyncReport', 'lgRecalcServer', 'srvLgMatchTally', 'srvLgUid'];
-const routesStart = src.indexOf('  // ── Competition API v1');
-const routesEnd = src.indexOf('\n  // Wipe the whole vault.', routesStart);
-assert.ok(routesStart > 0 && routesEnd > routesStart, 'competition route block not found');
 
 function world() {
   const state = {
@@ -56,16 +53,26 @@ function world() {
     _srvLgUidC: Date.now(),
   };
   deps.leaguesVer = 0;
-  const body = 'let leaguesVer = 0; let _srvLgUidC = Date.now(); let competitionApiKey = "nek_test";\n' +
+  const body = 'let leaguesVer = 0; let _srvLgUidC = Date.now();\n' +
     NAMES.map(fn).join('\n') +
-    '\nconst app = __app;\n' + src.slice(routesStart, routesEnd) +
     '\nreturn { ' + NAMES.join(', ') + ' };';
   const make = new Function('state', 'savedTeams', 'competition', 'saveAppState', 'broadcastFullState',
-    'refreshLeagueStandingsMirror', 'migrateLeague', '__app', 'require', 'Buffer', body);
+    'refreshLeagueStandingsMirror', 'migrateLeague', 'require', 'Buffer', body);
   const app = express();
   app.use(express.json());
   const api = make(state, deps.savedTeams, competition, deps.saveAppState, deps.broadcastFullState,
-    deps.refreshLeagueStandingsMirror, deps.migrateLeague, app, require, Buffer);
+    deps.refreshLeagueStandingsMirror, deps.migrateLeague, require, Buffer);
+  // The real routes module (backend/http/public-api.js), a fresh copy per world.
+  delete require.cache[require.resolve('../backend/http/public-api')];
+  let leaguesVer = 0;
+  require('../backend/http/public-api')({
+    app, state, competition, migrateLeague: deps.migrateLeague,
+    saveAppState: deps.saveAppState, broadcastFullState: deps.broadcastFullState,
+    ...api,
+    get competitionApiKey() { return 'nek_test'; }, set competitionApiKey(v) {},
+    get leaguesVer() { return leaguesVer; }, set leaguesVer(v) { leaguesVer = v; },
+    get savedTeams() { return deps.savedTeams; }, set savedTeams(v) { deps.savedTeams = v; }
+  });
   return { state, calls, api, app };
 }
 

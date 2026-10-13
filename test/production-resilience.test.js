@@ -205,7 +205,7 @@ const ok = (cond, why) => { assert.ok(cond, why); pass++; };
   ok(/if \(!now \|\| now\.id !== cur\.id\) return;/.test(src), 'Twitch prediction poll never overwrites a newer prediction');
   ok(/edited during the read/.test(src) && /if \(_sheetsBusy\) return _sheetsBusy;/.test(src), 'Sheets keeps an edit made during the read; one sync at a time');
   ok(/if \(_twitchRefreshing\) return _twitchRefreshing;/.test(src), 'Twitch token refresh is single-flight');
-  ok(/state\.twitch\.refreshToken = '';\s*\n\s*if \(_tokenRefreshTimer\)/.test(src), 'Twitch disconnect sticks');
+  ok(/state\.twitch\.refreshToken = '';\s*\n\s*if \((?:ctx\.)?_tokenRefreshTimer\)/.test(src), 'Twitch disconnect sticks');
   {
     const body = twitchSrc.slice(twitchSrc.indexOf('const _eventSubSeenIds'), twitchSrc.indexOf('class EventSubService {')) + '\nreturn _eventSubSeen;';
     const seen = new Function(body)();
