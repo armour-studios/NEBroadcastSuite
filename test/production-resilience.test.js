@@ -11,6 +11,8 @@ const Module = require('module');
 
 const root = path.join(__dirname, '..');
 const src = fs.readFileSync(path.join(root, 'server.js'), 'utf8').replace(/\r\n/g, '\n');
+// Twitch services moved out of server.js (refactor step 3).
+const twitchSrc = fs.readFileSync(path.join(root, 'backend', 'twitch', 'services.js'), 'utf8').replace(/\r\n/g, '\n');
 function fn(name) {
   const start = src.indexOf('\nfunction ' + name + '(');
   assert.ok(start >= 0, name + ' not found');
@@ -204,11 +206,11 @@ const ok = (cond, why) => { assert.ok(cond, why); pass++; };
   ok(/if \(_twitchRefreshing\) return _twitchRefreshing;/.test(src), 'Twitch token refresh is single-flight');
   ok(/state\.twitch\.refreshToken = '';\s*\n\s*if \(_tokenRefreshTimer\)/.test(src), 'Twitch disconnect sticks');
   {
-    const body = src.slice(src.indexOf('const _eventSubSeenIds'), src.indexOf('class EventSubService {')) + '\nreturn _eventSubSeen;';
+    const body = twitchSrc.slice(twitchSrc.indexOf('const _eventSubSeenIds'), twitchSrc.indexOf('class EventSubService {')) + '\nreturn _eventSubSeen;';
     const seen = new Function(body)();
     ok(seen('a') === false && seen('a') === true && seen('') === false, 'EventSub message ids deduped');
   }
-  ok(/if \(this\._connecting\) return this\._connecting;/.test(src) && /this\._lineBuf = lines\.pop\(\);/.test(src), 'Twitch IRC: one socket, split lines kept');
+  ok(/if \(this\._connecting\) return this\._connecting;/.test(twitchSrc) && /this\._lineBuf = lines\.pop\(\);/.test(twitchSrc), 'Twitch IRC: one socket, split lines kept');
   ok(/if \(gen !== _lolPollGen\) return;/.test(src), 'LoL: a reply from a stopped poll is ignored');
 
   // Integration polls report failure to pollLoop (backoff + panel warning) instead of swallowing it.
