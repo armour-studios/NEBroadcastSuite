@@ -81,7 +81,8 @@ function world({ leagues } = {}) {
   const calls = { save: 0, broadcast: 0 };
   const cloud = makeCloud();
   const body = 'let leaguesVer = 0; let cloudCompetitionsVer = 0; let _srvLgUidC = Date.now(); let _compRoutesLegacy = false;\n' +
-    'const _compEtags = {}; const _compCloudRevs = {}; const _compCloudLiveArmed = {};\n' +
+    'const _compEtags = {}; const _compCloudRevs = {}; const _compCloudLiveArmed = {}; const _compLiveSeq = {};\n' +
+    'const liveFeed = { configure() {}, followOnly() {}, stop() {} };\n' +
     'let sheetsServiceAccount = ""; const sheets = {}; const competitionFeedTokens = {};\n' +
     signInLine[0] + '\n' +
     NAMES.map(fn).join('\n') +

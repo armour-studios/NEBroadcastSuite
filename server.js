@@ -2448,6 +2448,7 @@ function saveDiscordUser(sync = false) {
 // definitively refuses them (access revoked / rejected / session invalid). ──────────
 function forceCloudSignOut(message) {
   try { cloud.clearSession(); } catch (_) {}
+  try { liveFeed.stop(); } catch (_) {}
   state.discord.connected     = false;
   state.discord.userId        = '';
   state.discord.username      = '';
@@ -3319,7 +3320,7 @@ function cloudLoop(name, fn, baseMs, opts = {}) {
 
   async function run() {
     st.running = true;
-    let next = baseMs;
+    let next = opts.nextMs ? opts.nextMs() : baseMs;   // nextMs: an interval that can change (push connected = slower list poll)
     try {
       // Breaker open: skip the call entirely and look again just after it lifts. Deliberately does
       // NOT count as a failure of this loop — it never got to try.
@@ -6656,6 +6657,7 @@ const CLOUD_COMP_SIGNIN = 'Sign in to the Nameless website again (Settings > Pro
 // The person-scoped routes (/api/broadcast/competitions) are the current contract. A website that
 // predates them answers the LIST with 404; from then on (until restart) the org-scoped routes are used.
 let _compRoutesLegacy = false;
+const _compLiveSeq = {};   // leagueId -> live seq of the document last applied
 function cloudGetCompetition(id, etag) {
   return _compRoutesLegacy ? cloud.getOrgCompetition(id, { orgId: cloudOrgId(), etag }) : cloud.getMyCompetition(id, { etag });
 }
@@ -6690,6 +6692,8 @@ async function readLeagueSource(lg) {
     let out;
     try { out = await cloudGetCompetition(s.cloudCompetitionId, _compEtags[lg.id] || ''); }
     catch (e) { throw cloudCompError(e); }
+    // X-Live-Seq: what the document reflects (push updates, backend/cloud/live.js). A 304 keeps the last.
+    if (out.seq != null) _compLiveSeq[lg.id] = out.seq;
     if (out.notModified) return { notModified: true };
     // The website owns this league outright: fixtures it no longer lists are removed, like a feed.
     return { raw: out.doc, warnings: [], prune: true, etag: out.etag };
@@ -6804,12 +6808,14 @@ async function pullOrgCompetitions() {
     if (cloud.configured()) {
       linked.forEach((lg) => { const st = compSyncStatus(lg.id); if (st.lastError !== CLOUD_COMP_SIGNIN) { st.lastError = CLOUD_COMP_SIGNIN; st.lastSyncAt = Date.now(); touched = true; } });
     }
+    liveFeed.stop();
     if (touched) broadcastFullState();
     return { skipped: 'signed-out' };
   }
   if (state.cloudEventsMeta.signedIn !== true || !state.cloudEventsMeta.loaded) { state.cloudEventsMeta.signedIn = true; state.cloudEventsMeta.loaded = true; cloudCompetitionsVer++; }
   let list;
-  try { const got = await cloudListCompetitions(); list = got.competitions; if (state.cloudEventsMeta.error) { state.cloudEventsMeta.error = ''; cloudCompetitionsVer++; } if (got.createUrl && state.cloudEventsMeta.createUrl !== got.createUrl) { state.cloudEventsMeta.createUrl = String(got.createUrl).slice(0, 500); cloudCompetitionsVer++; } }
+  let liveHints = null;
+  try { const got = await cloudListCompetitions(); list = got.competitions; liveHints = got.live || null; if (state.cloudEventsMeta.error) { state.cloudEventsMeta.error = ''; cloudCompetitionsVer++; } if (got.createUrl && state.cloudEventsMeta.createUrl !== got.createUrl) { state.cloudEventsMeta.createUrl = String(got.createUrl).slice(0, 500); cloudCompetitionsVer++; } }
   catch (e) {
     const err = cloudCompError(e);
     let touched = false;
@@ -6883,9 +6889,35 @@ async function pullOrgCompetitions() {
       console.log(`[competition] "${lg.name}" put on air by the Nameless website`);
     }
   }
+  // Push: follow every website event linked here (backend/cloud/live.js). Off = the minute poll.
+  liveFeed.configure(_compRoutesLegacy ? null : liveHints);
+  liveFeed.followOnly(new Map(linked.map((lg) => [lg.source.cloudCompetitionId, _compLiveSeq[lg.id] == null ? null : _compLiveSeq[lg.id]])));
   return { competitions: clean.length, linked: linked.length, synced };
 }
-cloudLoop('org-competitions', () => pullOrgCompetitions(), 60000, { startAfterMs: 10000 });
+
+// Push updates for loaded website events (website DESKTOP_INTEGRATION 7.2 / 7.3): a change on the
+// website re-syncs that event's league (ETag: usually a few hundred bytes), auto-follow runs, and
+// the overlays update. Latency samples (website publish -> overlay) go up once a minute.
+const liveFeed = require('./backend/cloud/live').createLive({
+  cloud,
+  onRefetch: async (competitionId) => {
+    const lg = (state.leagues || []).find((l) => l && l.source && l.source.type === 'cloud' && l.source.cloudCompetitionId === competitionId);
+    if (!lg) return null;
+    await syncLeagueSource(lg.id);
+    if (siteEventState().leagueId === lg.id) siteEventFollow(lg);
+    broadcastFullState();
+    return _compLiveSeq[lg.id] == null ? null : _compLiveSeq[lg.id];
+  },
+});
+// With push connected the events list only matters for new events and renames: every 5 minutes.
+cloudLoop('org-competitions', () => pullOrgCompetitions(), 60000, {
+  startAfterMs: 10000,
+  nextMs: () => require('./backend/cloud/producer-live').listPollMs(liveFeed.connected, liveFeed.listPollSeconds),
+});
+cloudLoop('latency', async () => {
+  const samples = liveFeed.takeSamples();
+  if (samples.length && cloud.authed()) await cloud.postLatencySamples(samples);
+}, 60000, { startAfterMs: 60000 });
 
 // ── Website events: load one like a start.gg event, follow its live match, report scores ──
 // The website (league + tournament creation) is the source of truth. Loading an event mirrors it
@@ -15961,6 +15993,7 @@ const {
 
 // ─── Graceful Shutdown ───────────────────────────────────────────────────────
 module.exports.shutdown = function () {
+  try { liveFeed.stop(); } catch (e) { /* ignore */ }
   stopValorantWatchdog();
   if (_watchdogInterval) { clearInterval(_watchdogInterval); _watchdogInterval = null; }
   if (_bridgeHeartbeat) { clearInterval(_bridgeHeartbeat); _bridgeHeartbeat = null; }

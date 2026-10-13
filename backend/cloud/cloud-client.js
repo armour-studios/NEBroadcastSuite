@@ -438,7 +438,8 @@ async function listMyCompetitions() {
   _require();
   try {
     const { data } = await _client().get('/api/broadcast/competitions');
-    return { competitions: Array.isArray(data && data.competitions) ? data.competitions : [], createUrl: (data && data.createUrl) || '' };
+    // live: the push hints (Ably on/off, token and catch-up URLs, list poll seconds); older sites omit it.
+    return { competitions: Array.isArray(data && data.competitions) ? data.competitions : [], createUrl: (data && data.createUrl) || '', live: (data && data.live && typeof data.live === 'object') ? data.live : null };
   } catch (e) { throw _err(e); }
 }
 async function getMyCompetition(id, { etag = '' } = {}) {
@@ -472,6 +473,26 @@ async function actOnCompetitionMatch(id, matchId, body) {
     const { data } = await _client().post(`/api/broadcast/competitions/${encodeURIComponent(id)}/matches/${encodeURIComponent(matchId)}/actions`, body);
     return data;
   } catch (e) { throw _err(e); }
+}
+
+// Push updates for loaded events (website DESKTOP_INTEGRATION 7.2 / 7.3). getLiveToken answers an
+// Ably token request (subscribe-only on competition:*) plus when it was sent and answered locally,
+// for the clock offset. liveCatchUp is the replay after a gap or a reconnect.
+async function getLiveToken() {
+  _require();
+  const sentAt = Date.now();
+  try { const { data } = await _client().get('/api/broadcast/live-token'); return { tokenRequest: data, sentAt, receivedAt: Date.now() }; }
+  catch (e) { throw _err(e); }
+}
+async function liveCatchUp(id, since) {
+  _require();
+  try { const { data } = await _client().get(`/api/broadcast/competitions/${encodeURIComponent(id)}/live?since=${encodeURIComponent(since)}`); return data; }
+  catch (e) { throw _err(e); }
+}
+async function postLatencySamples(samples) {
+  _require();
+  try { const { data } = await _client().post('/api/broadcast/telemetry/latency', { samples }); return data; }
+  catch (e) { throw _err(e); }
 }
 
 // Home page content (backend/site-home.js). getSiteHome is public and edge-cached; getSiteMe is the
@@ -511,6 +532,7 @@ module.exports = {
   pushLeague, listCloudLeagues, pullLeague,
   listOrgCompetitions, getOrgCompetition,
   listMyCompetitions, getMyCompetition, reportCompetitionMatch, actOnCompetitionMatch,
+  getLiveToken, liveCatchUp, postLatencySamples,
   publicUrl,
   createStation, ensureStation, createStationRoom, createCameraSession, createMatch, createTalentInvite,
   listStationsFull, patchStation, deleteStation, patchRoom, deleteRoom, addRoomSlot, patchRoomSlot, deleteRoomSlot
