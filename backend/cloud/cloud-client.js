@@ -145,10 +145,14 @@ function health() {
   };
 }
 
-function _client(auth = true) {
+function _headers(auth = true) {
   const headers = { 'Content-Type': 'application/json', 'x-app': 'NE-Broadcast-Suite', 'x-app-version': APP_VERSION };
   if (DEVICE.id) { headers['x-device-id'] = DEVICE.id; headers['x-device-name'] = DEVICE.name; headers['x-device-platform'] = DEVICE.platform; }
   if (auth && session.token) headers.Authorization = `Bearer ${session.token}`;
+  return headers;
+}
+function _client(auth = true) {
+  const headers = _headers(auth);
   const inst = axios.create({ baseURL: BASE, timeout: 12000, headers, httpsAgent: AGENT });
   // One hook for every cloud call in the app — individual callers keep their own try/catch and
   // stay unchanged; the breaker just observes them.
@@ -221,7 +225,29 @@ async function refreshSession() {
 async function linkTwitch({ code, codeVerifier, redirectUri }) {
   _require();
   try { const { data } = await _client().post('/api/auth/twitch', { code, codeVerifier, redirectUri }); return data; }
-  catch (e) { throw _err(e); }
+  catch (e) {
+    if (e && e.response && e.response.status === 503) _twitchLinkProbe = { at: Date.now(), ok: false };
+    throw _err(e);
+  }
+}
+// Can the website finish a Twitch code-flow sign-in? Until its Twitch client id + secret are set it
+// answers every exchange with 503 "Twitch linking is not configured on the backend yet", and a
+// signed-in app that sent producers through the code flow anyway could never connect Twitch: the
+// callback page only ever said "Connection failed". An empty POST is refused at the body check (400)
+// once the backend is configured, so this asks without a code and never reaches Twitch. Plain axios,
+// not _client(): a 503 here is an answer, not an outage, and must not count against the breaker.
+const TWITCH_PROBE_TTL_MS = 5 * 60 * 1000;
+let _twitchLinkProbe = { at: 0, ok: false };
+async function twitchLinkAvailable() {
+  if (!authed()) return false;
+  if (_twitchLinkProbe.at && Date.now() - _twitchLinkProbe.at < TWITCH_PROBE_TTL_MS) return _twitchLinkProbe.ok;
+  try {
+    const r = await axios.post(BASE + '/api/auth/twitch', {}, { headers: _headers(true), timeout: 6000, httpsAgent: AGENT, validateStatus: () => true });
+    _twitchLinkProbe = { at: Date.now(), ok: r.status === 400 };
+  } catch (e) {
+    return false;   // no answer (offline): the implicit flow still works; ask again next time
+  }
+  return _twitchLinkProbe.ok;
 }
 // Rotate the user-scoped Twitch tokens via the backend (it holds the client secret —
 // confidential Twitch apps can't refresh without it, which is why implicit-grant tokens
@@ -519,7 +545,7 @@ module.exports = {
   getPromos,
   getSiteHome, getSiteMe,
   loginWithDiscord,
-  loginWithEmail, acceptContract, refreshSession, linkTwitch, refreshTwitch, me,
+  loginWithEmail, acceptContract, refreshSession, linkTwitch, twitchLinkAvailable, refreshTwitch, me,
   listProfiles, getProfile, saveProfile, deleteProfile, shareProfile,
   listOrgSeats, addOrgSeat, removeOrgSeat,
   listCameraFeeds,

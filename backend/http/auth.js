@@ -88,33 +88,42 @@ module.exports = function registerAuthRoutes(c) {
   // Store OAuth sessions in memory (expires after 15 minutes)
   const oauthSessions = new Map();
 
+  const TWITCH_REDIRECT_URI = 'http://localhost:3000/api/oauth/twitch/callback';
+  function twitchAuthorizeUrl(responseType, scopes, stateId) {
+    return 'https://id.twitch.tv/oauth2/authorize'
+      + `?client_id=${encodeURIComponent(TWITCH_CLIENT_ID)}`
+      + `&redirect_uri=${encodeURIComponent(TWITCH_REDIRECT_URI)}`
+      + `&response_type=${responseType}`
+      + (scopes.length ? `&scope=${scopes.map(encodeURIComponent).join('%20')}` : '')
+      + `&state=${encodeURIComponent(stateId)}`
+      + '&force_verify=true';
+  }
+
   // POST /api/oauth/twitch/init - Create a new OAuth session and build the authorize URL.
-  // Cloud signed-in → authorization-CODE flow (the backend holds the client secret and hands
-  // back tokens WITH a refresh token — no more implicit-grant tokens dying mid-show).
-  // No cloud → the legacy implicit-grant URL, exactly as before (local-first, additive).
-  app.post('/api/oauth/twitch/init', express.json({ limit: '16kb' }), (req, res) => {
+  // Cloud signed-in AND the website can do the exchange → authorization-CODE flow (the backend
+  // holds the client secret and hands back tokens WITH a refresh token — no more implicit-grant
+  // tokens dying mid-show). Otherwise → the implicit-grant URL (local-first). Being signed in is
+  // not enough on its own: until the website's Twitch secret is configured it answers every code
+  // exchange with 503, which left signed-in producers unable to connect Twitch at all.
+  app.post('/api/oauth/twitch/init', express.json({ limit: '16kb' }), async (req, res) => {
     try {
       const sessionId = Math.random().toString(36).substring(2, 15);
       const expiresAt = Date.now() + 15 * 60 * 1000; // 15 minutes
       const scopes = (Array.isArray(req.body && req.body.scopes) ? req.body.scopes : [])
         .filter((s) => typeof s === 'string' && /^[a-z_:.]+$/.test(s)).slice(0, 64);
-      const useCodeFlow = !!(cloud && typeof cloud.authed === 'function' && cloud.authed());
+      let useCodeFlow = false;
+      try { useCodeFlow = !!(cloud && typeof cloud.twitchLinkAvailable === 'function' && await cloud.twitchLinkAvailable()); }
+      catch (e) { useCodeFlow = false; }
 
       oauthSessions.set(sessionId, {
         state: sessionId,
         accessToken: null,
         mode: useCodeFlow ? 'code' : 'token',
+        scopes,
         expiresAt
       });
 
-      const redirectUri = 'http://localhost:3000/api/oauth/twitch/callback';
-      const authUrl = 'https://id.twitch.tv/oauth2/authorize'
-        + `?client_id=${encodeURIComponent(TWITCH_CLIENT_ID)}`
-        + `&redirect_uri=${encodeURIComponent(redirectUri)}`
-        + `&response_type=${useCodeFlow ? 'code' : 'token'}`
-        + (scopes.length ? `&scope=${scopes.map(encodeURIComponent).join('%20')}` : '')
-        + `&state=${encodeURIComponent(sessionId)}`
-        + '&force_verify=true';
+      const authUrl = twitchAuthorizeUrl(useCodeFlow ? 'code' : 'token', scopes, sessionId);
 
       console.log('[OAuth] Session created:', sessionId, '· flow:', useCodeFlow ? 'code (backend exchange)' : 'implicit');
       res.json({ sessionId, authUrl, mode: useCodeFlow ? 'code' : 'token' });
@@ -205,7 +214,20 @@ module.exports = function registerAuthRoutes(c) {
         // State must match a session we minted (CSRF guard); temp- prefixed panel fallbacks pass too.
         const sess = oauthSessions.get(cbState);
         if (!sess && !cbState.startsWith('temp-')) throw new Error('Unknown or expired sign-in session — start the connect again.');
-        const d = await cloud.linkTwitch({ code, redirectUri: 'http://localhost:3000/api/oauth/twitch/callback' });
+        let d;
+        try { d = await cloud.linkTwitch({ code, redirectUri: TWITCH_REDIRECT_URI }); }
+        catch (e) {
+          // The website can't exchange codes (503: its Twitch secret isn't set). Don't strand the
+          // producer on "Connection failed": send this same window round again through the
+          // implicit flow, which needs no secret. cloud.linkTwitch remembered the 503, so the
+          // next Connect goes straight to the implicit flow.
+          if (sess && e.status === 503) {
+            console.warn('[OAuth Callback] backend cannot exchange Twitch codes (' + e.message + ') — retrying with the implicit flow');
+            sess.mode = 'token';
+            return res.redirect(twitchAuthorizeUrl('token', sess.scopes || [], cbState));
+          }
+          throw e;
+        }
         const user = await applyTwitchAccessToken(d.accessToken, d.refreshToken || '');
         if (sess) sess.accessToken = d.accessToken;   // existing pollers resolve
         res.send(twitchResultPage(true, user.login));
