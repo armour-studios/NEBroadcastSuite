@@ -230,14 +230,15 @@
       + '<b>' + esc(cur.name) + '</b>'
       + '<span class="mx-lo-acts">' + (n > 1 ? '<button type="button" class="mx-link" data-lp="overlays">Change style (' + n + ')</button>' : '<button type="button" class="mx-link" data-lp="overlays">Open Overlays</button>')
       + (canOver ? (isOver ? '<span class="mx-lo-on">Over the game</span>' : '<button type="button" class="mx-link" data-lp="over">Show over the game</button>') : '')
-      + '</span></span></div>'
-      + (live && canOver && !isOver && !overGame.length ? '<div class="mx-lp-prompt"><span>' + esc(gameName(s, g)) + ' is sending live data. Show the ' + esc(cur.name) + ' over the game?</span><button type="button" class="mx-btn mx-btn-sm mx-btn-primary" data-lp="over">Show over the game</button></div>' : '');
+      + '<button type="button" class="mx-link" data-lp="settings" title="Open this game\'s settings">Game settings</button>'
+      + '</span></span></div>';
   }
   document.addEventListener('click', function (e) {
     var b = e.target.closest && e.target.closest('#dbk-look-ov [data-lp]'); if (!b) return;
     var s = st(), cur = currentTheme(s, s.activeGame);
     if (b.getAttribute('data-lp') === 'overlays') { var n = document.querySelector('.mx-nav [data-mx-item="overlays"]'); if (n) n.click(); }
     else if (b.getAttribute('data-lp') === 'over' && cur) openOverGame(cur.path, cur.name);
+    else if (b.getAttribute('data-lp') === 'settings' && typeof openSettings === 'function') openSettings('games');
   });
 
   // A thumbnail that can't load (server still rendering it, file gone) is hidden, never a broken icon.

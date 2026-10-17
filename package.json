@@ -1,6 +1,6 @@
 {
   "name": "ne-broadcast-suite",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "description": "Professional Esports Broadcast Overlay Suite by Armour Studios",
   "author": "Armour Studios",
   "main": "main.js",

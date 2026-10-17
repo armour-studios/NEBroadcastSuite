@@ -213,7 +213,15 @@ html[data-ui="modern"] .mx-ws-text { display: flex; flex-direction: column; gap:
 html[data-ui="modern"] .mx-ws-event { font-size: 13.5px; font-weight: 700; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
 html[data-ui="modern"] .mx-ws-game { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 html[data-ui="modern"] .mx-ws-live { flex: 0 0 auto; font-size: 11px; font-weight: 800; color: #fff; background: var(--mx-live); padding: 3px 8px; border-radius: 999px; }
-html[data-ui="modern"] .mx-group { font-size: 11.5px; font-weight: 700; color: #646a74; padding: 14px 10px 6px; user-select: none; white-space: nowrap; }
+html[data-ui="modern"] .mx-group {
+  display: flex; align-items: center; gap: 6px; width: 100%; border: 0; background: transparent; font: inherit; text-align: left; cursor: pointer;
+  font-size: 11.5px; font-weight: 700; color: #646a74; padding: 14px 10px 6px; user-select: none; white-space: nowrap;
+}
+html[data-ui="modern"] .mx-group:hover { color: var(--text); }
+html[data-ui="modern"] .mx-group-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+html[data-ui="modern"] .mx-group-chev { flex: 0 0 auto; width: 14px; height: 14px; opacity: 0; transition: transform .16s, opacity .12s; }
+html[data-ui="modern"] .mx-group:hover .mx-group-chev, html[data-ui="modern"] .mx-group:focus-visible .mx-group-chev, html[data-ui="modern"] .mx-group.is-closed .mx-group-chev { opacity: 1; }
+html[data-ui="modern"] .mx-group.is-closed .mx-group-chev { transform: rotate(-90deg); }
 html[data-ui="modern"] .mx-nav-spacer { flex: 1 1 auto; min-height: 14px; }
 html[data-ui="modern"] .mx-item {
   position: relative; display: flex; align-items: center; gap: 12px; width: 100%; height: 40px; padding: 0 10px 0 12px;
@@ -251,7 +259,8 @@ html[data-ui="modern"] .mx-collapse:hover { background: var(--mx-hover); color: 
   html[data-ui="modern"].mx-rail-min .mx-item.is-active::before { left: -10px; }
   html[data-ui="modern"].mx-rail-min .mx-ws { justify-content: center; padding: 8px 0; }
   html[data-ui="modern"].mx-rail-min .mx-ws-live { position: absolute; margin: -34px 0 0 34px; padding: 2px 5px; font-size: 9px; }
-  html[data-ui="modern"].mx-rail-min .mx-group { font-size: 0; padding: 0; height: 1px; margin: 10px 8px; background: var(--border); }
+  html[data-ui="modern"].mx-rail-min .mx-group { font-size: 0; padding: 0; height: 1px; width: auto; margin: 10px 8px; background: var(--border); pointer-events: none; }
+  html[data-ui="modern"].mx-rail-min .mx-group-chev { display: none; }
   html[data-ui="modern"].mx-rail-min .mx-tick { position: absolute; top: 4px; right: 4px; }
   html[data-ui="modern"].mx-rail-min .mx-tick svg { width: 11px; height: 11px; }
   html[data-ui="modern"].mx-rail-min .mx-badge { position: absolute; top: 3px; right: 3px; min-width: 16px; height: 16px; padding: 0 4px; font-size: 9.5px; }
@@ -650,9 +659,6 @@ html[data-ui="modern"] .mx-switch i { position: relative; width: 34px; height: 2
 html[data-ui="modern"] .mx-switch i::after { content: ''; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .15s; }
 html[data-ui="modern"] .mx-switch input:checked + i { background: var(--mx-accent); }
 html[data-ui="modern"] .mx-switch input:checked + i::after { transform: translateX(14px); }
-/* Control room > Live now > Webcams: one full-width row per switch (label left, switch right) */
-html[data-ui="modern"] .mx-cam-list { display: flex; flex-direction: column; gap: 6px; }
-html[data-ui="modern"] .mx-cam-row { display: flex; justify-content: space-between; width: 100%; margin-left: 0; padding: 9px 10px 9px 12px; border-radius: 10px; background: var(--surface2, rgba(255,255,255,.04)); font-size: 13.5px; color: var(--text); }
 html[data-ui="modern"] .mx-switch input:focus-visible + i { outline: 2px solid var(--mx-ring); outline-offset: 2px; }
 /* Up next: one card per match */
 html[data-ui="modern"] .mx-next-list { display: flex; flex-direction: column; gap: 8px; }

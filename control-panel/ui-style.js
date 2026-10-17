@@ -234,7 +234,8 @@
     swap:     '<path d="M7 16V4M7 4L3 8M7 4l4 4M17 8v12M17 20l4-4M17 20l-4-4"/>',
     refresh:  '<path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/>',
     undo:     '<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/>',
-    edit:     '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>'
+    edit:     '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+    chevron:  '<path d="M6 9l6 6 6-6"/>'
   };
   function svg(name, cls) {
     return '<svg class="' + (cls || '') + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || '') + '</svg>';
@@ -507,6 +508,8 @@
   }
 
   function onNavClick(e) {
+    var gh = e.target.closest('[data-mx-group]');
+    if (gh) { toggleGroup(gh.getAttribute('data-mx-group')); return; }
     var b = e.target.closest('[data-mx-item]');
     if (!b) return;
     closeDrawer();
@@ -541,6 +544,17 @@
     root.classList.toggle('mx-rail-min', !!on);
     if (navEl) navEl._sig = '';
     refitPreviews();
+    refresh();
+  }
+  // Sidebar groups (Before the show, During the show, Library) fold up; which ones are folded is
+  // remembered. A folded group still shows the page you are on, so you never lose your place.
+  var GROUPS_KEY = 'ne_mx_groups_closed';
+  function closedGroups() { try { return JSON.parse(localStorage.getItem(GROUPS_KEY)) || {}; } catch (e) { return {}; } }
+  function toggleGroup(name) {
+    var c = closedGroups();
+    if (c[name]) delete c[name]; else c[name] = 1;
+    try { localStorage.setItem(GROUPS_KEY, JSON.stringify(c)); } catch (e) {}
+    if (navEl) navEl._sig = '';
     refresh();
   }
   function navBadges(s) {
@@ -592,7 +606,8 @@
     var logo = evLogo || gameLogo;
     var gameName = (s.games && s.games[s.activeGame] && s.games[s.activeGame].name) || '';
     var eventName = s.eventName || '';
-    var sig = JSON.stringify([cur, viewOnly, badges, ticks, logo.length > 200 ? logo.slice(0, 64) + logo.length : logo, gameName, eventName, railMin()]);
+    var closed = railMin() ? {} : closedGroups();   // the icon rail has no group headers to unfold
+    var sig = JSON.stringify([cur, viewOnly, badges, ticks, logo.length > 200 ? logo.slice(0, 64) + logo.length : logo, gameName, eventName, railMin(), closed]);
     if (navEl._sig === sig) return;
     navEl._sig = sig;
     navEl.textContent = '';
@@ -609,10 +624,23 @@
     ws.addEventListener('click', function () { openDrawer('event') || go(ITEM.event.go); });
     navEl.appendChild(ws);
 
+    var inGroup = '';
     NAV.forEach(function (n) {
-      if (n.group) { navEl.appendChild(mk('div', 'mx-group', n.group)); return; }
-      if (n.foot) { navEl.appendChild(mk('div', 'mx-nav-spacer')); return; }
+      if (n.group) {
+        inGroup = n.group;
+        var g = mk('button', 'mx-group' + (closed[n.group] ? ' is-closed' : ''));
+        g.type = 'button';
+        g.setAttribute('data-mx-group', n.group);
+        g.setAttribute('aria-expanded', closed[n.group] ? 'false' : 'true');
+        g.title = (closed[n.group] ? 'Show ' : 'Hide ') + n.group.toLowerCase();
+        g.innerHTML = '<span class="mx-group-label"></span>' + svg('chevron', 'mx-group-chev');
+        g.querySelector('.mx-group-label').textContent = n.group;
+        navEl.appendChild(g);
+        return;
+      }
+      if (n.foot) { inGroup = ''; navEl.appendChild(mk('div', 'mx-nav-spacer')); return; }
       if (viewOnly && (n.id === 'settings' || n.id === 'market')) return;
+      if (inGroup && closed[inGroup] && n.id !== cur) return;
       var b = mk('button', 'mx-item' + (n.id === cur ? ' is-active' : ''));
       b.type = 'button';
       b.setAttribute('data-mx-item', n.id);
@@ -846,7 +874,6 @@
       +       '<div class="mx-pgm-scenes"></div>'
       +       '<div class="mx-live-sub"><span>Graphics showing</span><button type="button" class="mx-link" data-cr="clear" title="Hide every graphic">Hide all</button></div>'
       +       '<div class="mx-air-list"></div>'
-      +       '<div class="mx-cams" hidden><div class="mx-live-sub"><span>Webcams</span><button type="button" class="mx-link" data-cr="cam-setup" title="Link player names to their cams, layout and sizes">Set up</button></div><div class="mx-cam-list"></div></div>'
       +       '<button type="button" class="mx-btn mx-btn-wide" data-cr="dock">' + svg('graphics') + 'Show a graphic</button>'
       +     '</div>'
       +     '<div class="mx-card mx-look">'
@@ -951,7 +978,6 @@
       else if (k === 'setup-hide') { try { localStorage.setItem(SETUP_KEY, '1'); } catch (e2) {} cr._setupSig = ''; }
       else if (k === 'setup-go') { var dest = b.getAttribute('data-go'); if (ITEM[dest]) go(ITEM[dest].go); }
       else if (k === 'off') { var src = b.__src; if (src && document.contains(src)) src.click(); }
-      else if (k === 'cam-setup') { var gs = (state() || {}).activeGame; if (typeof window._ghOpen === 'function' && gs) window._ghOpen(gs + ':cameras'); }
       setTimeout(renderControlRoom, 80);
     }
   }
@@ -1274,35 +1300,8 @@
 
   // On air now: the program scene plus every graphic that is live, each with a Take off button that
   // presses the On Air rail's chip (so configurable graphics behave exactly as they do there).
-  // Webcam switches (HUD_LAYERS in app/08-production.js) for the game being produced.
-  // A webcam switch flips its HUD layer (same message the Game settings switch sends).
-  document.addEventListener('change', function (e) {
-    var t = e.target && e.target.closest && e.target.closest('[data-cam]');
-    if (!t || typeof send !== 'function') return;
-    var l = (window.HUD_LAYERS || []).find(function (x) { return x.key === t.getAttribute('data-cam'); });
-    if (l) send(l.msg, t.checked ? l.showData : l.hideData);
-  });
-  function renderCams(s) {
-    var box = cr.querySelector('.mx-cams');
-    if (!box) return;
-    var layers = typeof window.hudLayersFor === 'function' ? window.hudLayersFor(s.activeGame) : [];
-    box.hidden = !layers.length;
-    var host = box.querySelector('.mx-cam-list');
-    var sig = layers.map(function (l) { return l.key + (l.check(s) ? '1' : '0'); }).join('|');
-    if (host._sig === sig) return;
-    host._sig = sig;
-    host.textContent = '';
-    layers.forEach(function (l) {
-      var row = mk('label', 'mx-switch mx-cam-row');
-      row.title = l.hint;
-      row.innerHTML = '<span></span><input type="checkbox" data-cam="' + l.key + '"><i></i>';
-      row.querySelector('span').textContent = l.label;
-      row.querySelector('input').checked = l.check(s);
-      host.appendChild(row);
-    });
-  }
+  // Webcam switches are not here: they are per-game settings (Match ▸ Game Settings ▸ Cameras).
   function renderAir(s) {
-    renderCams(s);
     var obs = s.obs || {};
     var pg = cr.querySelector('.mx-pgm');
     var sv = pg.querySelector('.mx-pgm-v');

@@ -63,8 +63,7 @@
   const dashPanes = (id, tab) => ((DASH_PANES[id] || {})[tab]) || [];
   const TAB_LABEL = (t) => (SET_TABS.find((x) => x[0] === t) || [])[1] || t;
   // What an empty tab says instead.
-  function emptyNote(tab, name, onDash) {
-    if (onDash) return 'This is on the Dashboard: Game Settings, ' + TAB_LABEL(tab) + ' tab (per-match controls for ' + name + ').';
+  function emptyNote(tab, name) {
     switch (tab) {
       case 'match': return name + ' has no extra match format. Teams, the score and the best-of work the same for every game, on the Match page and the Dashboard.';
       case 'cameras': return name + ' has no player cams or observer tools. Talent and caster cameras are on Talent, Cameras.';
@@ -227,11 +226,45 @@
   const tabBtns = (attr, cur, filled) => SET_TABS.map(([k, label]) =>
     '<button type="button" class="ev-subnav-btn' + (k === cur ? ' active' : '') + (filled.has(k) ? '' : ' is-empty') + '" ' + attr + '="' + k + '"'
     + (filled.has(k) ? '' : ' title="Nothing here for this game"') + '>' + label + '</button>').join('');
-  // A note shown at the top of the body when the tab has nothing (or its content is on the Dashboard).
+  // A note shown at the top of the body when the tab has nothing.
   function bodyNote(b, text) {
     let n = b.querySelector(':scope > .gh-tab-note');
     if (!n) { n = document.createElement('p'); n.className = 'gh-tab-note'; b.prepend(n); }
     n.hidden = !text; n.textContent = text || '';
+  }
+
+  // ── Per-match panes (.gs-pane: look, sponsors, player cams, stocks…) ──────
+  // ONE set of elements with two homes, like the setup body: they sit in the Dashboard's Game Settings
+  // card and are MOVED into Settings ▸ Games while it shows, so every option is in both places.
+  // The Settings slot carries .dash-gameset + data-game so the card's styles and game gates apply.
+  let matchPanes = null, paneSlot = null;
+  const getPanes = () => matchPanes || (matchPanes = [...document.querySelectorAll('#game-settings-section .gs-pane:not([data-gspane="setup"])')]);
+  function panesToSettings(card, id, tab, isActive, d) {
+    if (!paneSlot) {
+      paneSlot = document.createElement('div');
+      paneSlot.className = 'dash-gameset gh-pane-slot';
+      paneSlot.innerHTML = '<p class="gs-notice" hidden></p>';
+    }
+    const b = getBody();
+    if (paneSlot.parentElement !== card) card.insertBefore(paneSlot, b && b.parentElement === card ? b : null);
+    getPanes().forEach((p) => {
+      if (p.parentElement !== paneSlot) {
+        if (!p._home) { p._home = document.createComment('gs-pane home'); p.parentNode.insertBefore(p._home, p); }
+        paneSlot.appendChild(p);
+      }
+    });
+    const mine = dashPanes(id, tab);
+    getPanes().forEach((p) => { p.hidden = !mine.includes(p.dataset.gspane); });
+    paneSlot.dataset.game = id;
+    paneSlot.classList.toggle('gs-not-active', !isActive);
+    paneSlot.hidden = !mine.length;
+    const notice = paneSlot.querySelector('.gs-notice');
+    notice.hidden = isActive || !mine.length;
+    notice.textContent = nameOf(d, id) + ' is not on air. Changes here are saved and used when you make it the active game.';
+  }
+  function panesToDash() {
+    getPanes().forEach((p) => { if (p._home && p._home.parentNode && p.previousSibling !== p._home) p._home.parentNode.insertBefore(p, p._home.nextSibling); });
+    if (paneSlot) paneSlot.hidden = true;
   }
 
   function renderSettings() {
@@ -254,11 +287,13 @@
 
     // Settings takes the setup body back whenever it is on screen; otherwise the Dashboard may hold it.
     if (settingsOnGames()) {
-      const b = claimBody(root.querySelector('.gh-card'));
+      const card = root.querySelector('.gh-card');
+      const b = claimBody(card);
       if (b) {
         renderBody(b, id, key, sTab, isActive, d);
-        bodyNote(b, have.has(sTab) ? '' : emptyNote(sTab, nameOf(d, id), dashPanes(id, sTab).length > 0));
+        bodyNote(b, have.has(sTab) || dashPanes(id, sTab).length ? '' : emptyNote(sTab, nameOf(d, id)));
       }
+      panesToSettings(card, id, sTab, isActive, d);
     }
   }
 
@@ -369,6 +404,7 @@
     const mine = dashPanes(id, cur);
     const notice = $('gs-notice');
     if (notice) { notice.hidden = isActive || !mine.length; notice.textContent = nameOf(d, id) + ' is not on air. Changes here are saved and used when you make it the active game.'; }
+    if (!settingsOnGames()) panesToDash();
     const showSetup = !!id && have.has(cur) && !settingsOnGames();
     sec.querySelectorAll('.gs-pane').forEach((p) => { p.hidden = p.dataset.gspane === 'setup' ? !showSetup : !mine.includes(p.dataset.gspane); });
     if (showSetup) {
@@ -379,7 +415,7 @@
     if (empty) {
       const none = !!id && !mine.length && !have.has(cur);
       empty.hidden = !!id && !none;
-      empty.textContent = !id ? 'Pick a game to see its settings.' : emptyNote(cur, nameOf(d, id), false);
+      empty.textContent = !id ? 'Pick a game to see its settings.' : emptyNote(cur, nameOf(d, id));
     }
     const pc = $('msp-playercams'), pcNote = $('gs-pc-off');
     if (pcNote) pcNote.hidden = !(pc && pc.style.display === 'none');

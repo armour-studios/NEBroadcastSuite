@@ -36,7 +36,8 @@
 
   // Presets: column count, card order, which are shown, and widths ('full' or 1/2).
   var PRESETS = {
-    producer: { name: 'Producer', cols: 2, show: ['hero', 'next', 'live', 'series', 'deck'], w: {} },
+    // The house layout everyone runs; new installs and Reset start here.
+    producer: { name: 'Producer', cols: 2, show: ['setup', 'hero', 'clock', 'next', 'deck', 'live', 'series'], w: {} },
     caller: { name: 'Show caller', cols: 3, show: ['hero', 'rundown', 'clock', 'next', 'live', 'series', 'notes', 'deck'], w: { notes: 1 } },
     ops: { name: 'Stream ops', cols: 3, show: ['hero', 'program', 'stream', 'clock', 'live', 'next', 'series'], w: { program: 2 } },
     multiview: { name: 'Multiview', cols: 2, show: ['program', 'overlay', 'hero', 'live', 'next'], w: { hero: 'full' } }
