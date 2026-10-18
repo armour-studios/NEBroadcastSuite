@@ -39,6 +39,9 @@ html,body{width:1920px;height:1080px;overflow:hidden;}
 body{
   font-family:var(--main-font); color:var(--txt);
   background:transparent; -webkit-font-smoothing:antialiased; position:relative;
+  /* Lay glyphs out at their true size instead of snapping each to whole pixels: with blocky fonts
+     (Industry) the snapping drew round capitals a pixel shorter than flat ones (sEEK, sEEd). */
+  text-rendering:geometricPrecision;
 }
 .hidden{display:none !important;}
 /* Manual "Hide UI" (Match ▸ Teams gear, RL) — blanks the persistent live HUD for a clean gameplay feed.
@@ -1253,6 +1256,7 @@ body.sb-external #sb{display:none !important;}
 .tk-sep{color:rgba(255,255,255,.25);font-size:22px;padding:0 28px;}
 .tk-segment{font-weight:600;font-size:24px;color:#fff;text-transform:uppercase;letter-spacing:.02em;padding-right:40px;}
 </style>
+<script src="font-tune.js"></script>   <!-- evens out capital heights for the active font -->
 </head>
 <body>
 
@@ -2997,6 +3001,7 @@ let _sbTickSig='';   // last LIVE ?only=scoreboard paint (see applyStateUpdate)
 let _firstFullState=true;   // true until the first full_state after this page loaded
 // Each section of a full_state renders on its own: one section throwing on odd data (a brand or
 // ticker shape) used to stop every section after it, every update, for the rest of the show.
+let _tunedFont=null;
 function safe(name, fn){ try{ fn(); }catch(e){ console.error('[rl-hud] '+name+' failed:', e); } }
 function applyFullState(data){
   _sbTickSig='';
@@ -3033,6 +3038,7 @@ function applyFullState(data){
     if(data.brand.accent) document.documentElement.style.setProperty('--accent-2', data.brand.accent);
     if(data.brand.font)   document.documentElement.style.setProperty('--main-font', `'${data.brand.font}', 'Bourgeois', 'Segoe UI', sans-serif`);
   }
+  { const mf=document.documentElement.style.getPropertyValue('--main-font'); if(mf!==_tunedFont){ _tunedFont=mf; if(window.FontTune) FontTune.run(); } }   // font-tune.js
   safe('renderSponsorRail',()=>{ renderSponsorRail(data.brand); });
   safe('renderTicker',()=>{ renderTicker(data); });   // live-scores / sponsor ticker (matches overlay/ticker.html)
 

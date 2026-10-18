@@ -15354,7 +15354,8 @@ function startHttpServer(baseDir) {
     res.redirect(302, '/rl-hud.html' + (q >= 0 ? req.originalUrl.slice(q) : ''));
   });
 
-  const _stickyTag = '<script src="/sticky-logos.js"></script>\n  <script src="/scene-bg.js"></script>';
+  // font-tune.js evens out capital heights for whatever font the overlay ends up in (overlay/font-tune.js).
+  const _stickyTag = '<script src="/sticky-logos.js"></script>\n  <script src="/scene-bg.js"></script>\n  <script src="/font-tune.js"></script>';
   const _resolveOverlayHtml = (reqPath) => {
     const ov = overlayEditor.resolveFileForRequest(reqPath);
     if (ov) return ov;
