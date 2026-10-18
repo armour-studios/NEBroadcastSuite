@@ -503,7 +503,10 @@ const MR_CDN_SLUG = {
   'jeff-the-land-shark':'jeff-the-land-shark'
 };
 function mrHeroRole(n){ return MR_HERO_ROLES[mrHeroSlug(n)] || null; }
-function mrHeroImgUrl(n){ const s=mrHeroSlug(n); return s ? `/assets/heroes/marvel-rivals/${s}.png` : ''; }
+// A hero the producer added in Settings > Games > Custom content (newer than the bundled pictures)
+// uses that picture; everyone else the bundled one. Refreshed on every render().
+let _mrCustomImg = {};
+function mrHeroImgUrl(n){ const c=_mrCustomImg[String(n||'').trim().toLowerCase()]; if(c) return c; const s=mrHeroSlug(n); return s ? `/assets/heroes/marvel-rivals/${s}.png` : ''; }
 function mrHeroCdnUrl(n){
   const s=mrHeroSlug(n); if(!s) return '';
   const cs=MR_CDN_SLUG[s]||s;
@@ -816,6 +819,7 @@ function mrDevUpdateLbl(){
 }
 
 function render(state){
+  { const cfg=state&&state.gameConfigs&&state.gameConfigs['marvel-rivals']; const m={}; ((cfg&&cfg.characters)||[]).forEach(c=>{ if(c&&c.name&&c.image) m[String(c.name).trim().toLowerCase()]=c.image; }); _mrCustomImg=m; }
   const mr=state.mrMatch||{}, veto=state.veto||{}, teams=state.teams||{}, brand=state.brand||{};
   const board=document.getElementById('mr-board'); if(!board) return;
   board.classList.remove('hidden');
