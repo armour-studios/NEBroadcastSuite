@@ -11928,3 +11928,11 @@ body.gfx-board-open { overflow: hidden; }
 .intro-roster-name { font-size: 13px; font-weight: 600; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .intro-roster-seg { flex-shrink: 0; }
 .intro-roster-seg .seg-btn { padding: 3px 10px; font-size: 12px; }
+/* Settings > Games: a folded card (Worlds HUD extras) spans the row and opens on click. */
+.dash-gameset .gs-card-fold { grid-column: 1 / -1; }
+.dash-gameset .gs-card-fold > summary { display: flex; align-items: baseline; gap: 10px; cursor: pointer; list-style: none; }
+.dash-gameset .gs-card-fold > summary::-webkit-details-marker { display: none; }
+.dash-gameset .gs-card-fold > summary::before { content: '\25B8'; color: var(--muted); font-size: 11px; transition: transform .15s; }
+.dash-gameset .gs-card-fold[open] > summary::before { transform: rotate(90deg); }
+.dash-gameset .gs-card-fold > summary .gs-card-title { margin: 0; }
+.gs-fold-hint { font-size: 11px; color: var(--muted); }

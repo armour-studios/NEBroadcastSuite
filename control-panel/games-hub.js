@@ -245,7 +245,11 @@
       paneSlot.innerHTML = '<p class="gs-notice" hidden></p>';
     }
     const b = getBody();
-    if (paneSlot.parentElement !== card) card.insertBefore(paneSlot, b && b.parentElement === card ? b : null);
+    // Overlay tab: the layout picker and browser sources (in the body) come first, the game's own
+    // look and sponsor-slot cards after them. Other tabs keep the game's panes on top.
+    const after = tab === 'overlay';
+    const want = after ? null : (b && b.parentElement === card ? b : null);
+    if (paneSlot.parentElement !== card || paneSlot.nextSibling !== want) card.insertBefore(paneSlot, want);
     getPanes().forEach((p) => {
       if (p.parentElement !== paneSlot) {
         if (!p._home) { p._home = document.createComment('gs-pane home'); p.parentNode.insertBefore(p._home, p); }

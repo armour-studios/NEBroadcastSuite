@@ -298,7 +298,7 @@ const handlers = {
   },
 
   // "Capture current show setup" — snapshot the live scene presets / ticker / event name /
-  // board titles / caster lineup + slot labels / OBS moment mappings into a package, so
+  // board titles / caster lineup + slot labels / OBS moment mappings / RL overlay look into a package, so
   // activating it later restores the whole show configuration.
   capture_package_snapshot(msg, ws) {
     const kit = ctx.savedBrandKits.find((b) => b.id === msg.data?.kitId);

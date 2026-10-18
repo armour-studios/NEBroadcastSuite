@@ -1415,7 +1415,7 @@
       <!-- ── Overtime Ad Slot ── -->
       <div class="adslot-panel gs-card" id="adslot-ot">
         <h4 class="gs-card-title">Overtime</h4>
-        <p style="font-size:11px; color:var(--muted); margin-bottom:12px;">Shown on the overlay's center timer during overtime and in the OVERTIME swipe. Pick a sponsor from your active brand — <button type="button" class="btn btn-ghost btn-sm js-goto-brands" style="padding:2px 8px; font-size:11px; vertical-align:baseline;">Profiles tab</button>.</p>
+        <p style="font-size:11px; color:var(--muted); margin-bottom:12px;">The center timer and the OVERTIME swipe during overtime. Sponsors come from the active brand kit (<button type="button" class="btn btn-ghost btn-sm js-goto-brands" style="padding:2px 8px; font-size:11px; vertical-align:baseline;">Brand kits</button>).</p>
         <div class="field-row">
           <label class="field-label" for="input-ot-label">Label / Sponsor Text</label>
           <input type="text" id="input-ot-label" class="input-text" placeholder="OVERTIME">
@@ -1460,11 +1460,31 @@
         </div>
       </div>
 
+      <!-- ── Scoreboard Ad Slot ── -->
+      <div class="adslot-panel gs-card" id="adslot-sbad">
+        <h4 class="gs-card-title">Title sponsor label &amp; scorecard</h4>
+        <p style="font-size:11px; color:var(--muted); margin-bottom:12px;">Sponsor logo on the end-of-match scorecard (left on None, it uses the brand kit's title sponsor), plus the <strong>Label</strong> that sets the "Presented by" wording on the desk / duorow overlays too.</p>
+        <div class="field-row">
+          <label class="field-label" for="input-sbad-label">Label</label>
+          <input type="text" id="input-sbad-label" class="input-text" placeholder="PRESENTED BY">
+        </div>
+        <p style="font-size:11px; color:var(--muted); margin:-4px 0 12px;">Any phrase — e.g. "Presented by", "Sponsored by", "In partnership with". Applies to duorow + all desk overlays.</p>
+        <div style="flex:1; min-width:200px; margin-bottom:14px;" data-ad-picker="sbad-logo"></div>
+        <div style="flex:1; min-width:200px;">
+          <label class="field-label" for="input-sbad-bg">Scene Background (optional)</label>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input type="file" id="input-sbad-bg" accept="image/*" class="input-text" style="padding:6px;">
+            <img id="preview-sbad-bg" alt="" style="height:30px; max-width:54px; object-fit:cover; border-radius:3px; display:none;">
+            <button class="btn btn-ghost btn-sm" id="btn-sbad-bg-clear" type="button">Clear</button>
+          </div>
+        </div>
+      </div>
+
       <!-- ── Worlds overlay extras (rl-worlds.html only) — one card, not three: ticker, title-sponsor
            roll-out and the stats sidebar are all Worlds-specific toggles, so they live together
            instead of each taking a full card slot. ── -->
-      <div class="adslot-panel gs-card" id="adslot-worlds" style="grid-column:span 2;">
-        <h4 class="gs-card-title">Worlds overlay</h4>
+      <details class="adslot-panel gs-card gs-card-fold" id="adslot-worlds">
+        <summary><h4 class="gs-card-title">Worlds HUD extras</h4><span class="gs-fold-hint">Only for the Worlds HUD: scores ticker, sponsor roll-out, stats sidebar</span></summary>
         <p style="font-size:11px; color:var(--muted); margin-bottom:4px;">Extras specific to the <strong>Worlds</strong> HUD (rl-worlds.html) — on/off toggles, nothing to route or design elsewhere.</p>
 
         <div class="ps-block" style="padding-top:10px;">
@@ -1504,27 +1524,7 @@
             <span id="wsb-saved" style="font-size:11px; color:var(--muted); align-self:center; display:none;">Saved</span>
           </div>
         </div>
-      </div>
-
-      <!-- ── Scoreboard Ad Slot ── -->
-      <div class="adslot-panel gs-card" id="adslot-sbad">
-        <h4 class="gs-card-title">Title sponsor label &amp; scorecard</h4>
-        <p style="font-size:11px; color:var(--muted); margin-bottom:12px;">Sponsor logo on the end-of-match scorecard (left on None, it uses the brand kit's title sponsor), plus the <strong>Label</strong> that sets the "Presented by" wording on the desk / duorow overlays too.</p>
-        <div class="field-row">
-          <label class="field-label" for="input-sbad-label">Label</label>
-          <input type="text" id="input-sbad-label" class="input-text" placeholder="PRESENTED BY">
-        </div>
-        <p style="font-size:11px; color:var(--muted); margin:-4px 0 12px;">Any phrase — e.g. "Presented by", "Sponsored by", "In partnership with". Applies to duorow + all desk overlays.</p>
-        <div style="flex:1; min-width:200px; margin-bottom:14px;" data-ad-picker="sbad-logo"></div>
-        <div style="flex:1; min-width:200px;">
-          <label class="field-label" for="input-sbad-bg">Scene Background (optional)</label>
-          <div style="display:flex; gap:8px; align-items:center;">
-            <input type="file" id="input-sbad-bg" accept="image/*" class="input-text" style="padding:6px;">
-            <img id="preview-sbad-bg" alt="" style="height:30px; max-width:54px; object-fit:cover; border-radius:3px; display:none;">
-            <button class="btn btn-ghost btn-sm" id="btn-sbad-bg-clear" type="button">Clear</button>
-          </div>
-        </div>
-      </div>
+      </details>
 
       </div>
       <div class="gs-pane" data-gspane="playercams">

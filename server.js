@@ -2647,7 +2647,20 @@ function capturePackageSnapshot() {
     lowerThird: (state.casters && state.casters.lowerThird) || '',
     lineup: JSON.parse(JSON.stringify((state.casters && state.casters.lineup) || [])),
     slotLabels: { ...((state.casters && state.casters.slotLabels) || {}) },
-    obsScenes: { ...((state.obs && state.obs.scenes) || {}) }
+    obsScenes: { ...((state.obs && state.obs.scenes) || {}) },
+    // The overlay LOOK set in Settings > Games > Rocket League > Overlay: wording, colours and
+    // styles, so a brand (exported, or synced to the org) brings its look with it. Sponsor logos
+    // are not copied here: the brand's sponsor placements already own those slots.
+    overlayLook: {
+      overtime: { label: state.overtime.label, bg: state.overtime.bg, color: state.overtime.color },
+      replay: { label: state.replay.label, colorMode: state.replay.colorMode, style: state.replay.style },
+      scoreboardLabel: state.scoreboardAd.label,
+      rlStatsScreen: { ...(state.rlStatsScreen || {}) },
+      rlReplayTransitions: state.rlReplayTransitions !== false,
+      rlSponsorRoll: !!state.rlSponsorRoll,
+      worldsTicker: state.worldsTicker !== false,
+      worldsSidebar: { title: (state.worldsSidebar || {}).title || '', subtitle: (state.worldsSidebar || {}).subtitle || '' }
+    }
   };
 }
 
@@ -2723,7 +2736,39 @@ function applyPackageSnapshot(pkg, opts) {
   if (s.obsScenes && typeof s.obsScenes === 'object' && Object.values(s.obsScenes).some(Boolean)) {
     state.obs.scenes = { ...state.obs.scenes, ...s.obsScenes };
   }
+  applyOverlayLook(s.overlayLook);
   return true;
+}
+
+// A package's captured overlay look (capturePackageSnapshot.overlayLook). Only known fields with
+// sane values are taken, so an old or hand-edited kit file cannot put junk into the overlays.
+function applyOverlayLook(o) {
+  if (!o || typeof o !== 'object') return;
+  const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : null);
+  const col = (v) => (typeof v === 'string' && /^#[0-9a-f]{3,8}$/i.test(v) ? v : null);
+  if (o.overtime) {
+    const l = str(o.overtime.label, 40); if (l != null) state.overtime.label = l;
+    const b = col(o.overtime.bg); if (b) state.overtime.bg = b;
+    const c = col(o.overtime.color); if (c) state.overtime.color = c;
+  }
+  if (o.replay) {
+    const l = str(o.replay.label, 40); if (l != null) state.replay.label = l;
+    if (['team', 'mono', 'brand'].includes(o.replay.colorMode)) state.replay.colorMode = o.replay.colorMode;
+    if (REPLAY_STYLES.includes(o.replay.style)) state.replay.style = o.replay.style;
+  }
+  { const l = str(o.scoreboardLabel, 40); if (l != null) state.scoreboardAd.label = l; }
+  if (o.rlStatsScreen && typeof o.rlStatsScreen === 'object') {
+    state.rlStatsScreen = { ...state.rlStatsScreen,
+      ...(typeof o.rlStatsScreen.showStats === 'boolean' ? { showStats: o.rlStatsScreen.showStats } : {}),
+      ...(['default', 'glass', 'block', 'radar', 'compare'].includes(o.rlStatsScreen.design) ? { design: o.rlStatsScreen.design } : {}) };
+  }
+  if (typeof o.rlReplayTransitions === 'boolean') state.rlReplayTransitions = o.rlReplayTransitions;
+  if (typeof o.rlSponsorRoll === 'boolean') state.rlSponsorRoll = o.rlSponsorRoll;
+  if (typeof o.worldsTicker === 'boolean') state.worldsTicker = o.worldsTicker;
+  if (o.worldsSidebar && typeof o.worldsSidebar === 'object') {
+    const t = str(o.worldsSidebar.title, 60), sub = str(o.worldsSidebar.subtitle, 80);
+    state.worldsSidebar = { ...state.worldsSidebar, ...(t != null ? { title: t } : {}), ...(sub != null ? { subtitle: sub } : {}) };
+  }
 }
 
 // Migrate a kit in place: guarantee a packages[] array + a valid activePackageId.

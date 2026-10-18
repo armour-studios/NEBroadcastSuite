@@ -589,7 +589,7 @@ function renderBrands(data) {
     capBtn.title = (pkg.showSnapshot
       ? 'Update the captured show setup (last captured ' + new Date(pkg.showSnapshot.capturedAt || 0).toLocaleString() + ')'
       : 'Snapshot the current show setup into "' + (pkg.name || 'Main') + '"')
-      + ' — scene presets · ticker · event name · titles · caster lineup · OBS scene mappings';
+      + ' — scene presets · ticker · event name · titles · caster lineup · OBS scene mappings · the Rocket League overlay look (overtime / replay wording and colours, scoreboard and replay styles, Presented by label, Worlds extras)';
     capBtn.addEventListener('click', () => {
       send('capture_package_snapshot', { kitId: k.id, packageId: pkg.id });   // brand-result toasts the outcome
     });
