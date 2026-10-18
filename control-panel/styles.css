@@ -11921,3 +11921,4 @@ body.gfx-board-open { overflow: hidden; }
 .tb-ad-menu-note { font-size: 11px; line-height: 1.4; color: var(--muted); padding: 0 2px 4px; max-width: 240px; }
 .tb-ad-btn:disabled { opacity: .5; cursor: not-allowed; }
 #tb-ad-target-row .tb-ad-menu-lbl { white-space: nowrap; }
+.sponsor-cta-input { width: 220px; padding: 4px 8px; font-size: 12px; }

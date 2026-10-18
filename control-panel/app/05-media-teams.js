@@ -2575,6 +2575,7 @@ wireScorecard('scorecard-teams', 'teams');
   });
   panel.addEventListener('change', (e) => {
     if (e.target.id === 'chk-team-record') send('set_team_record_settings', { enabled: e.target.checked });
+    if (e.target.id === 'chk-team-seed') send('set_team_record_settings', { showSeed: e.target.checked });
     if (e.target.id === 'sel-team-record-metric') send('set_team_record_settings', { metric: e.target.value });
     if (e.target.id === 'sel-team-record-league') send('set_team_record_settings', { leagueId: e.target.value });
     if (e.target.id === 'sel-team-record-week') send('set_team_record_settings', { week: e.target.value });
@@ -2681,6 +2682,7 @@ function syncSeriesDeskUI(data) {
   const ls = data.startggLeagueStandings || {};
   const trSource = tr.source || 'stats';
   const chk = el('chk-team-record'); if (chk && document.activeElement !== chk) chk.checked = !!tr.enabled;
+  const chkSeed = el('chk-team-seed'); if (chkSeed && document.activeElement !== chkSeed) chkSeed.checked = !!tr.showSeed;
   const selM = el('sel-team-record-metric'); if (selM && document.activeElement !== selM) selM.value = tr.metric || 'season';
   document.querySelectorAll('#tr-source-seg .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.src === trSource));
   const slugIn = el('input-league-slug');

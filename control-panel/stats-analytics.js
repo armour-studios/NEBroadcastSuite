@@ -1097,7 +1097,7 @@ function statTable(cols, rows, rowFn) {
 // ── Sponsor proof-of-play ───────────────────────────────────────────────────
 const ADPROOF_API = 'http://127.0.0.1:3000/api/adproof';
 const ADPROOF_SPOTS = ['rail', 'desk', 'overtime', 'replayGoal', 'replayOutro', 'scoreboard', 'banner', 'ticker'];
-const ADPROOF_SPOT_LABEL = { rail: 'Rail', desk: 'Desk', overtime: 'OT', replayGoal: 'Replay', replayOutro: 'Outro', scoreboard: 'Score', banner: 'Banner', ticker: 'Ticker' };
+const ADPROOF_SPOT_LABEL = { rail: 'Rail', desk: 'Desk', overtime: 'OT', replayGoal: 'Replay', replayOutro: 'Outro', scoreboard: 'Score', banner: 'Banner', ticker: 'Ticker', drop: 'Drop-down' };
 let _adProofReport = null;
 function adProofMmss(s) { s = Math.max(0, Math.round(s || 0)); const m = Math.floor(s / 60); return m + ':' + String(s % 60).padStart(2, '0'); }
 function adProofPlacementStr(byPlacement) {

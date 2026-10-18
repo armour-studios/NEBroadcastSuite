@@ -1653,6 +1653,7 @@ let state = {
   //     record is tied to the team PROFILE — it follows the team across side swaps and reassignments.
   //     (Legacy `manual: {blue,orange}` is migrated into this on load.)
   teamRecord: {
+    showSeed: false,   // start.gg seed beside each team name (team.seed, from initialSeedNum), separate from the record line
     enabled: false, metric: 'season', source: 'stats', leagueId: '',   // leagueId = chosen in-app league for the 'stats' source ('' = auto-pick)
     week: '',   // 'stats' source only — which lg.schedule week feeds weekW/weekL ('' = auto: latest fully-completed week)
     manual: { blue: { w: 0, l: 0, pts: null, place: null }, orange: { w: 0, l: 0, pts: null, place: null } },
@@ -2520,7 +2521,16 @@ function loadDiscordUser() {
 
 // Where a sponsor logo can be displayed. Each brand sponsor carries a `placements`
 // map of these flags, set with checkmarks in the brand editor.
-const SPONSOR_SPOTS = ['title', 'rail', 'desk', 'overtime', 'replayGoal', 'replayOutro', 'scoreboard', 'banner', 'ticker'];
+const SPONSOR_SPOTS = ['title', 'rail', 'desk', 'overtime', 'replayGoal', 'replayOutro', 'scoreboard', 'banner', 'ticker', 'drop'];
+// Scorebar drop-down (RL HUD): every `every` seconds a sponsor card drops out under the scorebar for
+// `hold` seconds, sponsors taking turns. Timed off the clock, not the overlay, so every source and
+// the Sponsor Proof of Play count agree on what was up. -> index of the sponsor showing, or -1.
+function dropSlot(nowMs, every, hold, n) {
+  if (!n) return -1;
+  const e = Math.max(30, Number(every) || 120), h = Math.min(Math.max(5, Number(hold) || 12), e - 5);
+  const t = Math.floor(nowMs / 1000);
+  return (t % e) < h ? Math.floor(t / e) % n : -1;
+}
 // A desk caster's tournament-winner pick — ANY team from the library (state.savedTeams), not
 // tied to whichever two teams the current match happens to be. Snapshotted at pick time (name +
 // logo), same "don't just store a pointer that can go stale" convention as MatchSession's team
@@ -2535,7 +2545,7 @@ function sanitizePlacements(p) {
   // No placements (legacy sponsor saved before this feature) → show on rail + caster desk,
   // matching the old "every sponsor shows on the rail/desk" behaviour.
   if (!p || typeof p !== 'object') {
-    return { title: false, rail: true, desk: true, overtime: false, replayGoal: false, replayOutro: false, scoreboard: false, banner: false, ticker: false };
+    return { title: false, rail: true, desk: true, overtime: false, replayGoal: false, replayOutro: false, scoreboard: false, banner: false, ticker: false, drop: false };
   }
   const o = {};
   SPONSOR_SPOTS.forEach((k) => { o[k] = !!p[k]; });
@@ -2589,6 +2599,8 @@ function sanitizePackage(p, fallbackName) {
     sponsors: Array.isArray(p.sponsors) ? p.sponsors.map((s) => ({
       id: s.id || brandId(), name: (s.name || '').toString(), logo: s.logo || null,
       tier: String(s.tier || 'partner').slice(0, 20), placements: sanitizePlacements(s.placements),
+      // One line beside the logo on the scorebar drop-down card ("Build your free portfolio").
+      cta: typeof s.cta === 'string' ? s.cta.slice(0, 60) : '',
       // Deal $/ROI: what this sponsor paid, and/or their agreed market rate — both optional,
       // feed the Sponsor Proof of Play $ metrics (realized CPM / value delivered).
       dealValue: (typeof s.dealValue === 'number' && s.dealValue >= 0) ? s.dealValue : null,
@@ -2606,6 +2618,9 @@ function sanitizePackage(p, fallbackName) {
       sceneName: typeof t.sceneName === 'string' ? t.sceneName.slice(0, 100) : ''
     })).slice(0, 12) : [],
     bannerInterval: Number(p.bannerInterval) > 0 ? Number(p.bannerInterval) : 10,
+    // Scorebar drop-down timing: drops every dropEvery seconds and stays down dropHold seconds.
+    dropEvery: Math.min(900, Math.max(30, Number(p.dropEvery) || 120)),
+    dropHold: Math.min(60, Math.max(5, Number(p.dropHold) || 12)),
     replaySkin: p.replaySkin || null,   // per-profile replay transition background image
     scoreboardBg: p.scoreboardBg || null,   // per-profile RL post-game scoreboard background image (link or uploaded)
     // Captured show setup ("Capture current show setup" in the profile editor): scene presets,
@@ -2750,7 +2765,7 @@ function activeBrand() {
   const pkg = activePackage(kit);
   const sponsors = (Array.isArray(pkg.sponsors) ? pkg.sponsors : []).map((s) => ({
     id: s.id, name: s.name || '', logo: s.logo || null, tier: s.tier || 'partner',
-    placements: sanitizePlacements(s.placements),
+    placements: sanitizePlacements(s.placements), cta: s.cta || '',
     dealValue: (typeof s.dealValue === 'number') ? s.dealValue : null,
     targetCpm: (typeof s.targetCpm === 'number') ? s.targetCpm : null
   }));
@@ -2774,6 +2789,9 @@ function activeBrand() {
     railSponsors: tagged('rail'),              // rotating corner bug
     deskSponsors: tagged('desk'),              // caster-desk footer logos
     bannerSponsors: tagged('banner'),          // sponsor-banner rotation
+    dropSponsors: tagged('drop'),              // RL HUD scorebar drop-down card (logo or QR + cta line)
+    dropEvery: Math.min(900, Math.max(30, Number(pkg.dropEvery) || 120)),
+    dropHold: Math.min(60, Math.max(5, Number(pkg.dropHold) || 12)),
     spots: {                                   // single-logo ad slots → first tagged sponsor's logo
       title: (tagged('title')[0] || {}).logo || null,   // prominent always-on title-sponsor bug
       overtime: (tagged('overtime')[0] || {}).logo || null,
@@ -2875,6 +2893,12 @@ function adProofOnAir(brand, elapsed) {
   // Desk + banner show every tagged sponsor at once while their surface is up.
   if (state.casters && state.casters.visible) (brand.deskSponsors || []).forEach((s) => out.push({ sponsor: s, placement: 'desk' }));
   if (state.banner && state.banner.visible) (brand.bannerSponsors || []).forEach((s) => out.push({ sponsor: s, placement: 'banner' }));
+  // Scorebar drop-down: up on the gameplay HUD (not a replay or the post-game board) on its timer.
+  const drops = brand.dropSponsors || [];
+  if (live && drops.length && (state.view || 'hud') === 'hud' && state.activeGame === 'rocket-league') {
+    const i = dropSlot(Date.now(), brand.dropEvery, brand.dropHold, drops.length);
+    if (i >= 0) out.push({ sponsor: drops[i], placement: 'drop' });
+  }
   // Single-logo ad slots — on-air when their moment/scene is live.
   const gfx = typeof state.gfxActive === 'string' ? state.gfxActive : '';
   const cond = {
@@ -5967,7 +5991,12 @@ function buildLiveState() {
     presets: savedPresets.map((p) => ({ id: p.id, name: p.name, game: p.game })),
     facecams: savedFacecams,
     formattedTime: formatTime(state.game.time),
-    teamRecords: resolveTeamRecords(),   // resolved season/league record line per side (tiny)
+    // resolved season/league record line per side (tiny), plus each side's start.gg seed when shown
+    teamRecords: Object.assign(resolveTeamRecords(), {
+      showSeed: !!(state.teamRecord && state.teamRecord.showSeed),
+      seedBlue: Number(state.teams.blue && state.teams.blue.seed) || 0,
+      seedOrange: Number(state.teams.orange && state.teams.orange.seed) || 0,
+    }),
     leagueStandings: resolveLeagueStandings(),   // in-app league W/L+place per side — overlay fallback when no bracket
     flows: state.flows || [],
     flowVars: state.flowVars || {},

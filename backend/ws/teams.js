@@ -13,6 +13,7 @@ const handlers = {
   set_team_record_settings(msg, ws) {
     const d = msg.data || {};
     if (typeof d.enabled === 'boolean') state.teamRecord.enabled = d.enabled;
+    if (typeof d.showSeed === 'boolean') state.teamRecord.showSeed = d.showSeed;
     if (typeof d.metric === 'string') {
       const allowed = ['season', 'week', 'pts', 'place', 'record-pts', 'games'];
       if (allowed.includes(d.metric)) state.teamRecord.metric = d.metric;

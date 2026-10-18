@@ -46,6 +46,7 @@ body{
 body.ui-hidden #scorebar,
 body.ui-hidden #event-name,
 body.ui-hidden #game-sub,
+body.ui-hidden #sb-drop,
 body.ui-hidden #game-sub-logo,
 body.ui-hidden #ot-subbar,
 body.ui-hidden #ot-swipe,
@@ -64,7 +65,7 @@ body.ui-hidden #sponsor{display:none !important;}
    (Ready / Exit / stats) until the next kickoff. With on-board hiding the chrome too, the screen is
    simply clear after a match. OBS sources never get this class. */
 html.ne-over-game:not(.sb-only) #sb{display:none !important;}
-body.on-board :is(#scorebar,#event-name,#game-sub,#game-sub-logo,#ot-subbar,#ot-swipe,#players-blue,#players-orange,#br,#tk,#sponsor){display:none !important;}
+body.on-board :is(#scorebar,#event-name,#game-sub,#game-sub-logo,#ot-subbar,#ot-swipe,#players-blue,#players-orange,#br,#tk,#sponsor,#sb-drop){display:none !important;}
 img{display:block;}
 
 /* ───────────────────── TOP SCOREBOARD (CS2 header style) ─────────────────── */
@@ -136,6 +137,11 @@ img{display:block;}
   text-transform:uppercase;color:rgba(255,255,255,.95);white-space:nowrap;
   text-shadow:0 1px 3px rgba(0,0,0,.7);}
 .team-record.hidden{display:none;}
+/* start.gg seed beside the series pips (Match > Team Record > Show start.gg seed) */
+.team-seed{display:inline-flex;align-items:baseline;gap:4px;font-weight:800;font-size:12px;line-height:1;color:#fff;
+  white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,.7);}
+.team-seed i{font-style:normal;font-weight:700;font-size:9px;letter-spacing:.14em;color:rgba(255,255,255,.62);}
+.team-seed.hidden{display:none;}
 /* GOAL! flash — team name morphs to GOAL!, pulses, then transitions back */
 .team-name.goalflash{color:var(--goal-color,#fff);text-shadow:0 0 22px var(--goal-color,#fff);
   font-weight:900;animation:goalFlash 2.5s cubic-bezier(.2,.7,.3,1);}
@@ -194,6 +200,22 @@ img{display:block;}
   clip-path:polygon(0 0,100% 0,calc(100% - 15px) 100%,15px 100%);
   filter:drop-shadow(0 6px 11px rgba(0,0,0,.45));animation:otSubIn .4s cubic-bezier(.2,.8,.25,1);}
 .game-sub.hidden{display:none;}
+/* Scorebar drop-down. The strip starts at the scorebar's bottom edge and clips its card, so the card
+   reads as sliding out from behind the bar. --drop-h is the card's height while it is down; the GAME
+   label and the OVERTIME card move down by it, so the label always hangs at the bottom of the stack. */
+.sb-drop{position:absolute;top:102px;left:50%;transform:translateX(-50%);z-index:1;overflow:hidden;
+  pointer-events:none;padding:0 8px 12px;}
+.sbd-card{display:flex;align-items:center;justify-content:center;gap:12px;min-width:200px;max-width:340px;
+  height:var(--drop-card-h,64px);padding:6px 14px;box-sizing:border-box;background:#fff;color:#111;
+  box-shadow:0 6px 14px rgba(0,0,0,.4);transform:translateY(-110%);
+  transition:transform .55s cubic-bezier(.2,.8,.25,1);}
+.sb-drop.down .sbd-card{transform:translateY(0);}
+.sbd-logo{max-height:52px;max-width:150px;object-fit:contain;}
+.sbd-logo[src=""]{display:none;}
+.sbd-cta{font-size:15px;font-weight:800;line-height:1.12;text-align:center;max-width:170px;white-space:normal;}
+.sbd-cta:empty{display:none;}
+.game-sub,.ot-subbar{transition:top .55s cubic-bezier(.2,.8,.25,1);}
+body.drop-down .game-sub,body.drop-down .ot-subbar{top:calc(102px + var(--drop-card-h,64px));}
 .gs-label{width:100%;height:21px;display:flex;align-items:center;justify-content:center;gap:8px;padding:0 16px;
   font-size:10px;font-weight:800;letter-spacing:.18em;color:#cdd2da;text-transform:uppercase;white-space:nowrap;}
 /* OVERTIME chip in the middle of the bottom bar — background from the overtime slot (currently red).
@@ -1231,6 +1253,7 @@ body.sb-external #sb{display:none !important;}
       <div class="team-meta">
         <span id="name-blue" class="team-name">BLUE</span>
         <div class="meta-row">
+          <span id="seed-blue" class="team-seed hidden"></span>
           <div id="pips-blue" class="series"></div>
           <span id="record-blue" class="team-record hidden"></span>
         </div>
@@ -1246,6 +1269,7 @@ body.sb-external #sb{display:none !important;}
       <div class="team-meta">
         <span id="name-orange" class="team-name">ORANGE</span>
         <div class="meta-row">
+          <span id="seed-orange" class="team-seed hidden"></span>
           <div id="pips-orange" class="series"></div>
           <span id="record-orange" class="team-record hidden"></span>
         </div>
@@ -1263,6 +1287,11 @@ body.sb-external #sb{display:none !important;}
 <!-- title-sponsor logo — floats (transparent) in the seam between the scorebar and the GAME label so it
      can sit higher without a second opaque panel stacking on the scorebar (which reads as a double layer) -->
 <img id="game-sub-logo" class="gs-logo hidden" alt="">
+<!-- SCOREBAR DROP-DOWN: a sponsor card (logo or QR code + one line) that slides out from under the
+     scorebar on the brand package's timer; the GAME label rides down beneath it while it is out. -->
+<div id="sb-drop" class="sb-drop" aria-hidden="true">
+  <div class="sbd-card"><img id="sbd-logo" class="sbd-logo" alt=""><span id="sbd-cta" class="sbd-cta"></span></div>
+</div>
 <!-- GAME n of X sub-card (hangs below center) — label only. REPLACED by the red OVERTIME card during overtime. -->
 <div id="game-sub" class="game-sub">
   <span id="game-sub-label" class="gs-label">GAME 1 OF 5</span>
@@ -2039,6 +2068,37 @@ function renderSponsorRail(brand){
     srTimer=setInterval(()=>{ srIdx=(srIdx+1)%sp.length; draw(); }, ms); }
 }
 
+/* ── scorebar drop-down (brand 'drop' placement) ─────────────────────────────
+   Sponsors take turns: every dropEvery seconds one drops out for dropHold seconds. The slot comes
+   from the clock with the same formula as server.js dropSlot(), so the Sponsor Proof of Play count
+   matches what this overlay shows. ?drop=0 turns it off for this source. */
+const DROP_OFF = new URLSearchParams(location.search).get('drop') === '0';
+function dropSlotAt(nowMs, every, hold, n){
+  if(!n) return -1;
+  const e=Math.max(30, Number(every)||120), h=Math.min(Math.max(5, Number(hold)||12), e-5);
+  const t=Math.floor(nowMs/1000);
+  return (t % e) < h ? Math.floor(t/e) % n : -1;
+}
+let _dropIdx=-2;
+function tickDrop(){
+  const box=el('sb-drop'); if(!box) return;
+  const b=(currentState && currentState.brand) || {};
+  const list=Array.isArray(b.dropSponsors) ? b.dropSponsors.filter(s=>s && s.logo) : [];
+  const onHud=!currentState || !currentState.view || currentState.view==='hud';
+  const i = (DROP_OFF || !onHud || !list.length) ? -1 : dropSlotAt(Date.now(), b.dropEvery, b.dropHold, list.length);
+  if(i===_dropIdx) return;
+  _dropIdx=i;
+  if(i>=0){
+    const s=list[i], img=el('sbd-logo'), cta=el('sbd-cta');
+    if(img && img.getAttribute('src')!==s.logo) img.setAttribute('src', s.logo);
+    if(img) img.alt=s.name||'';
+    if(cta) cta.textContent=(s.cta||'').trim();
+  }
+  box.classList.toggle('down', i>=0);
+  document.body.classList.toggle('drop-down', i>=0);
+}
+setInterval(tickDrop, 500);
+
 // Title-sponsor logo (brand 'title' placement) that hangs inside the GAME/OT card.
 function titleSponsorLogo(){
   const b = currentState.brand;
@@ -2160,6 +2220,12 @@ function setTeamName(id, side, val){
 /* Season / league record line under each team name. Server resolves the string per the
    producer-chosen metric (season W-L / week / points / placement); empty = hide. */
 function renderTeamRecords(tr){
+  [['seed-blue', tr && tr.seedBlue], ['seed-orange', tr && tr.seedOrange]].forEach(([id, n])=>{
+    const e=el(id); if(!e) return;
+    const show = !!(tr && tr.showSeed) && Number(n) > 0;
+    e.innerHTML = show ? '<i>SEED</i>' + Number(n) : '';
+    e.classList.toggle('hidden', !show);
+  });
   const on = !!(tr && tr.enabled);
   [['record-blue', tr && tr.blue], ['record-orange', tr && tr.orange]].forEach(([id, txt])=>{
     const e=el(id); if(!e) return;

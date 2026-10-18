@@ -976,6 +976,7 @@
           <p class="msp-label" style="flex:1;">Team Record <span class="msp-hint">(under name)</span></p>
           <label class="msp-toggle"><input type="checkbox" id="chk-team-record"> Show</label>
         </div>
+        <label class="msp-toggle" title="The team's start.gg seed beside its name on the scorebar. It fills in when a start.gg match is loaded."><input type="checkbox" id="chk-team-seed"> Show start.gg seed</label>
         <div class="seg msp-seg" id="tr-source-seg">
           <button type="button" class="seg-btn" data-src="startgg" title="Auto-pull from the tournament platform (start.gg league + live event)">Tournament</button>
           <button type="button" class="seg-btn" data-src="stats" title="Record tracked within the app (your in-app leagues)">In-app</button>
@@ -7313,6 +7314,14 @@
     </div>
     <div id="sponsors-list" class="presets-list">
       <p class="empty-msg" id="sponsors-empty">No sponsors added.</p>
+    </div>
+    <div class="sponsor-drop-timing" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:10px 0 0; font-size:13px;" title="Sponsors tagged Scorebar drop take turns in a card that drops out under the Rocket League scorebar">
+      <span style="font-weight:600; color:#e0e0e0;">Scorebar drop-down:</span>
+      <span style="color:var(--muted);">drops every</span>
+      <input type="number" id="input-brand-drop-every" class="input-text" value="120" min="30" max="900" style="width:70px; padding:4px 8px;">
+      <span style="color:var(--muted);">seconds, stays down</span>
+      <input type="number" id="input-brand-drop-hold" class="input-text" value="12" min="5" max="60" style="width:60px; padding:4px 8px;">
+      <span style="color:var(--muted);">seconds</span>
     </div>
 
     <h4 style="margin:20px 0 4px; font-size:13px; color:#e0e0e0; border-top:1px solid rgba(255,255,255,0.08); padding-top:16px;">Sponsor Banner</h4>
