@@ -215,7 +215,7 @@ const DERIVED_TIERS = {
 // written by buildSaveSnapshot()'s serializers and read back by loadState().
 const SAVED_EXTRA = [
   'draftAuto', 'draftLook', 'lolHudMode', 'lolOcr', 'bedwarsToken', 'startggApiToken',
-  'challengermodeRefreshKey', 'challongeApiKey', 'nxgenApiKey', 'liquipediaApiKey', 'riotApiKey',
+  'challengermodeRefreshKey', 'challongeApiKey', 'nxgenApiKey', 'liquipediaApiKey', 'riotApiKey', 'apexStatsToken',
   'liquipediaBudget', 'liquipediaCache', 'faceitApiKey', 'ballchasingApiKey',
   'sheetsServiceAccount', 'competitionApiKey', 'competitionFeedTokens', 'obsPassword',
   'slobsToken', 'brand', 'preshowPresets', 'csgoCfgPath', 'csgoAutoWinner', 'csgoShowHistory',

@@ -313,6 +313,7 @@ let challengermodeRefreshKey = '';
 let nxgenApiKey = '';
 let faceitApiKey = '';        // FACEIT Data API server-side key (encrypted at rest, never broadcast)
 let ballchasingApiKey = '';
+let apexStatsToken = '';     // Apex tournament stats token (EA's code .csv): post-game results, backend/apex-postgame.js
 let riotApiKey = '';         // Riot Games developer/production key — the PRODUCER's own, from
                              // developer.riotgames.com. Encrypted at rest, never broadcast.
                              // NOTE: a DEVELOPMENT key expires every 24h; riot-client says so on 403.
@@ -1004,6 +1005,9 @@ let state = {
     ring: { stage: 0, current: 0, end: 0, shrinking: false },
     observed: null,                 // spectated player card { name, legend, hp, shield, kills, squad:[...] }
     standings: [],                  // ALGS leaderboard: series points per team (computed from games + live)
+    // Official post-game results from EA's stats token (backend/apex-postgame.js). The token itself
+    // is a secret kept outside state; this only says whether one is saved and how the last pull went.
+    postgame: { hasToken: false, lastPullAt: 0, lastError: '', matches: [] },
     squadsAlive: 0, squadsTotal: 0, playersAlive: 0,
     killfeed: [],
     winners: [],
@@ -3960,6 +3964,7 @@ function restoreSecrets(saved) {
   take('faceitApiKey',         (v) => { faceitApiKey = v; });
   take('liquipediaApiKey',     (v) => { liquipediaApiKey = v; });
   take('riotApiKey',           (v) => { riotApiKey = v; });
+  take('apexStatsToken',       (v) => { apexStatsToken = v; if (state.apex && state.apex.postgame) state.apex.postgame.hasToken = !!v; });
   take('ballchasingApiKey',    (v) => { ballchasingApiKey = v; });
   take('bedwarsToken',         (v) => { bedwarsToken = v; });
   take('sheetsServiceAccount', (v) => { sheetsServiceAccount = v; });
@@ -4975,6 +4980,7 @@ function buildSaveSnapshot() {
     liquipediaApiKey: encryptSecret(liquipediaApiKey),
     riot: { region: state.riot.region, platform: state.riot.platform },
     riotApiKey: encryptSecret(riotApiKey),
+    apexStatsToken: encryptSecret(apexStatsToken),
     // Persisted so the rolling hour survives a restart (Liquipedia's window keeps running
     // regardless) and so cached results are re-used, which their terms explicitly ask for.
     liquipediaBudget: _lpBudget.toJSON(),
@@ -16102,7 +16108,9 @@ registerWsHandlers(require('./backend/ws/battle-royale')({
   get gameConfigsVer() { return gameConfigsVer; }, set gameConfigsVer(v) { gameConfigsVer = v; },
   get leaguesVer() { return leaguesVer; }, set leaguesVer(v) { leaguesVer = v; },
   get obsClient() { return obsClient; }, set obsClient(v) { obsClient = v; },
-  get startggApiToken() { return startggApiToken; }, set startggApiToken(v) { startggApiToken = v; }
+  get startggApiToken() { return startggApiToken; }, set startggApiToken(v) { startggApiToken = v; },
+  get apexStatsToken() { return apexStatsToken; }, set apexStatsToken(v) { apexStatsToken = v; },
+  get dataDir() { return dataDir; }
 }));
 registerWsHandlers(require('./backend/ws/cs2')({
   broadcastCsgo, broadcastFullState, cleanRadarLayout, cs2Cinematic, cs2Netcon, cs2Setup,

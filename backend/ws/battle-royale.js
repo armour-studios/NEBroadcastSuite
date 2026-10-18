@@ -12,6 +12,7 @@ let
   obsAppName, parseEventSlug, recomputeApexBroadcast, recomputeBrSeason, sanitizeBrEntrant,
   sanitizePointMatrix, saveAppState, sendWs, setExclusiveGfxVisible, state;
 let ctx;
+const apexPostgame = require('../apex-postgame');
 
 const handlers = {
   // -- Battle royale series (Fortnite / PUBG / Warzone / any points-per-placement format) ------
@@ -771,6 +772,54 @@ if (!Array.isArray(lg.brSeries)) lg.brSeries = [];
       recomputeApexBroadcast();
       saveAppState();
     }
+  },
+
+  // Official results: EA's stats token (from the tournament code .csv) and the post-game endpoint.
+  // A blank token clears it. The token never rides the state broadcast.
+  apex_set_stats_token(msg, ws) {
+    const d = msg.data || {};
+    if (d.clear) ctx.apexStatsToken = '';
+    else if (typeof d.token === 'string' && d.token.trim()) ctx.apexStatsToken = d.token.trim().slice(0, 200);
+    state.apex.postgame = Object.assign({ matches: [] }, state.apex.postgame, { hasToken: !!ctx.apexStatsToken, lastError: '' });
+    saveAppState();
+    broadcastFullState();
+    sendWs(ws, { type: 'apex-postgame-result', data: { ok: true, message: ctx.apexStatsToken ? 'Stats token saved.' : 'Stats token removed.' } });
+  },
+
+  // Pull the matches played with the token's codes. useForSeries replaces the series games with
+  // the official results (placement + kills from EA), so the standings use them.
+  apex_pull_results(msg, ws) {
+    const d = msg.data || {};
+    const reply = (data) => sendWs(ws, { type: 'apex-postgame-result', data });
+    if (!ctx.apexStatsToken) { reply({ ok: false, message: 'Paste your stats token first (it is in the .csv EA sent with your tournament codes).' }); return; }
+    (async () => {
+      const pg = state.apex.postgame = Object.assign({ matches: [] }, state.apex.postgame, { hasToken: true });
+      try {
+        const json = await apexPostgame.fetchPostGame(ctx.apexStatsToken);
+        // Keep the last raw answer: the format is not published, so the first real pull is checked against it.
+        try { if (ctx.dataDir) require('fs').writeFileSync(require('path').join(ctx.dataDir, 'apex-postgame-last.json'), JSON.stringify(json, null, 2)); } catch (e) {}
+        const matches = apexPostgame.parsePostGame(json);
+        pg.lastPullAt = Date.now();
+        pg.lastError = matches.length ? '' : 'No matches yet for this token.';
+        pg.matches = matches.map((m) => ({ id: m.id, startedAt: m.startedAt, map: m.map, mode: m.mode, teams: m.teams.length,
+          winner: (m.teams[0] && m.teams[0].name) || '', top: m.teams.slice(0, 3).map((t) => ({ name: t.name, kills: t.kills, placement: t.placement })) }));
+        if (matches.length && d.useForSeries) {
+          state.apex.games = apexPostgame.toSeriesGames(matches, apexLive.teamKeyOf);
+          if (ctx._apexAcc) ctx._apexAcc.games = state.apex.games.map((g) => ({ ...g }));
+          ctx._apexGamesSig = String(state.apex.games.length);
+          recomputeApexBroadcast();
+        }
+        saveAppState();
+        broadcastFullState();
+        reply({ ok: true, message: matches.length
+          ? 'Found ' + matches.length + ' match' + (matches.length === 1 ? '' : 'es') + (d.useForSeries ? '. The series now uses the official results.' : '.')
+          : 'EA returned no matches for this token yet. A new token only works once EA has approved it (register it at apex.seatlon.eu/add), and matches appear after they finish.' });
+      } catch (e) {
+        pg.lastError = (e && e.message) || 'Could not reach the EA stats server.';
+        broadcastFullState();
+        reply({ ok: false, message: pg.lastError });
+      }
+    })();
   },
 
   apex_finalize_game(msg, ws) {

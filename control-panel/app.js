@@ -24495,6 +24495,21 @@ function applyLolState(data) {
 let _apexSavedTeams = [];
 function applyApexState(data) {
   const apex = data.apex || {};
+  // Official results card.
+  const pg = apex.postgame || {};
+  const chip = el('apex-token-chip');
+  if (chip) { chip.textContent = pg.hasToken ? 'Token saved' : 'No token'; chip.classList.toggle('ok', !!pg.hasToken); }
+  const pgl = el('apex-pg-list');
+  if (pgl) {
+    const ms = Array.isArray(pg.matches) ? pg.matches : [];
+    const sig = JSON.stringify([pg.lastPullAt, ms.length, pg.lastError]);
+    if (pgl._sig !== sig) {
+      pgl._sig = sig;
+      pgl.innerHTML = ms.length ? ms.map((m, i) => '<div style="padding:4px 0; border-bottom:1px solid var(--border);"><b>Match ' + (i + 1) + '</b> · ' + escapeHtml(m.map || 'map unknown')
+        + (m.startedAt ? ' · ' + new Date(m.startedAt).toLocaleString() : '') + ' · ' + m.teams + ' teams · winner <b>' + escapeHtml(m.winner || '?') + '</b></div>').join('')
+        : (pg.lastError ? escapeHtml(pg.lastError) : (pg.lastPullAt ? 'No matches yet.' : ''));
+    }
+  }
   if (Array.isArray(data.savedTeams)) _apexSavedTeams = data.savedTeams;
   const conn = el('apex-conn');
   if (conn) {
@@ -24602,6 +24617,23 @@ function wireApexScoring() {
   }));
   const fin = el('apex-finalize-game'); if (fin) fin.addEventListener('click', () => send('apex_finalize_game', {}));
   const rs = el('apex-reset-series'); if (rs) rs.addEventListener('click', () => { if (confirm('Reset the whole series? All recorded games and points will be cleared.')) send('apex_reset_series', {}); });
+  // Official results: EA stats token + post-game pull (backend/apex-postgame.js).
+  el('apex-save-token')?.addEventListener('click', () => {
+    const inp = el('apex-stats-token'); const v = (inp && inp.value || '').trim();
+    if (!v) { showToast('Paste the stats token first.', '#fbbf24', 4000); return; }
+    send('apex_set_stats_token', { token: v }); inp.value = '';
+  });
+  el('apex-clear-token')?.addEventListener('click', () => {
+    appConfirm('Remove the saved stats token?', 'Remove').then((ok) => { if (ok) send('apex_set_stats_token', { clear: true }); });
+  });
+  el('apex-pull-results')?.addEventListener('click', () => {
+    const series = !!(el('apex-pg-series') && el('apex-pg-series').checked);
+    const go = () => { const st = el('apex-pg-status'); if (st) st.textContent = 'Asking EA...'; send('apex_pull_results', { useForSeries: series }); };
+    // Replacing recorded games is destructive: ask when there are live-recorded games to replace.
+    const live = ((currentState.apex && currentState.apex.games) || []).filter((g) => !g.official).length;
+    if (series && live) appConfirm('Replace the ' + live + ' game' + (live === 1 ? '' : 's') + ' recorded from the live feed with EA\'s official results?', 'Replace').then((ok) => { if (ok) go(); });
+    else go();
+  });
 }
 
 // Fetch the LiveAPI details once (launch string + config path) and fill the setup card.
@@ -35156,6 +35188,10 @@ async function connect() {
         try { navigator.clipboard.writeText(d.joinUrl).then(done, () => { customPrompt('Camera link', 'Copy this link', d.joinUrl, 'Close'); }); }
         catch (er) { customPrompt('Camera link', 'Copy this link', d.joinUrl, 'Close'); }
       }
+    } else if (msg.type === 'apex-postgame-result') {
+      const d = msg.data || {};
+      const st = el('apex-pg-status'); if (st) st.textContent = d.message || '';
+      showToast(d.message || (d.ok ? 'Done.' : 'That did not work.'), d.ok ? '#22c55e' : '#f56565', d.ok ? 5000 : 8000);
     } else if (msg.type === 'site-event-result') {
       if (window.__siteEvents) window.__siteEvents.onResult(msg.data || {});
     } else if (msg.type === 'site-event-action-result') {
