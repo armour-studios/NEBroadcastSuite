@@ -1133,6 +1133,10 @@ function applyApexState(data) {
   const sc = apex.scoring;
   if (sc && Array.isArray(sc.placementPoints)) {
     apexBuildPlaceGrid(sc.placementPoints);
+    // The table sits in a closed disclosure; its summary line says what is scoring now.
+    const sum = el('apex-points-sum');
+    if (sum) sum.textContent = sc.placementPoints.slice(0, 10).join('-') + (sc.placementPoints.length > 10 ? '...' : '')
+      + ' · ' + (sc.killPoints != null ? sc.killPoints : 1) + ' per kill' + (sc.killCap ? ' (max ' + sc.killCap + ')' : '');
     const kp = el('apex-kill-pts'); if (kp && document.activeElement !== kp) kp.value = sc.killPoints != null ? sc.killPoints : 1;
     const kc = el('apex-kill-cap'); if (kc && document.activeElement !== kc) kc.value = sc.killCap || 0;
     // Presets: ALGS (built in) + the producer's leagues; the current table's name is selected.
@@ -1254,6 +1258,7 @@ function wireApexScoring() {
       if (v == null || !String(v).trim()) return;
       _apexPlaceGridBuilt = false;
       send('apex_set_scoring', { text: String(v), name: 'Custom' });
+      const box = el('apex-points-edit'); if (box) box.open = true;
     });
   });
   const saveEv = el('apex-save-event');

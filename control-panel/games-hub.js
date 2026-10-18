@@ -33,7 +33,6 @@
   // hand-kept list, and the RL Worlds HUD was added to the layouts but never here, so it had no row.
   const EXTRA_SOURCES = {
     'rocket-league': [['/rl-hud.html?only=scoreboard', 'Post-game scoreboard only']],
-    apex: [['/apex.html?live=1', 'Observer HUD']],
     fortnite: [['/br-leaderboard.html', 'Leaderboard'], ['/br-rail.html', 'Standings rail'], ['/br-match.html', 'Match results']],
   };
   // Friendlier row labels where the layout name is terse.

@@ -9288,15 +9288,15 @@
       <div class="gh-pane" data-gtab="match">
         <div class="gh-group">
           <div class="gh-group-title">Points</div>
-          <p class="gh-hint">Placement points plus kill points, added up across every game. Every league scores differently: pick its preset,
-            or paste its rules and save them as one. ALGS is built in.</p>
-        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px;">
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
           <label class="field-label" for="apex-preset" style="margin:0;">Scoring</label>
           <select id="apex-preset" class="input-select" style="width:auto; min-width:200px;"></select>
           <button type="button" class="btn btn-secondary btn-sm" id="apex-preset-save" title="Save the table below as a named preset (the same name replaces it)">Save as preset...</button>
           <button type="button" class="btn btn-ghost btn-sm" id="apex-preset-delete" title="Delete the selected preset">Delete</button>
           <button type="button" class="btn btn-ghost btn-sm" id="apex-preset-paste" title="Paste the league's scoring rules as text and fill the table from them">Paste rules...</button>
-        </div>
+          </div>
+          <details class="gh-guide" id="apex-points-edit"><summary>Edit the points table <span id="apex-points-sum" class="field-hint" style="margin:0 0 0 8px;"></span></summary><div class="gh-guide-body">
+          <p class="gh-hint">Placement points plus kill points, added up across every game. Every league scores differently: pick its preset, or paste its rules and save them as one. ALGS is built in.</p>
         <div style="display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; margin-bottom:10px;">
           <div>
             <label class="field-label" style="display:block; margin-bottom:6px;">Placement points (1st → 20th)</label>
@@ -9316,6 +9316,7 @@
           <button type="button" class="btn btn-secondary btn-sm" id="apex-reset-scoring">Reset to ALGS default</button>
           <span id="apex-scoring-status" class="field-hint" style="margin:0;"></span>
         </div>
+          </div></details>
         </div>
         <div class="gh-group">
         <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:8px;">
@@ -9329,9 +9330,7 @@
         </div>
         <div class="gh-group" id="apex-postgame">
           <div class="gh-group-title">Official results (EA stats token)</div>
-          <p class="field-hint" style="margin:0 0 8px;">EA sends a stats token with your tournament codes (in the .csv). Once EA has approved it
-            (register it at <code>apex.seatlon.eu/add</code>), it returns the official placement, kills and damage for every match played
-            with those codes. The in-match kill count is not reliable, so use these for final standings. Works on any PC: no observer client needed.</p>
+          <p class="gh-hint">Placement, kills and damage from EA for every match played with your tournament codes. Use these for final standings: the in-match kill count is not reliable.</p>
           <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
             <input type="password" id="apex-stats-token" class="input-text" placeholder="Paste your stats token" autocomplete="off" style="flex:1; min-width:220px;">
             <button type="button" class="btn btn-secondary btn-sm" id="apex-save-token">Save</button>
@@ -9349,7 +9348,10 @@
             <input type="file" id="apex-import-file" accept=".json,application/json" hidden>
             <span id="apex-pg-last" class="field-hint" style="margin:0;"></span>
           </div>
-          <p class="field-hint" style="margin:6px 0 0;">No connection from this PC? Open <code>r5-crossplay.r5prod.stryder.respawn.com/privatematch/?token=</code> followed by your token in a browser, save the page as a .json file and import it.</p>
+          <details class="gh-guide"><summary>Where the token comes from</summary><div class="gh-guide-body">
+            <p style="margin:0 0 6px;">EA sends a stats token with your tournament codes (in the .csv). It returns results once EA has approved it: register it at <code>apex.seatlon.eu/add</code>. Works on any PC: no observer client needed.</p>
+            <p style="margin:0;">No connection from this PC? Open <code>r5-crossplay.r5prod.stryder.respawn.com/privatematch/?token=</code> followed by your token in a browser, save the page as a .json file and use Import results file.</p>
+          </div></details>
           <div id="apex-pg-list" style="font-size:12px; color:var(--muted); margin-top:8px;"></div>
         </div>
       </div>
@@ -9364,8 +9366,6 @@
           <button type="button" class="btn btn-secondary btn-sm" id="apex-save-event">Save</button>
         </div>
         </div>
-      </div>
-      <div class="gh-pane" data-gtab="match">
         <div class="gh-group">
           <div class="gh-group-title">Team identity</div>
           <p class="gh-hint">Logos, tags and colours come from your Teams library, matched to the names Apex reports. Bind any that don't match. These are the squads from the current or last lobby.</p>

@@ -376,10 +376,9 @@ const OVERLAY_LAYOUTS = {
   ],
   'apex': [
     { id: 'apex-hud',      name: 'Apex BR HUD',      path: '/apex.html' },
-    { id: 'apex-observer', name: 'Apex Observer HUD', path: '/apex-observer.html' },
-    { id: 'br-leaderboard', name: 'BR Series Leaderboard', path: '/br-leaderboard.html' },
-    { id: 'br-rail',        name: 'BR Standings Rail',     path: '/br-rail.html' },
-    { id: 'br-match',       name: 'BR Match Result',       path: '/br-match.html' }
+    { id: 'apex-observer', name: 'Apex Observer HUD', path: '/apex-observer.html' }
+    // No br-* boards here: they draw the lobby board (state.br), which Apex never fills. Its standings
+    // come from LiveAPI + the stats token (state.apex) and show on the two Apex overlays above.
   ],
   // Fortnite has no third-party live match feed, so its series is scored from a Google Sheet or the
   // manual grid (see state.br) — the br-* scenes render whatever the scoring engine derived.

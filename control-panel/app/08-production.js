@@ -1626,14 +1626,20 @@ const SCENE_GAME_TAGS = {
 const SCENE_FEATURE_TAGS = {
   '/fgc/default/template.html': ['fgc'], '/fgc/default-img/template.html': ['fgc'],
   '/mapscreen.html': ['vetoes'], '/draft.html': ['draft', 'heroes', 'agents'],
-  '/br-leaderboard.html': ['battle-royale'], '/br-rail.html': ['battle-royale'], '/br-match.html': ['battle-royale'],
+  // The BR boards read the lobby board (state.br), which only lobby games fill (BR_LOBBY_GAMES in
+  // server.js). Apex scores through its own feed and has its own overlays, so they are not offered there.
+  '/br-leaderboard.html': ['lobby'], '/br-rail.html': ['lobby'], '/br-match.html': ['lobby'],
 };
+// Head-to-head only: one team against another. A free-for-all game (format 'ffa': 20 squads in a
+// lobby) has nothing to put in them.
+const SCENE_H2H_ONLY = new Set(['/series.html', '/matchup.html']);
 function sceneBasePath(p) { return String(p || '').split('?')[0]; }
 function sceneFitsGame(path, st) {
   const p = sceneBasePath(path);
   const games = SCENE_GAME_TAGS[p], feats = SCENE_FEATURE_TAGS[p];
-  if (!games && !feats) return true;
   const gid = st && st.activeGame;
+  if (gid && SCENE_H2H_ONLY.has(p)) return (((st.games || {})[gid]) || {}).format !== 'ffa';
+  if (!games && !feats) return true;
   if (!gid) return true;
   if (games && games.includes(gid)) return true;
   const f = ((((st.games || {})[gid]) || {}).features) || [];

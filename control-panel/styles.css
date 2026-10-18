@@ -833,7 +833,10 @@ textarea.input-text { background: var(--field); }
 .signature a:hover { text-decoration: underline; }
 
 /* ─── Scrollbar ──────────────────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 6px; }
+/* Electron 44 (Chromium 121+): a standard scrollbar-width / scrollbar-color on an element turns
+   these off for it and draws the light system scrollbar with arrows instead, so leave those out
+   (scrollbar-width: none, to hide one, is fine). */
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
@@ -8364,7 +8367,6 @@ body.sides-swapped .qrail-head { flex-direction: row-reverse; }
   flex: 1; overflow-y: auto;
   padding: 8px;
   display: flex; flex-direction: column; gap: 5px;
-  scrollbar-width: thin;
 }
 .fe-actions-scroll { /* right column actions — can grow forever */ }
 
@@ -8979,7 +8981,7 @@ body.perf-noanim *, body.perf-noanim *::before, body.perf-noanim *::after {
 .dbk-logo img { width: 100%; height: 100%; object-fit: contain; }
 .dbk-logo.is-empty { color: var(--muted); }
 .dbk-name { font-size: 13px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
-.dbk-sponsors { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; padding: 2px 0; scrollbar-width: thin; }
+.dbk-sponsors { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
 .dbk-sponsors::-webkit-scrollbar { height: 5px; }
 .dbk-sponsors::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); border-radius: 3px; }
 .dbk-sponsor { height: 26px; max-width: 90px; object-fit: contain; flex-shrink: 0; border-radius: 3px; background: var(--white-a05); padding: 2px 4px; }
@@ -10043,7 +10045,7 @@ body.perf-noanim *, body.perf-noanim *::before, body.perf-noanim *::after {
    min-content — so the one-line tab strip (12 tabs once Data source was added) widened the whole
    editor past the page and under the quick rail. The track may shrink; the strip scrolls instead. */
 .lg-main { min-width: 0; }
-.lg2-tabs { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.lg2-tabs { overflow-x: auto; overflow-y: hidden; }
 .lg2-tab { white-space: nowrap; flex-shrink: 0; }
 .lg2-tabs::-webkit-scrollbar { height: 3px; }
 .lg2-tabs::-webkit-scrollbar-track { background: transparent; }
@@ -10058,7 +10060,7 @@ body.perf-noanim *, body.perf-noanim *::before, body.perf-noanim *::after {
 .qrail-collapse { width: 26px; height: 24px; font-size: 13px; background: transparent; border-color: var(--border); color: var(--muted); }
 
 /* Body: thinner padding, a thin overlay-style scrollbar instead of a wide dark gutter. */
-.qrail-body { padding: 10px 12px 24px; gap: 14px; scrollbar-width: thin; }
+.qrail-body { padding: 10px 12px 24px; gap: 14px; }
 .qrail-body::-webkit-scrollbar { width: 6px; }
 .qrail-body::-webkit-scrollbar-track { background: transparent; }
 .qrail-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,.1); border-radius: 6px; }
@@ -10400,7 +10402,7 @@ body.perf-noanim *, body.perf-noanim *::before, body.perf-noanim *::after {
 /* ════════ Games hub — shared picker + header card (games-hub.js, 2026-09-17) ════════
    Used by Settings ▸ Games and Dashboard ▸ Game Settings so both navigate games the same way. */
 .gh-picker { position: relative; margin: 0 0 14px; }
-.gh-picker .gp-row { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+.gh-picker .gp-row { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
 .gh-picker .gp-row::-webkit-scrollbar { height: 4px; }
 .gh-picker .gp-row::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 4px; }
 .gp-chip, .gp-more {
@@ -10759,7 +10761,7 @@ body.gfx-board-open { overflow: hidden; }
 .gh-side { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 12px 0; border-right: 1px solid var(--border);
   position: sticky; top: 0; align-self: start; max-height: calc(100vh - 220px); }
 .gh-side .ghl-search { height: 32px; font-size: 12.5px; padding: 0 10px; }
-.ghl-list { overflow-y: auto; display: flex; flex-direction: column; gap: 1px; margin-right: -6px; padding-right: 6px; scrollbar-width: thin; }
+.ghl-list { overflow-y: auto; display: flex; flex-direction: column; gap: 1px; margin-right: -6px; padding-right: 6px; }
 .ghl-group { font-size: 11px; font-weight: 600; color: var(--muted); padding: 10px 8px 4px; }
 .ghl-group:first-child { padding-top: 2px; }
 .ghl-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 8px; border: 0; border-radius: 7px;
