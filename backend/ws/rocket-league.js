@@ -6,7 +6,7 @@
 let
   autoSwitch, bridgeClients, broadcast, broadcastDirectorUpdate, broadcastFullState,
   clearPostGameBoard, logAuto, mergeDirectorRuntime, recordDirectorDecision, rlSpectatorUi,
-  sanitizeWorldsSidebar, saveAppState, scoreboardRoster, sendRlCommand, state,
+  sanitizeScorebarDrop, sanitizeWorldsSidebar, saveAppState, scoreboardRoster, sendRlCommand, state,
   triggerClipCapture, triggerRlHideNativeUi;
 let ctx;
 
@@ -123,6 +123,15 @@ const handlers = {
 
   set_worlds_sidebar(msg, ws) {
     state.worldsSidebar = sanitizeWorldsSidebar(msg.data || {});
+    saveAppState();
+    broadcastFullState();
+  },
+
+  // Scorebar drop-down (Settings > Games > Rocket League > Overlay): on/off, timing and the
+  // producer's own messages. Sent whole; sanitizeScorebarDrop keeps only what the HUD can show.
+  set_scorebar_drop(msg, ws) {
+    const d = msg.data || {};
+    state.scorebarDrop = sanitizeScorebarDrop({ ...state.scorebarDrop, ...d });
     saveAppState();
     broadcastFullState();
   },
@@ -283,7 +292,7 @@ module.exports = function createRocketLeagueHandlers(c) {
   ({
     autoSwitch, bridgeClients, broadcast, broadcastDirectorUpdate, broadcastFullState,
     clearPostGameBoard, logAuto, mergeDirectorRuntime, recordDirectorDecision, rlSpectatorUi,
-    sanitizeWorldsSidebar, saveAppState, scoreboardRoster, sendRlCommand, state,
+    sanitizeScorebarDrop, sanitizeWorldsSidebar, saveAppState, scoreboardRoster, sendRlCommand, state,
     triggerClipCapture, triggerRlHideNativeUi
   } = c);
   return handlers;

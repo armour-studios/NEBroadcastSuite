@@ -2087,17 +2087,108 @@ function renderAdSponsorPickers(data) {
     if (document.activeElement !== sel) sel.value = val;
     const box = el(p.custom); if (box) box.style.display = (sel.value === '__custom') ? 'block' : 'none';
   });
-  // Scorebar drop-down row: which brand sponsors drop and how often (set in the brand kit editor).
+  // Scorebar drop-down: which brand sponsors drop (ticked in the brand kit editor), then the rest.
   const ds = el('rls-drop-status');
   if (ds) {
-    const b = (data && data.brand) || {};
-    const drops = (Array.isArray(b.dropSponsors) ? b.dropSponsors : []).filter((s) => s && s.logo);
-    ds.textContent = !data || !data.brand ? 'No brand kit is active'
-      : !drops.length ? 'No sponsor has it yet'
-      : drops.map((s) => s.name || 'Sponsor').join(', ') + ' · every ' + (b.dropEvery || 120) + 's for ' + (b.dropHold || 12) + 's';
+    const drops = ((data && data.brand && data.brand.dropSponsors) || []).filter((s) => s && s.logo);
+    ds.textContent = !data || !data.brand ? 'No brand kit is active' : drops.length ? drops.map((s) => s.name || 'Sponsor').join(', ') : 'None ticked in this brand kit';
     ds.classList.toggle('is-on', drops.length > 0);
   }
+  renderScorebarDrop(data);
 }
+// ── Scorebar drop-down (Settings > Games > Rocket League > Overlay) ──────────
+// On/off, timing and the producer's own messages; brand sponsors ticked "Scorebar drop" go first.
+// The whole object is sent on every change (set_scorebar_drop). Text fields send as you type
+// (debounced) and the list is not redrawn while one of its fields has focus.
+let _sbd = { enabled: true, every: 120, hold: 12, messages: [] };
+let _sbdSig = '';
+let _sbdImgFor = null;   // message id waiting for the file picker
+function sbdSend() { send('set_scorebar_drop', JSON.parse(JSON.stringify(_sbd))); }
+let _sbdT = null;
+function sbdSendSoon() { clearTimeout(_sbdT); _sbdT = setTimeout(sbdSend, 400); }
+function renderScorebarDrop(data) {
+  const sd = (data && data.scorebarDrop) || null;
+  if (sd) _sbd = JSON.parse(JSON.stringify(sd));
+  const on = el('chk-sbdrop-on'); if (on && document.activeElement !== on) on.checked = _sbd.enabled !== false;
+  const ev = el('inp-sbdrop-every'); if (ev && document.activeElement !== ev) ev.value = _sbd.every || 120;
+  const hd = el('inp-sbdrop-hold'); if (hd && document.activeElement !== hd) hd.value = _sbd.hold || 12;
+  const box = el('sbdrop-msgs'); if (!box) return;
+  if (box.contains(document.activeElement)) return;
+  const sig = JSON.stringify((_sbd.messages || []).map((m) => [m.id, m.text, m.sub, m.on, (m.image || '').length]));
+  if (sig === _sbdSig) return;
+  _sbdSig = sig;
+  const msgs = _sbd.messages || [];
+  box.innerHTML = msgs.length ? '' : '<p class="rls-status" style="margin:0 0 6px;">No messages yet.</p>';
+  msgs.forEach((m) => {
+    const row = document.createElement('div');
+    row.className = 'sbdrop-msg' + (m.on === false ? ' is-off' : '');
+    row.dataset.id = m.id;
+    row.innerHTML =
+      '<label class="switch switch-sm" title="Show this message"><input type="checkbox" data-f="on"' + (m.on === false ? '' : ' checked') + '><span class="slider"></span></label>'
+      + '<span class="sbdrop-fields">'
+      +   '<input type="text" class="input-text" data-f="text" maxlength="60" placeholder="Message, e.g. Build your free portfolio" value="' + esc(m.text || '') + '">'
+      +   '<input type="text" class="input-text sbdrop-sub" data-f="sub" maxlength="60" placeholder="Second line (optional), e.g. gamrly.com" value="' + esc(m.sub || '') + '">'
+      + '</span>'
+      + (m.image
+        ? '<span class="sbdrop-img"><img src="' + m.image + '" alt=""><button type="button" class="btn btn-ghost btn-sm" data-act="img-clear" title="Remove the image">Remove image</button></span>'
+        : '<button type="button" class="btn btn-ghost btn-sm" data-act="img" title="Add a logo or QR code image">Add image</button>')
+      + '<button type="button" class="btn btn-ghost btn-sm sbdrop-del" data-act="del" title="Delete this message" aria-label="Delete this message">✕</button>';
+    box.appendChild(row);
+  });
+}
+function sbdMsg(id) { return (_sbd.messages || []).find((m) => m.id === id); }
+el('chk-sbdrop-on')?.addEventListener('change', function () { _sbd.enabled = this.checked; sbdSend(); });
+['inp-sbdrop-every', 'inp-sbdrop-hold'].forEach((id) => el(id)?.addEventListener('change', () => {
+  _sbd.every = Number(el('inp-sbdrop-every').value) || 120;
+  _sbd.hold = Number(el('inp-sbdrop-hold').value) || 12;
+  sbdSend();
+}));
+el('btn-sbdrop-add')?.addEventListener('click', () => {
+  if ((_sbd.messages || []).length >= 12) { showToast('Twelve messages is the most the drop-down holds.', '#fbbf24', 4000); return; }
+  const id = 'dm' + Math.random().toString(36).slice(2, 9);
+  _sbd.messages = (_sbd.messages || []).concat([{ id, text: '', sub: '', image: null, on: true }]);
+  _sbdSig = '';
+  renderScorebarDrop(null);
+  const inp = document.querySelector('#sbdrop-msgs .sbdrop-msg[data-id="' + id + '"] [data-f="text"]');
+  if (inp) inp.focus();
+  sbdSend();
+});
+el('sbdrop-msgs')?.addEventListener('input', (e) => {
+  const row = e.target.closest('.sbdrop-msg'); const f = e.target.dataset.f;
+  if (!row || (f !== 'text' && f !== 'sub')) return;
+  const m = sbdMsg(row.dataset.id); if (!m) return;
+  m[f] = e.target.value;
+  sbdSendSoon();
+});
+el('sbdrop-msgs')?.addEventListener('change', (e) => {
+  const row = e.target.closest('.sbdrop-msg'); if (!row || e.target.dataset.f !== 'on') return;
+  const m = sbdMsg(row.dataset.id); if (!m) return;
+  m.on = e.target.checked; row.classList.toggle('is-off', !m.on);
+  sbdSend();
+});
+el('sbdrop-msgs')?.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const row = b.closest('.sbdrop-msg'); const m = row && sbdMsg(row.dataset.id); if (!m) return;
+  if (b.dataset.act === 'img') { _sbdImgFor = m.id; const f = el('sbdrop-file'); if (f) { f.value = ''; f.click(); } return; }
+  if (b.dataset.act === 'img-clear') { m.image = null; }
+  if (b.dataset.act === 'del') {
+    if ((m.text || m.sub || m.image) && !(await appConfirm('Delete this message?', 'Delete'))) return;
+    _sbd.messages = _sbd.messages.filter((x) => x !== m);
+  }
+  _sbdSig = '';
+  renderScorebarDrop(null);
+  sbdSend();
+});
+el('sbdrop-file')?.addEventListener('change', async function () {
+  const file = this.files && this.files[0]; const m = _sbdImgFor && sbdMsg(_sbdImgFor);
+  _sbdImgFor = null;
+  if (!file || !m) return;
+  try { m.image = await fileToBase64(file, 400); } catch (er) { showToast('Could not read that image.', '#f56565', 5000); return; }
+  _sbdSig = '';
+  renderScorebarDrop(null);
+  sbdSend();
+});
+
 AD_PICKERS.forEach((p) => {
   const sel = el(p.pick); if (!sel) return;
   sel.addEventListener('change', function () {

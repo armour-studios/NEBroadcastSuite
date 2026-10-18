@@ -27,6 +27,7 @@ const STATE_SCHEMA = {
   rlHudHidden: S('live', false),
   rlReplayTransitions: S('live', 'plain', 'typed'),
   rlSponsorRoll: S('live', 'plain', 'typed'),
+  scorebarDrop: S('library', 'plain', 'custom'),   // RL HUD drop-down messages can carry an image (QR code)
   worldsSidebar: S('live', 'plain', 'custom'),
   worldsTicker: S('live', 'plain', 'typed'),
   rlScoreboardSeparate: S('live', 'plain', 'typed'),

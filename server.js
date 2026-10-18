@@ -688,6 +688,10 @@ let state = {
   view: 'hud',              // 'hud' | 'scoreboard' | 'goal'
   rlHudHidden: false,       // manual "hide UI" — blanks the live RL HUD overlay for a clean feed (not persisted)
   rlReplayTransitions: true,   // play the animated shutter-slam replay intro/outro (+ Brazil flag) on the RL overlays; off = no wipe, HUD just hides/shows for the replay (persisted)
+  // RL HUD scorebar drop-down (Settings > Games > Rocket League > Overlay): a card slides out under
+  // the scorebar every `every` seconds for `hold`. It shows the active brand's 'drop' sponsors, then
+  // these producer messages (text, optional second line and image such as a QR code), in turn.
+  scorebarDrop: { enabled: true, every: 120, hold: 12, messages: [] },
   rlSponsorRoll: false,        // occasionally roll the title-sponsor tab out from behind the bottom-right statcard on the RL HUD (persisted)
   // optional RLCS-style stats sidebar on the Worlds overlay (rl-worlds.html): ranked rows the producer
   // fills manually or pulls from league standings / series stats (persisted)
@@ -2563,6 +2567,34 @@ const PACKAGE_FIELDS = ['sponsorLabel', 'presentedLabel', 'sponsorInterval', 'sp
 
 // Worlds overlay stats sidebar: clamp to a small, safe shape (≤10 ranked rows) so it can ride the
 // live broadcast tier without bloating it. Logos are optional and kept only when a data: or short URL.
+// Scorebar drop-down settings + messages (state.scorebarDrop). A message needs text or an image.
+function sanitizeScorebarDrop(o) {
+  o = (o && typeof o === 'object') ? o : {};
+  const every = Math.min(900, Math.max(30, Math.round(Number(o.every) || 120)));
+  const hold = Math.min(60, Math.max(5, Math.round(Number(o.hold) || 12)));
+  const messages = (Array.isArray(o.messages) ? o.messages : []).slice(0, 12).map((m) => {
+    m = (m && typeof m === 'object') ? m : {};
+    const img = (typeof m.image === 'string' && /^data:image\//.test(m.image) && m.image.length < 600000) ? m.image : null;
+    return {
+      id: String(m.id || ('dm' + Math.random().toString(36).slice(2, 9))).slice(0, 20),
+      text: String(m.text == null ? '' : m.text).slice(0, 60),
+      sub: String(m.sub == null ? '' : m.sub).slice(0, 60),
+      image: img,
+      on: m.on !== false,
+    };
+  });
+  return { enabled: o.enabled !== false, every, hold: Math.min(hold, every - 5), messages };
+}
+// What the drop-down rotates through, in order: brand sponsors first, then the producer's messages.
+// overlay/rl-hud.html builds the same list in the same order, so dropSlot() indexes agree.
+function scorebarDropItems(brand) {
+  const sd = state.scorebarDrop || {};
+  if (sd.enabled === false) return [];
+  const sponsors = ((brand && brand.dropSponsors) || []).filter((x) => x && x.logo).map((x) => ({ sponsor: x }));
+  const msgs = (sd.messages || []).filter((m) => m && m.on !== false && (m.text || m.image)).map((m) => ({ message: m }));
+  return sponsors.concat(msgs);
+}
+
 function sanitizeWorldsSidebar(s) {
   s = s || {};
   const src = ['manual', 'standings', 'series'].includes(s.source) ? s.source : 'manual';
@@ -2659,7 +2691,8 @@ function capturePackageSnapshot() {
       rlReplayTransitions: state.rlReplayTransitions !== false,
       rlSponsorRoll: !!state.rlSponsorRoll,
       worldsTicker: state.worldsTicker !== false,
-      worldsSidebar: { title: (state.worldsSidebar || {}).title || '', subtitle: (state.worldsSidebar || {}).subtitle || '' }
+      worldsSidebar: { title: (state.worldsSidebar || {}).title || '', subtitle: (state.worldsSidebar || {}).subtitle || '' },
+      scorebarDrop: JSON.parse(JSON.stringify(state.scorebarDrop || {}))
     }
   };
 }
@@ -2769,6 +2802,7 @@ function applyOverlayLook(o) {
     const t = str(o.worldsSidebar.title, 60), sub = str(o.worldsSidebar.subtitle, 80);
     state.worldsSidebar = { ...state.worldsSidebar, ...(t != null ? { title: t } : {}), ...(sub != null ? { subtitle: sub } : {}) };
   }
+  if (o.scorebarDrop && typeof o.scorebarDrop === 'object' && typeof sanitizeScorebarDrop === 'function') state.scorebarDrop = sanitizeScorebarDrop(o.scorebarDrop);
 }
 
 // Migrate a kit in place: guarantee a packages[] array + a valid activePackageId.
@@ -2939,10 +2973,12 @@ function adProofOnAir(brand, elapsed) {
   if (state.casters && state.casters.visible) (brand.deskSponsors || []).forEach((s) => out.push({ sponsor: s, placement: 'desk' }));
   if (state.banner && state.banner.visible) (brand.bannerSponsors || []).forEach((s) => out.push({ sponsor: s, placement: 'banner' }));
   // Scorebar drop-down: up on the gameplay HUD (not a replay or the post-game board) on its timer.
-  const drops = brand.dropSponsors || [];
+  // Only sponsors count; the producer's own messages take a turn but are nobody's screen time.
+  const drops = scorebarDropItems(brand);
   if (live && drops.length && (state.view || 'hud') === 'hud' && state.activeGame === 'rocket-league') {
-    const i = dropSlot(Date.now(), brand.dropEvery, brand.dropHold, drops.length);
-    if (i >= 0) out.push({ sponsor: drops[i], placement: 'drop' });
+    const sd = state.scorebarDrop || {};
+    const i = dropSlot(Date.now(), sd.every, sd.hold, drops.length);
+    if (i >= 0 && drops[i].sponsor) out.push({ sponsor: drops[i].sponsor, placement: 'drop' });
   }
   // Single-logo ad slots — on-air when their moment/scene is live.
   const gfx = typeof state.gfxActive === 'string' ? state.gfxActive : '';
@@ -4096,6 +4132,7 @@ function loadState() {
       if (state.fontFamily === 'Bourgeois') state.fontFamily = 'Industry';
       if (typeof saved.followSetGame === 'boolean') state.followSetGame = saved.followSetGame;
       if (saved.worldsSidebar && typeof saved.worldsSidebar === 'object') state.worldsSidebar = sanitizeWorldsSidebar(saved.worldsSidebar);
+      if (saved.scorebarDrop && typeof saved.scorebarDrop === 'object') state.scorebarDrop = sanitizeScorebarDrop(saved.scorebarDrop);
       // Merged field-by-field, not assigned wholesale: a state.json written before this feature
       // existed has no seriesStats at all, and one written by a newer build must not be able to
       // drop `games` into a non-array and break the overlay's reduce.
@@ -6153,6 +6190,7 @@ function libraryData() {
     banner: bannerForBroadcast(),
     mainBanner: state.banner,
     bracket: state.bracket,   // manual bracket (embedded team logos) — backfilled by bracket overlay + panel
+    scorebarDrop: state.scorebarDrop,   // RL HUD drop-down messages (may carry a QR / image)
     replay: state.replay,     // replay-monitor thumbnails — backfilled by the replays page
     crew: state.crew || [],   // unified crew profiles (hosts/guests/casters/observers)
     leagues: state.leagues || [],   // league rosters/standings (base64 team logos) — control panel only
@@ -6231,6 +6269,7 @@ function librarySig() {
     + '|pp:' + playerProfilesVer + '|bk:' + brandKitsVer + '|st:' + savedTeamsVer
     + '|lgv:' + leaguesVer + '|clv:' + clipsVer + '|eov:' + eventOpsVer + '|qv:' + questionsVer + '|ccv:' + cloudCompetitionsVer + '|cov:' + customOverlaysVer
     + '|gcv:' + gameConfigsVer
+    + '|sd:' + lite(state.scorebarDrop)
     // Belt AND braces: the explicit counter plus cheap content facts, so a missed touchMyEvents()
     // still can't strand the panel on a stale roster.
     + '|mev:' + myEventsVer + ':' + (state.myEvents || []).length
@@ -16222,7 +16261,7 @@ registerWsHandlers(require('./backend/ws/other-games')({
 registerWsHandlers(require('./backend/ws/rocket-league')({
   autoSwitch, bridgeClients, broadcast, broadcastDirectorUpdate, broadcastFullState,
   clearPostGameBoard, logAuto, mergeDirectorRuntime, recordDirectorDecision, rlSpectatorUi,
-  sanitizeWorldsSidebar, saveAppState, scoreboardRoster, sendRlCommand, state,
+  sanitizeScorebarDrop, sanitizeWorldsSidebar, saveAppState, scoreboardRoster, sendRlCommand, state,
   triggerClipCapture, triggerRlHideNativeUi,
   get _boardShownAt() { return _boardShownAt; }, set _boardShownAt(v) { _boardShownAt = v; },
   get directorEngine() { return directorEngine; }, set directorEngine(v) { directorEngine = v; },

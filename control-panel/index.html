@@ -1460,11 +1460,32 @@
           <div data-ad-picker="replay-outro"></div>
           <div data-ad-picker="sbad-logo"></div>
         </div>
-        <div class="rls-row rls-drop">
-          <div class="rls-k"><b>Scorebar drop-down</b><small>A sponsor card that drops out under the scorebar on a timer</small></div>
+      </section>
+
+      <section class="rls-sec" id="rls-drop-sec">
+        <h4 class="rls-hd">Scorebar drop-down
+          <span class="rls-hd-note">A card that slides out under the scorebar on a timer
+            <label class="switch" title="Turn the drop-down on or off"><input type="checkbox" id="chk-sbdrop-on" checked><span class="slider"></span></label></span></h4>
+        <div class="rls-row">
+          <div class="rls-k"><b>Timing</b><small>How often a card drops, and how long it stays</small></div>
+          <div class="rls-v rls-timing">
+            <span>Every</span><input type="number" id="inp-sbdrop-every" class="input-text rls-num" min="30" max="900" value="120" aria-label="Seconds between drops"><span>seconds, down for</span>
+            <input type="number" id="inp-sbdrop-hold" class="input-text rls-num" min="5" max="60" value="12" aria-label="Seconds down"><span>seconds</span>
+          </div>
+        </div>
+        <div class="rls-row">
+          <div class="rls-k"><b>Brand sponsors</b><small>Sponsors ticked Scorebar drop in the active brand kit go first</small></div>
           <div class="rls-v">
-            <span id="rls-drop-status" class="rls-status">No sponsor has it yet</span>
-            <button type="button" class="btn btn-secondary btn-sm js-goto-brands" title="In the brand kit editor, tick Scorebar drop on a sponsor, add its text, and set the timing under the sponsor list">Set up in Brand kits</button>
+            <span id="rls-drop-status" class="rls-status">None</span>
+            <button type="button" class="btn btn-ghost btn-sm js-goto-brands">Brand kits</button>
+          </div>
+        </div>
+        <div class="rls-row rls-row-top">
+          <div class="rls-k"><b>Your messages</b><small>Text, an optional second line and an optional image such as a QR code. They take turns after the sponsors.</small></div>
+          <div class="rls-v rls-msgs-col">
+            <div id="sbdrop-msgs" class="sbdrop-msgs"></div>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-sbdrop-add">+ Add message</button>
+            <input type="file" id="sbdrop-file" accept="image/*" hidden>
           </div>
         </div>
       </section>
@@ -7308,14 +7329,6 @@
     </div>
     <div id="sponsors-list" class="presets-list">
       <p class="empty-msg" id="sponsors-empty">No sponsors added.</p>
-    </div>
-    <div class="sponsor-drop-timing" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:10px 0 0; font-size:13px;" title="Sponsors tagged Scorebar drop take turns in a card that drops out under the Rocket League scorebar">
-      <span style="font-weight:600; color:#e0e0e0;">Scorebar drop-down:</span>
-      <span style="color:var(--muted);">drops every</span>
-      <input type="number" id="input-brand-drop-every" class="input-text" value="120" min="30" max="900" style="width:70px; padding:4px 8px;">
-      <span style="color:var(--muted);">seconds, stays down</span>
-      <input type="number" id="input-brand-drop-hold" class="input-text" value="12" min="5" max="60" style="width:60px; padding:4px 8px;">
-      <span style="color:var(--muted);">seconds</span>
     </div>
 
     <h4 style="margin:20px 0 4px; font-size:13px; color:#e0e0e0; border-top:1px solid rgba(255,255,255,0.08); padding-top:16px;">Sponsor Banner</h4>

@@ -11961,3 +11961,18 @@ body.gfx-board-open { overflow: hidden; }
 .rls-status.is-on { color: var(--text); font-weight: 600; }
 .rls-worlds { border-radius: 10px; }
 @media (max-width: 720px) { .rls-row { grid-template-columns: 1fr; gap: 8px; } }
+/* Scorebar drop-down section (RL Overlay tab): timing inline, messages as compact rows */
+.rls-row-top { align-items: start; }
+.rls-timing { gap: 8px; font-size: 13px; color: var(--muted); }
+.rls-num { width: 72px; padding: 5px 8px; }
+.rls-msgs-col { flex-direction: column; align-items: stretch; gap: 8px; }
+.rls-msgs-col > .btn { align-self: flex-start; }
+.sbdrop-msgs { display: flex; flex-direction: column; gap: 8px; }
+.sbdrop-msg { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,.02); }
+.sbdrop-msg.is-off { opacity: .55; }
+.sbdrop-fields { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+.sbdrop-fields .input-text { padding: 6px 9px; font-size: 13px; }
+.sbdrop-fields .sbdrop-sub { font-size: 12px; }
+.sbdrop-img { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.sbdrop-img img { width: 44px; height: 44px; object-fit: contain; background: #fff; border-radius: 4px; }
+.sbdrop-del { color: var(--muted); }

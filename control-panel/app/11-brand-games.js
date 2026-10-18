@@ -39,8 +39,6 @@ function flushEditorToPackage() {
   pkg.bannerImages = brandBannerImages;
   pkg.bannerCaptions = brandBannerCaptions;
   pkg.bannerInterval = Number(el('input-brand-banner-interval').value) || 10;
-  if (el('input-brand-drop-every')) pkg.dropEvery = Math.min(900, Math.max(30, Number(el('input-brand-drop-every').value) || 120));
-  if (el('input-brand-drop-hold')) pkg.dropHold = Math.min(60, Math.max(5, Number(el('input-brand-drop-hold').value) || 12));
   pkg.bannerSlant = el('select-brand-banner-slant')?.value || 'right';
   pkg.bannerHeader = el('input-brand-banner-header')?.value || '';
   pkg.replaySkin = brandReplaySkin;
@@ -57,8 +55,6 @@ function loadPackageIntoEditor(pkg) {
   el('input-brand-interval').value = pkg.sponsorInterval || 6;
   if (el('select-brand-sponsor-mode')) el('select-brand-sponsor-mode').value = pkg.sponsorMode === 'static' ? 'static' : 'cycle';
   el('input-brand-banner-interval').value = pkg.bannerInterval || 10;
-  if (el('input-brand-drop-every')) el('input-brand-drop-every').value = pkg.dropEvery || 120;
-  if (el('input-brand-drop-hold')) el('input-brand-drop-hold').value = pkg.dropHold || 12;
   if (el('select-brand-banner-slant')) el('select-brand-banner-slant').value = pkg.bannerSlant || 'right';
   if (el('input-brand-banner-header')) el('input-brand-banner-header').value = pkg.bannerHeader || '';
   brandReplaySkin = pkg.replaySkin || null;
@@ -223,7 +219,7 @@ const SPONSOR_SPOTS_UI = [
   { key: 'replayGoal',  label: 'Replay',       multi: false, desc: 'The logo on goal and highlight replays.' },
   { key: 'replayOutro', label: 'Replay outro', multi: false, desc: 'The logo at the end of each replay.' },
   { key: 'overtime',    label: 'Overtime',     multi: false, desc: 'The logo on the Overtime graphic when a game goes to overtime.' },
-  { key: 'drop',        label: 'Scorebar drop', multi: true, desc: 'A card that drops down under the Rocket League scorebar on a timer, above the round label. Use a logo or a QR code image, with an optional line of text.' },
+  { key: 'drop',        label: 'Scorebar drop', multi: true, desc: 'A card that drops down under the Rocket League scorebar on a timer, above the round label. Use a logo or a QR code image, with an optional line of text. The timer and your own text messages are in Settings > Games > Rocket League > Overlay.' },
 ];
 // Sponsor tiers: a tier is a preset of placements, so a producer picks "Title sponsor" instead of
 // working out nine checkboxes. Ticking a box by hand turns the sponsor into Custom. One-sponsor

@@ -212,8 +212,15 @@ img{display:block;}
 .sb-drop.down .sbd-card{transform:translateY(0);}
 .sbd-logo{max-height:52px;max-width:150px;object-fit:contain;}
 .sbd-logo[src=""]{display:none;}
+.sbd-logo[hidden]{display:none;}
+.sbd-txt{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:0;}
 .sbd-cta{font-size:15px;font-weight:800;line-height:1.12;text-align:center;max-width:170px;white-space:normal;}
-.sbd-cta:empty{display:none;}
+.sbd-sub{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#555;text-align:center;max-width:200px;}
+.sbd-cta:empty,.sbd-sub:empty{display:none;}
+.sbd-txt:has(.sbd-cta:empty):has(.sbd-sub:empty){display:none;}   /* own rule: an older OBS without :has() drops only this line */
+/* text-only message: wider line, a little larger */
+.sb-drop.text-only .sbd-cta{font-size:17px;max-width:300px;}
+.sb-drop.text-only .sbd-sub{max-width:300px;}
 .game-sub,.ot-subbar{transition:top .55s cubic-bezier(.2,.8,.25,1);}
 body.drop-down .game-sub,body.drop-down .ot-subbar{top:calc(102px + var(--drop-card-h,64px));}
 .gs-label{width:100%;height:21px;display:flex;align-items:center;justify-content:center;gap:8px;padding:0 16px;
@@ -1290,7 +1297,7 @@ body.sb-external #sb{display:none !important;}
 <!-- SCOREBAR DROP-DOWN: a sponsor card (logo or QR code + one line) that slides out from under the
      scorebar on the brand package's timer; the GAME label rides down beneath it while it is out. -->
 <div id="sb-drop" class="sb-drop" aria-hidden="true">
-  <div class="sbd-card"><img id="sbd-logo" class="sbd-logo" alt=""><span id="sbd-cta" class="sbd-cta"></span></div>
+  <div class="sbd-card"><img id="sbd-logo" class="sbd-logo" alt=""><span class="sbd-txt"><span id="sbd-cta" class="sbd-cta"></span><span id="sbd-sub" class="sbd-sub"></span></span></div>
 </div>
 <!-- GAME n of X sub-card (hangs below center) — label only. REPLACED by the red OVERTIME card during overtime. -->
 <div id="game-sub" class="game-sub">
@@ -2080,22 +2087,38 @@ function dropSlotAt(nowMs, every, hold, n){
   return (t % e) < h ? Math.floor(t/e) % n : -1;
 }
 let _dropIdx=-2;
+// Same list, same order as server.js scorebarDropItems(): brand 'drop' sponsors, then the producer's
+// messages from Settings > Games > Rocket League > Overlay (text, second line, optional image).
+function dropItems(){
+  const sd=(currentState && currentState.scorebarDrop) || {};
+  if(sd.enabled===false) return [];
+  const b=(currentState && currentState.brand) || {};
+  const sponsors=(Array.isArray(b.dropSponsors) ? b.dropSponsors : []).filter(s=>s && s.logo)
+    .map(s=>({ img:s.logo, text:(s.cta||'').trim(), sub:'', alt:s.name||'' }));
+  const msgs=(Array.isArray(sd.messages) ? sd.messages : []).filter(m=>m && m.on!==false && (m.text||m.image))
+    .map(m=>({ img:m.image||'', text:(m.text||'').trim(), sub:(m.sub||'').trim(), alt:'' }));
+  return sponsors.concat(msgs);
+}
+let _dropKey='';
 function tickDrop(){
   const box=el('sb-drop'); if(!box) return;
-  const b=(currentState && currentState.brand) || {};
-  const list=Array.isArray(b.dropSponsors) ? b.dropSponsors.filter(s=>s && s.logo) : [];
+  const sd=(currentState && currentState.scorebarDrop) || {};
+  const list=dropItems();
   const onHud=!currentState || !currentState.view || currentState.view==='hud';
-  const i = (DROP_OFF || !onHud || !list.length) ? -1 : dropSlotAt(Date.now(), b.dropEvery, b.dropHold, list.length);
-  if(i===_dropIdx) return;
-  _dropIdx=i;
-  if(i>=0){
-    const s=list[i], img=el('sbd-logo'), cta=el('sbd-cta');
-    if(img && img.getAttribute('src')!==s.logo) img.setAttribute('src', s.logo);
-    if(img) img.alt=s.name||'';
-    if(cta) cta.textContent=(s.cta||'').trim();
+  const i = (DROP_OFF || !onHud || !list.length) ? -1 : dropSlotAt(Date.now(), sd.every, sd.hold, list.length);
+  const it = i>=0 ? list[i] : null;
+  const key = it ? i+'|'+it.text+'|'+it.sub+'|'+(it.img||'').length : '';
+  if(key===_dropKey) return;
+  _dropKey=key;
+  if(it){
+    const img=el('sbd-logo'), cta=el('sbd-cta'), sub=el('sbd-sub');
+    if(img){ if(it.img){ if(img.getAttribute('src')!==it.img) img.setAttribute('src', it.img); img.hidden=false; } else { img.removeAttribute('src'); img.hidden=true; } img.alt=it.alt; }
+    if(cta) cta.textContent=it.text;
+    if(sub) sub.textContent=it.sub;
+    box.classList.toggle('text-only', !it.img);
   }
-  box.classList.toggle('down', i>=0);
-  document.body.classList.toggle('drop-down', i>=0);
+  box.classList.toggle('down', !!it);
+  document.body.classList.toggle('drop-down', !!it);
 }
 setInterval(tickDrop, 500);
 
@@ -2982,6 +3005,7 @@ function applyFullState(data){
   if(currentState){
     // brand===null is a REAL value (no kit active) — only carry forward when the key was omitted.
     if(data.brand===undefined && currentState.brand) data.brand=currentState.brand;
+    if(data.scorebarDrop===undefined && currentState.scorebarDrop) data.scorebarDrop=currentState.scorebarDrop;   // library channel
     if(currentState._goal && !data._goal) data._goal=currentState._goal;   // scoring team/logo for the replay accent lives here
     if(data.banner==null && currentState.banner) data.banner=currentState.banner;
     if(data.mainBanner==null && currentState.mainBanner) data.mainBanner=currentState.mainBanner;
