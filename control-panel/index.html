@@ -1388,7 +1388,7 @@
                   <button type="button" class="seg-btn" data-sbstyle="radar" title="Team comparison">Radar</button>
                   <button type="button" class="seg-btn" data-sbstyle="compare" title="Team totals w/ stat bar">Compare</button>
                 </div>
-                <p class="msp-hint">Switches the on-air board live — tap a style during the post-game to flip it.</p>
+                <p class="msp-hint">Tap a style during the post-game to switch the board on air.</p>
               </div>
 
               <!-- "Series player stats" (every game added up) lived here — pulled from Match▸Teams
@@ -1404,86 +1404,72 @@
                   <option value="cinema">Cinema — letterbox, scrolling type</option>
                   <option value="sweep">Sweep — angled panels, glitch type</option>
                 </select>
-                <p class="msp-hint">The full-screen wipe (and the Brazil flag) at the start of a goal replay, on every RL overlay that uses the shared transitions. Off = a clean cut, or use an OBS stinger instead — the HUD still hides for the replay either way.</p>
+                <p class="msp-hint">Off gives a clean cut (or use an OBS stinger). The HUD still hides for the replay.</p>
               </div>
 
             </div>
           </div>
         </div><!-- /#msp-rl-scenes -->
       </div>
-      <div class="gs-pane gs-cards" data-gspane="sponsors">
-      <!-- ── Overtime Ad Slot ── -->
-      <div class="adslot-panel gs-card" id="adslot-ot">
-        <h4 class="gs-card-title">Overtime</h4>
-        <p style="font-size:11px; color:var(--muted); margin-bottom:12px;">The center timer and the OVERTIME swipe during overtime. Sponsors come from the active brand kit (<button type="button" class="btn btn-ghost btn-sm js-goto-brands" style="padding:2px 8px; font-size:11px; vertical-align:baseline;">Brand kits</button>).</p>
-        <div class="field-row">
-          <label class="field-label" for="input-ot-label">Label / Sponsor Text</label>
-          <input type="text" id="input-ot-label" class="input-text" placeholder="OVERTIME">
-        </div>
-        <div style="display:flex; gap:18px; align-items:flex-end; flex-wrap:wrap;">
-          <div>
-            <label class="field-label" for="input-ot-bg">Bar Color</label>
-            <input type="color" id="input-ot-bg" value="#e0202a" style="width:48px; height:34px; padding:2px; border:none; background:none; cursor:pointer;">
+      <div class="gs-pane gs-rlset" data-gspane="sponsors">
+      <!-- Rocket League overlay wording, colours and sponsor slots: one list of labelled rows in two
+           groups. Sponsor logos are picked from the active brand kit (AD_PICKERS in
+           app/05-media-teams.js fills each data-ad-picker). Every id here is wired elsewhere. -->
+      <section class="rls-sec">
+        <h4 class="rls-hd">Wording and colours</h4>
+        <div class="rls-row">
+          <div class="rls-k"><b>Overtime</b><small>Center timer and the OVERTIME swipe</small></div>
+          <div class="rls-v">
+            <input type="text" id="input-ot-label" class="input-text rls-text" placeholder="OVERTIME" aria-label="Overtime label">
+            <label class="rls-swatch" title="Bar colour"><input type="color" id="input-ot-bg" value="#e0202a"><span>Bar</span></label>
+            <label class="rls-swatch" title="Text colour"><input type="color" id="input-ot-color" value="#ffffff"><span>Text</span></label>
           </div>
-          <div>
-            <label class="field-label" for="input-ot-color">Text Color</label>
-            <input type="color" id="input-ot-color" value="#ffffff" style="width:48px; height:34px; padding:2px; border:none; background:none; cursor:pointer;">
+        </div>
+        <div class="rls-row">
+          <div class="rls-k"><b>Replay</b><small>The tag and transition while a goal replay plays</small></div>
+          <div class="rls-v">
+            <input type="text" id="input-replay-label" class="input-text rls-text" placeholder="REPLAY" aria-label="Replay label">
+            <select id="select-replay-color" class="input-select rls-sel" aria-label="Replay colour">
+              <option value="team">Scoring team's colour</option>
+              <option value="brand">Brand colour</option>
+              <option value="mono">Black and white</option>
+            </select>
           </div>
-          <div style="flex:1; min-width:200px;" data-ad-picker="ot-logo"></div>
         </div>
-      </div>
-
-      <!-- ── Replay Ad Slot ── -->
-      <div class="adslot-panel gs-card" id="adslot-replay">
-        <h4 class="gs-card-title">Replay</h4>
-        <p style="font-size:11px; color:var(--muted); margin-bottom:12px;">Sponsor logo shown in the REPLAY transition and the replay tag while a goal replay is on.</p>
-        <div class="field-row">
-          <label class="field-label" for="input-replay-label">Replay Label</label>
-          <input type="text" id="input-replay-label" class="input-text" placeholder="REPLAY">
+        <div class="rls-row">
+          <div class="rls-k"><b>Presented by</b><small>Scorecard, desk and duorow overlays</small></div>
+          <div class="rls-v">
+            <input type="text" id="input-sbad-label" class="input-text rls-text rls-wide" placeholder="PRESENTED BY" aria-label="Presented by label">
+          </div>
         </div>
-        <div class="field-row">
-          <label class="field-label" for="select-replay-color">Text / Accent Color</label>
-          <select id="select-replay-color" class="input-select">
-            <option value="team">Team colour (follows Match-Teams team/brand)</option>
-            <option value="brand">Brand colour</option>
-            <option value="mono">Black &amp; white</option>
-          </select>
-        </div>
-        <div style="flex:1; min-width:200px; margin-bottom:14px;" data-ad-picker="replay-logo"></div>
-        <div style="flex:1; min-width:200px;">
-          <div data-ad-picker="replay-outro"></div>
-          <p style="font-size:11px; color:var(--muted); margin-top:5px;">Shown on the quick swipe after the replay. Falls back to the sponsor logo, then the brand-kit logo.</p>
-        </div>
-        <div style="flex:1; min-width:200px;">
-          <label class="field-label">Replay Transition Background</label>
-          <p style="font-size:11px; color:var(--muted); margin-top:5px;">Now set <strong>per brand profile</strong> so it swaps automatically with the active profile — upload it in the <strong>brand editor</strong> (Saved Brand Kits → edit → <em>Replay Transition Background</em>).</p>
-        </div>
-      </div>
-
-      <!-- ── Scoreboard Ad Slot ── -->
-      <div class="adslot-panel gs-card" id="adslot-sbad">
-        <h4 class="gs-card-title">Title sponsor label &amp; scorecard</h4>
-        <p style="font-size:11px; color:var(--muted); margin-bottom:12px;">Sponsor logo on the end-of-match scorecard (left on None, it uses the brand kit's title sponsor), plus the <strong>Label</strong> that sets the "Presented by" wording on the desk / duorow overlays too.</p>
-        <div class="field-row">
-          <label class="field-label" for="input-sbad-label">Label</label>
-          <input type="text" id="input-sbad-label" class="input-text" placeholder="PRESENTED BY">
-        </div>
-        <p style="font-size:11px; color:var(--muted); margin:-4px 0 12px;">Any phrase — e.g. "Presented by", "Sponsored by", "In partnership with". Applies to duorow + all desk overlays.</p>
-        <div style="flex:1; min-width:200px; margin-bottom:14px;" data-ad-picker="sbad-logo"></div>
-        <div style="flex:1; min-width:200px;">
-          <label class="field-label" for="input-sbad-bg">Scene Background (optional)</label>
-          <div style="display:flex; gap:8px; align-items:center;">
-            <input type="file" id="input-sbad-bg" accept="image/*" class="input-text" style="padding:6px;">
-            <img id="preview-sbad-bg" alt="" style="height:30px; max-width:54px; object-fit:cover; border-radius:3px; display:none;">
+        <div class="rls-row">
+          <div class="rls-k"><b>Scorecard background</b><small>Optional image behind the post-game scorecard</small></div>
+          <div class="rls-v">
+            <input type="file" id="input-sbad-bg" accept="image/*" class="input-text rls-file">
+            <img id="preview-sbad-bg" alt="" class="rls-thumb" style="display:none;">
             <button class="btn btn-ghost btn-sm" id="btn-sbad-bg-clear" type="button">Clear</button>
           </div>
         </div>
-      </div>
+      </section>
 
-      <!-- ── Worlds overlay extras (rl-worlds.html only) — one card, not three: ticker, title-sponsor
-           roll-out and the stats sidebar are all Worlds-specific toggles, so they live together
-           instead of each taking a full card slot. ── -->
-      <details class="adslot-panel gs-card gs-card-fold" id="adslot-worlds">
+      <section class="rls-sec">
+        <h4 class="rls-hd">Sponsor slots <span class="rls-hd-note">Logos come from the active brand kit. <button type="button" class="btn btn-ghost btn-sm js-goto-brands">Brand kits</button></span></h4>
+        <div class="rls-grid">
+          <div data-ad-picker="ot-logo"></div>
+          <div data-ad-picker="replay-logo"></div>
+          <div data-ad-picker="replay-outro"></div>
+          <div data-ad-picker="sbad-logo"></div>
+        </div>
+        <div class="rls-row rls-drop">
+          <div class="rls-k"><b>Scorebar drop-down</b><small>A sponsor card that drops out under the scorebar on a timer</small></div>
+          <div class="rls-v">
+            <span id="rls-drop-status" class="rls-status">No sponsor has it yet</span>
+            <button type="button" class="btn btn-secondary btn-sm js-goto-brands" title="In the brand kit editor, tick Scorebar drop on a sponsor, add its text, and set the timing under the sponsor list">Set up in Brand kits</button>
+          </div>
+        </div>
+      </section>
+
+      <details class="gs-card gs-card-fold rls-worlds" id="adslot-worlds">
         <summary><h4 class="gs-card-title">Worlds HUD extras</h4><span class="gs-fold-hint">Only for the Worlds HUD: scores ticker, sponsor roll-out, stats sidebar</span></summary>
         <p style="font-size:11px; color:var(--muted); margin-bottom:4px;">Extras specific to the <strong>Worlds</strong> HUD (rl-worlds.html) — on/off toggles, nothing to route or design elsewhere.</p>
 

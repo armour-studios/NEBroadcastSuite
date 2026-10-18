@@ -11936,3 +11936,28 @@ body.gfx-board-open { overflow: hidden; }
 .dash-gameset .gs-card-fold[open] > summary::before { transform: rotate(90deg); }
 .dash-gameset .gs-card-fold > summary .gs-card-title { margin: 0; }
 .gs-fold-hint { font-size: 11px; color: var(--muted); }
+/* Settings > Games > Rocket League > Overlay: wording, colours and sponsor slots as one list of
+   labelled rows (index.html data-gspane="sponsors"). Label left, controls right; stacks when narrow. */
+.gs-rlset:not([hidden]) { display: flex; flex-direction: column; gap: 14px; }
+.rls-sec { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 4px 16px 6px; }
+.rls-hd { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 10px 0 4px; font-size: 13px; font-weight: 700; color: var(--text); }
+.rls-hd-note { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 500; color: var(--muted); }
+.rls-row { display: grid; grid-template-columns: minmax(150px, 210px) 1fr; align-items: center; gap: 14px; padding: 11px 0; border-top: 1px solid var(--border); }
+.rls-hd + .rls-row { border-top: 0; }
+.rls-k { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rls-k b { font-size: 13px; font-weight: 600; color: var(--text); }
+.rls-k small { font-size: 11.5px; color: var(--muted); line-height: 1.35; }
+.rls-v { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.rls-text { flex: 1 1 160px; min-width: 120px; max-width: 260px; }
+.rls-text.rls-wide { max-width: 340px; }
+.rls-sel { flex: 0 1 220px; width: auto; min-width: 160px; }
+.rls-file { flex: 1 1 200px; min-width: 0; max-width: 300px; padding: 6px; }
+.rls-thumb { height: 30px; max-width: 54px; object-fit: cover; border-radius: 4px; }
+.rls-swatch { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.rls-swatch input[type="color"] { width: 34px; height: 30px; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: none; cursor: pointer; }
+.rls-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 16px; padding: 8px 0 12px; }
+.rls-grid .field-label { font-size: 12px; margin-bottom: 4px; }
+.rls-status { font-size: 12.5px; color: var(--muted); }
+.rls-status.is-on { color: var(--text); font-weight: 600; }
+.rls-worlds { border-radius: 10px; }
+@media (max-width: 720px) { .rls-row { grid-template-columns: 1fr; gap: 8px; } }

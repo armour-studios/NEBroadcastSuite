@@ -2016,10 +2016,10 @@ el('input-event')?.addEventListener('input', function() {
 // and this table generates + mounts the real markup into it (must run before the input/button
 // listeners below, which look up elements this creates).
 const AD_PICKERS = [
-  { pick: 'pick-ot-logo',      suffix: 'ot-logo',      slot: 'overtime',      field: 'logo',      msg: 'set_overtime',      label: 'Sponsor (from active brand)' },
-  { pick: 'pick-replay-logo',  suffix: 'replay-logo',  slot: 'replay',        field: 'logo',      msg: 'set_replay',        label: 'Sponsor — goal swipe (from active brand)' },
-  { pick: 'pick-replay-outro', suffix: 'replay-outro', slot: 'replay',        field: 'outroLogo', msg: 'set_replay',        label: 'Outro Logo — after replay (from active brand)' },
-  { pick: 'pick-sbad-logo',    suffix: 'sbad-logo',    slot: 'scoreboardAd',  field: 'logo',      msg: 'set_scoreboard_ad', label: 'Sponsor (from active brand)' },
+  { pick: 'pick-ot-logo',      suffix: 'ot-logo',      slot: 'overtime',      field: 'logo',      msg: 'set_overtime',      label: 'Overtime' },
+  { pick: 'pick-replay-logo',  suffix: 'replay-logo',  slot: 'replay',        field: 'logo',      msg: 'set_replay',        label: 'Goal replay' },
+  { pick: 'pick-replay-outro', suffix: 'replay-outro', slot: 'replay',        field: 'outroLogo', msg: 'set_replay',        label: 'After the replay' },
+  { pick: 'pick-sbad-logo',    suffix: 'sbad-logo',    slot: 'scoreboardAd',  field: 'logo',      msg: 'set_scoreboard_ad', label: 'Post-game scorecard' },
 ].map((p) => Object.assign(p, { custom: 'custom-' + p.suffix }));
 (function mountAdPickers() {
   AD_PICKERS.forEach((p) => {
@@ -2087,6 +2087,16 @@ function renderAdSponsorPickers(data) {
     if (document.activeElement !== sel) sel.value = val;
     const box = el(p.custom); if (box) box.style.display = (sel.value === '__custom') ? 'block' : 'none';
   });
+  // Scorebar drop-down row: which brand sponsors drop and how often (set in the brand kit editor).
+  const ds = el('rls-drop-status');
+  if (ds) {
+    const b = (data && data.brand) || {};
+    const drops = (Array.isArray(b.dropSponsors) ? b.dropSponsors : []).filter((s) => s && s.logo);
+    ds.textContent = !data || !data.brand ? 'No brand kit is active'
+      : !drops.length ? 'No sponsor has it yet'
+      : drops.map((s) => s.name || 'Sponsor').join(', ') + ' · every ' + (b.dropEvery || 120) + 's for ' + (b.dropHold || 12) + 's';
+    ds.classList.toggle('is-on', drops.length > 0);
+  }
 }
 AD_PICKERS.forEach((p) => {
   const sel = el(p.pick); if (!sel) return;
