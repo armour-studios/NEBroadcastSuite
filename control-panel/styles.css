@@ -11922,3 +11922,9 @@ body.gfx-board-open { overflow: hidden; }
 .tb-ad-btn:disabled { opacity: .5; cursor: not-allowed; }
 #tb-ad-target-row .tb-ad-menu-lbl { white-space: nowrap; }
 .sponsor-cta-input { width: 220px; padding: 4px 8px; font-size: 12px; }
+/* Line-up panel: Active / Bench per player (app/10-dashboard.js renderIntroRoster) */
+.intro-roster { display: flex; flex-direction: column; gap: 4px; }
+.intro-roster-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 3px 0; }
+.intro-roster-name { font-size: 13px; font-weight: 600; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.intro-roster-seg { flex-shrink: 0; }
+.intro-roster-seg .seg-btn { padding: 3px 10px; font-size: 12px; }

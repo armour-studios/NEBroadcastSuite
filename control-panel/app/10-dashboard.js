@@ -1841,6 +1841,9 @@ function applyProductionState(data) {
   if (intrFoot) intrFoot.checked = !!_intr.showFooter;
   const intrRealName = el('check-intro-realname');
   if (intrRealName) intrRealName.checked = !!_intr.showRealName;
+  const intrBench = el('check-intro-bench');
+  if (intrBench && document.activeElement !== intrBench) intrBench.checked = _intr.showBench !== false;
+  renderIntroRoster(data);
   // Same flag, mirrored into the Matchup panel so the producer can reach it from the graphic
   // they're actually setting up (Line-up, Bracket and Matchup all read intro.showRealName).
   const muRealName = el('check-matchup-realname');
@@ -2248,3 +2251,31 @@ el('btn-save-preset')?.addEventListener('click', () => {
   send('save_preset', { name });
   el('input-preset-name').value = '';
 });
+
+// Line-up panel: each player of the team the Line-up shows, with an Active / Bench switch. Same
+// status as the Starter / Sub button on the team cards (edit_player status 'starter' | 'sub'), so
+// benching someone here benches them everywhere. With Show bench off, benched players leave the
+// Line-up graphic.
+function renderIntroRoster(data) {
+  const box = el('intro-roster'); if (!box) return;
+  const side = (el('select-intro-side') && el('select-intro-side').value) || ((data.intro || {}).side) || 'blue';
+  const players = (((data.teams || {})[side] || {}).players || []).filter((p) => p && (p.name || p.gamerTag));
+  const sig = JSON.stringify([side, players.map((p) => [p.id, p.name || p.gamerTag, p.status])]);
+  if (box._sig === sig) return;
+  box._sig = sig;
+  if (!players.length) { box.innerHTML = '<p class="msp-hint" style="margin:0;">No players on this team yet. Add them on the team card.</p>'; return; }
+  box.innerHTML = players.map((p) => {
+    const bench = (p.status || '') === 'sub';
+    return '<div class="intro-roster-row"><span class="intro-roster-name">' + escapeHtml(p.name || p.gamerTag) + '</span>'
+      + '<span class="seg intro-roster-seg"><button type="button" class="seg-btn' + (bench ? '' : ' active') + '" data-id="' + escapeHtml(String(p.id || '')) + '" data-status="starter"' + (p.id ? '' : ' disabled') + '>Active</button>'
+      + '<button type="button" class="seg-btn' + (bench ? ' active' : '') + '" data-id="' + escapeHtml(String(p.id || '')) + '" data-status="sub"' + (p.id ? '' : ' disabled') + '>Bench</button></span></div>';
+  }).join('');
+  box.dataset.side = side;
+}
+el('intro-roster')?.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-status]'); if (!b || !b.dataset.id || b.classList.contains('active')) return;
+  const box = el('intro-roster');
+  send('edit_player', { side: box.dataset.side || 'blue', playerId: b.dataset.id, playerData: { status: b.dataset.status } });
+  b.parentElement.querySelectorAll('.seg-btn').forEach((x) => x.classList.toggle('active', x === b));
+});
+el('select-intro-side')?.addEventListener('change', () => { const box = el('intro-roster'); if (box) box._sig = ''; if (typeof currentState !== 'undefined' && currentState) renderIntroRoster(currentState); });

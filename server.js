@@ -870,7 +870,7 @@ let state = {
     // LoL champ-select automation — fills the board live from the League Client (LCU).
     auto: { enabled: false, status: 'off', statusDetail: '', lockfilePath: '' } },
   // Team-lineup / player-intro card scene. side = which team to feature ('blue'|'orange'); style = card variant.
-  intro: { visible: false, side: 'blue', title: '', style: 1, showFooter: false, showRealName: true },
+  intro: { visible: false, side: 'blue', title: '', style: 1, showFooter: false, showRealName: true, showBench: true },   // showBench off = Line-up shows active players only
   // (state.credits defined once near the top of this state object — sponsors/talent/visible together.)
   // Overtime ad slot — sellable sponsor slot shown on the overlay during OT.
   overtime: { label: 'OVERTIME', logo: null, bg: '#e0202a', color: '#ffffff' },
@@ -4235,7 +4235,8 @@ function loadState() {
           title: saved.intro.title || '',
           style: [1, 2].includes(Number(saved.intro.style)) ? Number(saved.intro.style) : 1,
           showFooter: false,  // always reset — was auto-true before; opt-in via checkbox now
-          showRealName: saved.intro.showRealName !== false   // was dropped on every restart (persist-roundtrip test)
+          showRealName: saved.intro.showRealName !== false,   // was dropped on every restart (persist-roundtrip test)
+          showBench: saved.intro.showBench !== false
         };
       }
       if (saved.owMatch && typeof saved.owMatch === 'object') {
@@ -4987,7 +4988,7 @@ function buildSaveSnapshot() {
     // Persist content for the momentary production graphics; visibility is reset on restart.
     winner: { side: state.winner.side, name: state.winner.name, logo: state.winner.logo, color: state.winner.color, subtitle: state.winner.subtitle, style: state.winner.style },
     veto: { title: state.veto.title, maps: state.veto.maps },
-    intro: { side: state.intro.side, title: state.intro.title, style: state.intro.style, showFooter: state.intro.showFooter, showRealName: state.intro.showRealName !== false },
+    intro: { side: state.intro.side, title: state.intro.title, style: state.intro.style, showFooter: state.intro.showFooter, showRealName: state.intro.showRealName !== false, showBench: state.intro.showBench !== false },
     owMatch: { visible: !!state.owMatch.visible, format: state.owMatch.format, currentMapIdx: state.owMatch.currentMapIdx, bansByMap: state.owMatch.bansByMap, attackSide: state.owMatch.attackSide || null, showAttack: !!state.owMatch.showAttack, gameMode: state.owMatch.gameMode || 'escort', showMapLabels: state.owMatch.showMapLabels !== false, mapWinners: Array.isArray(state.owMatch.mapWinners) ? state.owMatch.mapWinners : [], mapModes: Array.isArray(state.owMatch.mapModes) ? state.owMatch.mapModes : [], seriesLabel: state.owMatch.seriesLabel === 'bo' ? 'bo' : 'ft' },
     mrMatch: (function(){ const m=state.mrMatch||{}; return { visible: m.visible !== false, format: m.format || 'BO5', bansByMap: m.bansByMap || [], gameMode: m.gameMode || 'convergence', showMapLabels: m.showMapLabels !== false, mapWinners: Array.isArray(m.mapWinners)?m.mapWinners:[], mapModes: Array.isArray(m.mapModes)?m.mapModes:[], gepData: m.gepData||null }; })(),
     customOverlayLayouts: state.customOverlayLayouts || {},
@@ -14426,7 +14427,8 @@ registerWsHandlers({
       title: typeof i.title === 'string' ? i.title : (cur.title ?? ''),
       style: [1, 2].includes(Number(i.style)) ? Number(i.style) : (cur.style ?? 1),
       showFooter: ('showFooter' in i) ? !!i.showFooter : (cur.showFooter ?? false),
-      showRealName: ('showRealName' in i) ? !!i.showRealName : (cur.showRealName ?? false)
+      showRealName: ('showRealName' in i) ? !!i.showRealName : (cur.showRealName ?? false),
+      showBench: ('showBench' in i) ? !!i.showBench : (cur.showBench !== false)
     };
     // Keeps gfxActive in sync with .visible — see setExclusiveGfxVisible's own doc.
     if ('visible' in i) setExclusiveGfxVisible('intro', introVisible);

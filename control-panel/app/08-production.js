@@ -337,7 +337,8 @@ function introPayload(visible) {
     side: el('select-intro-side')?.value || 'blue',
     title: (el('input-intro-title')?.value || '').trim(),
     showFooter: el('check-intro-footer') ? !!el('check-intro-footer').checked : false,
-    showRealName: el('check-intro-realname') ? !!el('check-intro-realname').checked : false
+    showRealName: el('check-intro-realname') ? !!el('check-intro-realname').checked : false,
+    showBench: el('check-intro-bench') ? !!el('check-intro-bench').checked : true
   };
 }
 gfxAction('show', 'intro', () => send('set_intro', introPayload(true)), 'btn-show-intro');

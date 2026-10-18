@@ -1603,13 +1603,13 @@ function gfxShow(key) {
 
   const doIntroPreview = debounce(() => {
     if (typeof send !== 'function') return;
-    send('set_intro', { side: el('select-intro-side')?.value || 'blue', title: (el('input-intro-title')?.value || '').trim(), showFooter: el('check-intro-footer') ? !!el('check-intro-footer').checked : false, showRealName: el('check-intro-realname') ? !!el('check-intro-realname').checked : false });
+    send('set_intro', { side: el('select-intro-side')?.value || 'blue', title: (el('input-intro-title')?.value || '').trim(), showFooter: el('check-intro-footer') ? !!el('check-intro-footer').checked : false, showRealName: el('check-intro-realname') ? !!el('check-intro-realname').checked : false, showBench: el('check-intro-bench') ? !!el('check-intro-bench').checked : true });
   }, 350);
   ['select-intro-side', 'input-intro-title'].forEach((id) => {
     el(id)?.addEventListener('input', doIntroPreview);
     el(id)?.addEventListener('change', doIntroPreview);
   });
-  ['check-intro-footer', 'check-intro-realname'].forEach((id) => {
+  ['check-intro-footer', 'check-intro-realname', 'check-intro-bench'].forEach((id) => {
     el(id)?.addEventListener('change', doIntroPreview);
   });
 
