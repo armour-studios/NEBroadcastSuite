@@ -1007,7 +1007,8 @@ let state = {
     standings: [],                  // ALGS leaderboard: series points per team (computed from games + live)
     // Official post-game results from EA's stats token (backend/apex-postgame.js). The token itself
     // is a secret kept outside state; this only says whether one is saved and how the last pull went.
-    postgame: { hasToken: false, lastPullAt: 0, lastError: '', matches: [] },
+    // auto: pull again every few minutes while Apex is the active game (handlers in backend/ws/battle-royale.js).
+    postgame: { hasToken: false, lastPullAt: 0, lastError: '', matches: [], source: '', auto: { on: false, useForSeries: true } },
     squadsAlive: 0, squadsTotal: 0, playersAlive: 0,
     killfeed: [],
     winners: [],
@@ -4889,6 +4890,7 @@ function loadState() {
         if (a.event && typeof a.event === 'object') state.apex.event = { title: String(a.event.title || ''), match: String(a.event.match || ''), split: String(a.event.split || '') };
         if (Array.isArray(a.games)) state.apex.games = a.games;
         if (Number(a.port)) state.apex.port = Number(a.port);
+        if (a.autoPull && typeof a.autoPull === 'object') state.apex.postgame.auto = { on: !!a.autoPull.on, useForSeries: a.autoPull.useForSeries !== false };
       }
     }
   } catch (e) {
@@ -4942,7 +4944,7 @@ function buildSaveSnapshot() {
       liveMatch: (state.br.live && state.br.live.match) || 1
     },
     pointMatrices: state.pointMatrices || [],
-    apex: { scoring: state.apex && state.apex.scoring, scoringPresets: (state.apex && state.apex.scoringPresets) || [], teamMap: (state.apex && state.apex.teamMap) || {}, event: (state.apex && state.apex.event) || {}, games: (state.apex && state.apex.games) || [], port: (state.apex && state.apex.port) || 7777 },
+    apex: { scoring: state.apex && state.apex.scoring, scoringPresets: (state.apex && state.apex.scoringPresets) || [], teamMap: (state.apex && state.apex.teamMap) || {}, event: (state.apex && state.apex.event) || {}, games: (state.apex && state.apex.games) || [], port: (state.apex && state.apex.port) || 7777, autoPull: (state.apex && state.apex.postgame && state.apex.postgame.auto) || null },
     // Settings only. gepData/data are live payloads from a spectator client or MC server —
     // restoring a stale scoreboard on boot would be worse than starting empty.
     r6: { autoScore: !!(state.r6 && state.r6.autoScore) },

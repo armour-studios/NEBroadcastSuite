@@ -1110,6 +1110,12 @@ function applyApexState(data) {
         : (pg.lastError ? escapeHtml(pg.lastError) : (pg.lastPullAt ? 'No matches yet.' : ''));
     }
   }
+  const auto = el('apex-pg-auto');
+  if (auto && document.activeElement !== auto) auto.checked = !!(pg.auto && pg.auto.on);
+  const last = el('apex-pg-last');
+  if (last) last.textContent = pg.lastPullAt
+    ? 'Last ' + (pg.source === 'file' ? 'import' : 'pull') + ' ' + new Date(pg.lastPullAt).toLocaleTimeString()
+    : '';
   if (Array.isArray(data.savedTeams)) _apexSavedTeams = data.savedTeams;
   const conn = el('apex-conn');
   if (conn) {
@@ -1265,13 +1271,44 @@ function wireApexScoring() {
   el('apex-clear-token')?.addEventListener('click', () => {
     appConfirm('Remove the saved stats token?', 'Remove').then((ok) => { if (ok) send('apex_set_stats_token', { clear: true }); });
   });
+  // Pull, import and auto-pull can all replace the series games: ask first when there are
+  // live-recorded games to replace.
+  const confirmReplace = (series) => {
+    const live = ((currentState.apex && currentState.apex.games) || []).filter((g) => !g.official).length;
+    return series && live ? appConfirm('Replace the ' + live + ' game' + (live === 1 ? '' : 's') + ' recorded from the live feed with EA\'s official results?', 'Replace') : Promise.resolve(true);
+  };
   el('apex-pull-results')?.addEventListener('click', () => {
     const series = !!(el('apex-pg-series') && el('apex-pg-series').checked);
-    const go = () => { const st = el('apex-pg-status'); if (st) st.textContent = 'Asking EA...'; send('apex_pull_results', { useForSeries: series }); };
-    // Replacing recorded games is destructive: ask when there are live-recorded games to replace.
-    const live = ((currentState.apex && currentState.apex.games) || []).filter((g) => !g.official).length;
-    if (series && live) appConfirm('Replace the ' + live + ' game' + (live === 1 ? '' : 's') + ' recorded from the live feed with EA\'s official results?', 'Replace').then((ok) => { if (ok) go(); });
-    else go();
+    confirmReplace(series).then((ok) => {
+      if (!ok) return;
+      const st = el('apex-pg-status'); if (st) st.textContent = 'Asking EA...';
+      send('apex_pull_results', { useForSeries: series });
+    });
+  });
+  el('apex-pg-auto')?.addEventListener('change', (e) => {
+    const box = e.target; const on = !!box.checked;
+    const series = !!(el('apex-pg-series') && el('apex-pg-series').checked);
+    if (on && !(currentState.apex && currentState.apex.postgame && currentState.apex.postgame.hasToken)) {
+      box.checked = false; showToast('Save your stats token first.', '#fbbf24', 4000); return;
+    }
+    (on ? confirmReplace(series) : Promise.resolve(true)).then((ok) => {
+      if (!ok) { box.checked = false; return; }
+      send('apex_set_autopull', { on, useForSeries: series });
+    });
+  });
+  el('apex-import-results')?.addEventListener('click', () => { const f = el('apex-import-file'); if (f) { f.value = ''; f.click(); } });
+  el('apex-import-file')?.addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (file.size > 20e6) { showToast('That file is too large to be an Apex results file.', '#f56565', 6000); return; }
+    const series = !!(el('apex-pg-series') && el('apex-pg-series').checked);
+    confirmReplace(series).then((ok) => {
+      if (!ok) return;
+      file.text().then((text) => {
+        const st = el('apex-pg-status'); if (st) st.textContent = 'Importing...';
+        send('apex_import_results', { json: text, useForSeries: series });
+      }, () => showToast('Could not read that file.', '#f56565', 6000));
+    });
   });
 }
 

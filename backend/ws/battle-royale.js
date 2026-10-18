@@ -830,34 +830,42 @@ if (!Array.isArray(lg.brSeries)) lg.brSeries = [];
     const d = msg.data || {};
     const reply = (data) => sendWs(ws, { type: 'apex-postgame-result', data });
     if (!ctx.apexStatsToken) { reply({ ok: false, message: 'Paste your stats token first (it is in the .csv EA sent with your tournament codes).' }); return; }
-    (async () => {
-      const pg = state.apex.postgame = Object.assign({ matches: [] }, state.apex.postgame, { hasToken: true });
-      try {
-        const json = await apexPostgame.fetchPostGame(ctx.apexStatsToken);
-        // Keep the last raw answer: the format is not published, so the first real pull is checked against it.
-        try { if (ctx.dataDir) require('fs').writeFileSync(require('path').join(ctx.dataDir, 'apex-postgame-last.json'), JSON.stringify(json, null, 2)); } catch (e) {}
-        const matches = apexPostgame.parsePostGame(json);
-        pg.lastPullAt = Date.now();
-        pg.lastError = matches.length ? '' : 'No matches yet for this token.';
-        pg.matches = matches.map((m) => ({ id: m.id, startedAt: m.startedAt, map: m.map, mode: m.mode, teams: m.teams.length,
-          winner: (m.teams[0] && m.teams[0].name) || '', top: m.teams.slice(0, 3).map((t) => ({ name: t.name, kills: t.kills, placement: t.placement })) }));
-        if (matches.length && d.useForSeries) {
-          state.apex.games = apexPostgame.toSeriesGames(matches, apexLive.teamKeyOf);
-          if (ctx._apexAcc) ctx._apexAcc.games = state.apex.games.map((g) => ({ ...g }));
-          ctx._apexGamesSig = String(state.apex.games.length);
-          recomputeApexBroadcast();
-        }
-        saveAppState();
-        broadcastFullState();
-        reply({ ok: true, message: matches.length
-          ? 'Found ' + matches.length + ' match' + (matches.length === 1 ? '' : 'es') + (d.useForSeries ? '. The series now uses the official results.' : '.')
-          : 'EA returned no matches for this token yet. A new token only works once EA has approved it (register it at apex.seatlon.eu/add), and matches appear after they finish.' });
-      } catch (e) {
-        pg.lastError = (e && e.message) || 'Could not reach the EA stats server.';
-        broadcastFullState();
-        reply({ ok: false, message: pg.lastError });
-      }
-    })();
+    pullPostGame({ useForSeries: !!d.useForSeries }).then((r) => reply({ ok: true, message: r.count
+      ? 'Found ' + r.count + ' match' + (r.count === 1 ? '' : 'es') + (d.useForSeries ? '. The series now uses the official results.' : '.')
+      : 'EA returned no matches for this token yet. A new token only works once EA has approved it (register it at apex.seatlon.eu/add), and matches appear after they finish.' }),
+    (e) => reply({ ok: false, message: (e && e.message) || 'Could not reach the EA stats server.' }));
+  },
+
+  // The same results from a file: opening the privatematch URL in a browser downloads the JSON
+  // (the route Apex Legends Status and other tools document), so a producer whose PC cannot reach
+  // EA from the app, or who was sent the file, can still use it. data.json is the file's text.
+  apex_import_results(msg, ws) {
+    const d = msg.data || {};
+    const reply = (data) => sendWs(ws, { type: 'apex-postgame-result', data });
+    let json = d.json;
+    if (typeof json === 'string') {
+      if (json.length > 20e6) { reply({ ok: false, message: 'That file is too large to be an Apex results file.' }); return; }
+      try { json = JSON.parse(json.replace(/^﻿/, '')); } catch (e) { reply({ ok: false, message: 'That file is not JSON. Save the page EA shows for your stats token as a .json file and import that.' }); return; }
+    }
+    if (!json || typeof json !== 'object') { reply({ ok: false, message: 'Choose the results .json file first.' }); return; }
+    const r = applyPostGame(json, { useForSeries: !!d.useForSeries, source: 'file' });
+    reply(r.count
+      ? { ok: true, message: 'Imported ' + r.count + ' match' + (r.count === 1 ? '' : 'es') + (d.useForSeries ? '. The series now uses the official results.' : '.') }
+      : { ok: false, message: 'No matches found in that file. It should be the JSON EA returns for your stats token.' });
+  },
+
+  // Pull again every few minutes while Apex is the active game, so standings follow the
+  // official results as each match finishes without anyone pressing Pull.
+  apex_set_autopull(msg, ws) {
+    const d = msg.data || {};
+    const pg = state.apex.postgame = Object.assign({ matches: [] }, state.apex.postgame);
+    pg.auto = { on: !!d.on, useForSeries: d.useForSeries !== false };
+    saveAppState();
+    broadcastFullState();
+    sendWs(ws, { type: 'apex-postgame-result', data: { ok: true, message: pg.auto.on
+      ? 'Auto-pull is on: the app asks EA for new results every ' + Math.round(AUTO_PULL_MS / 60000) + ' minutes while Apex is the active game.'
+      : 'Auto-pull is off.' } });
+    if (pg.auto.on && ctx.apexStatsToken && state.activeGame === 'apex') autoPullTick(true);
   },
 
   apex_finalize_game(msg, ws) {
@@ -870,6 +878,55 @@ if (!Array.isArray(lg.brSeries)) lg.brSeries = [];
   },
 };
 
+// -- Apex official results (EA stats token) ----------------------------------------------------
+const AUTO_PULL_MS = 3 * 60 * 1000;
+let _pulling = null;
+
+// Parsed EA results -> state.apex.postgame (+ the series games when useForSeries). Returns { count }.
+function applyPostGame(json, { useForSeries, source }) {
+  const pg = state.apex.postgame = Object.assign({ matches: [] }, state.apex.postgame, { hasToken: !!ctx.apexStatsToken });
+  // Keep the last raw answer: the format is not published, so the first real one is checked against it.
+  try { if (ctx.dataDir) require('fs').writeFileSync(require('path').join(ctx.dataDir, 'apex-postgame-last.json'), JSON.stringify(json, null, 2)); } catch (e) {}
+  const matches = apexPostgame.parsePostGame(json);
+  pg.lastPullAt = Date.now();
+  pg.source = source;
+  pg.lastError = matches.length ? '' : 'No matches yet' + (source === 'file' ? ' in that file.' : ' for this token.');
+  pg.matches = matches.map((m) => ({ id: m.id, startedAt: m.startedAt, map: m.map, mode: m.mode, teams: m.teams.length,
+    winner: (m.teams[0] && m.teams[0].name) || '', top: m.teams.slice(0, 3).map((t) => ({ name: t.name, kills: t.kills, placement: t.placement })) }));
+  if (matches.length && useForSeries) {
+    state.apex.games = apexPostgame.toSeriesGames(matches, apexLive.teamKeyOf);
+    if (ctx._apexAcc) ctx._apexAcc.games = state.apex.games.map((g) => ({ ...g }));
+    ctx._apexGamesSig = String(state.apex.games.length);
+    recomputeApexBroadcast();
+  }
+  saveAppState();
+  broadcastFullState();
+  return { count: matches.length };
+}
+
+// One request at a time: a manual Pull during an auto-pull waits for the same answer.
+function pullPostGame({ useForSeries }) {
+  if (_pulling) return _pulling;
+  _pulling = apexPostgame.fetchPostGame(ctx.apexStatsToken)
+    .then((json) => applyPostGame(json, { useForSeries, source: 'token' }), (e) => {
+      const pg = state.apex.postgame = Object.assign({ matches: [] }, state.apex.postgame);
+      pg.lastError = (e && e.message) || 'Could not reach the EA stats server.';
+      broadcastFullState();
+      throw e;
+    })
+    .finally(() => { _pulling = null; });
+  return _pulling;
+}
+
+function autoPullTick(now) {
+  const pg = state.apex && state.apex.postgame;
+  if (!pg || !pg.auto || !pg.auto.on || !ctx.apexStatsToken || state.activeGame !== 'apex') return;
+  if (!now && Date.now() - (pg.lastPullAt || 0) < AUTO_PULL_MS) return;
+  // A failed pull still counts as a try, so a refused token is not asked again every minute.
+  pg.lastPullAt = Date.now();
+  pullPostGame({ useForSeries: pg.auto.useForSeries !== false }).catch(() => {});
+}
+
 module.exports = function createBattleRoyaleHandlers(c) {
   ctx = c;
   ({
@@ -881,5 +938,6 @@ module.exports = function createBattleRoyaleHandlers(c) {
     obsAppName, parseEventSlug, recomputeApexBroadcast, recomputeBrSeason, sanitizeBrEntrant,
     sanitizePointMatrix, saveAppState, sendWs, setExclusiveGfxVisible, state
   } = c);
+  setInterval(autoPullTick, 60 * 1000).unref();
   return handlers;
 };
