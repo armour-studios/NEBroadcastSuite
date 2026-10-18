@@ -58,9 +58,25 @@ const handlers = {
           }
         }
       }
+      // A different team: its start.gg seed and entrant id come from the LOADED event's entrant list,
+      // never from whoever was on this side before. The spread below used to carry both forward, so
+      // renaming a side or picking a team from the library kept the previous team's seed on the HUD
+      // (GOAT showed Arepassion's SEED 1). No match in the event = no seed, rather than a wrong one.
+      const sidePrev = String((state.teams[msg.data.side] || {}).name || '').trim().toLowerCase();
+      const sideNew = String(msg.data.name || '').trim().toLowerCase();
+      let seedFix = null;
+      if (sideNew !== sidePrev) {
+        const ev = ((state.startgg && state.startgg.eventTeams) || []).find((t) => t && String(t.name || '').trim().toLowerCase() === sideNew);
+        seedFix = {
+          seed: (ev && Number(ev.seed) > 0) ? Number(ev.seed) : 0,
+          entrantId: (ev && ev.startggId) ? String(ev.startggId) : '',
+          nameRaw: msg.data.name || '',
+        };
+      }
       // Preserve color/players already set for this side
       state.teams[msg.data.side] = {
         ...state.teams[msg.data.side],
+        ...(seedFix || {}),
         name: msg.data.name || '',
         logo: msg.data.logo || null
       };

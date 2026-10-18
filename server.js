@@ -7924,7 +7924,9 @@ async function syncStartGgSet(setId) {
         state.teams[side].players = src.players;
         gotRealRoster = true;
       }
-      if (!state.teams[side].seed && Number(src.seed) > 0) state.teams[side].seed = Number(src.seed);
+      // Seed fallback from THIS event's entrant list only: a library team's saved seed is from whichever
+      // event it was last imported with.
+      if (!state.teams[side].seed && et && Number(et.seed) > 0) state.teams[side].seed = Number(et.seed);
       if (src.org) state.teams[side].org = src.org;
     }
     // Nothing in the library for this entrant - build the roster from the SET's own participants.
