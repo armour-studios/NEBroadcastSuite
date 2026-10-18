@@ -15505,7 +15505,7 @@ function startHttpServer(baseDir) {
 
   require('./backend/http/twitch-channel')({
     app, bridgeClients, broadcast, broadcastFullState, buildLiveState, chatManager,
-    saveTwitchData, state,
+    cloud, saveTwitchData, state,
     get twitchClient() { return twitchClient; }, set twitchClient(v) { twitchClient = v; }
   });
 

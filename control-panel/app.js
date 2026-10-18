@@ -36792,11 +36792,127 @@ el('tb-ad-play')?.addEventListener('click', () => {
   renderAdChip();
   if (_adLocalTimer) clearTimeout(_adLocalTimer);
   _adLocalTimer = setTimeout(() => { _adLocalTimer = null; if (_adState.adBreak && Date.now() >= _adState.adBreakEndsAt - 2000) { _adState.adBreak = false; _adState.adBreakEndsAt = 0; renderAdChip(); } }, (length + 5) * 1000);
-  _adPost('/api/twitch/ad/run', { length }, `Running a ${label} Twitch ad break`, '#9147ff');
+  const target = adTarget(), on = adTargetName();
+  _adPost('/api/twitch/ad/run', { length, target }, `Running a ${label} Twitch ad break${on ? ' on ' + on : ''}`, '#9147ff');
 });
 el('tb-ad-snooze')?.addEventListener('click', () => {
-  _adPost('/api/twitch/ad/snooze', null, 'Snoozed the next Twitch ad', '#4ade80');
+  const target = adTarget(), on = adTargetName();
+  _adPost('/api/twitch/ad/snooze', target === 'org' ? { target } : null, 'Snoozed the next Twitch ad' + (on ? ' on ' + on : ''), '#4ade80');
 });
+// ── Our channel: ads on the organization's Twitch channel ─────────────────────
+// Twitch only lets the channel's own account run or snooze its ads, so an editor producing on the
+// org channel goes through the website, which holds the channel owner's permission (website
+// lib/studio/twitch-ads.ts, server /api/twitch/ad/org-status). When that channel is not the one this
+// app's Twitch login is on, ads default to it; the menu's "Run on" switches back.
+const _orgAds = { available: false, channel: null, why: '', canSnooze: false, schedule: null, mine: '', checkedAt: 0, signedIn: false };
+let _adTargetPick = '';   // '' = automatic
+function orgIsOtherChannel() {
+  return !!(_orgAds.available && _orgAds.channel && _orgAds.channel.login && _orgAds.channel.login.toLowerCase() !== String(_orgAds.mine || '').toLowerCase());
+}
+function adTarget() {
+  if (_adTargetPick === 'mine' || !_orgAds.available) return 'mine';
+  if (_adTargetPick === 'org') return 'org';
+  return orgIsOtherChannel() || !(currentState && currentState.twitch && currentState.twitch.connected) ? 'org' : 'mine';
+}
+function adTargetName() {
+  return adTarget() === 'org' && _orgAds.channel ? (_orgAds.channel.displayName || _orgAds.channel.login) : '';
+}
+function renderAdTarget() {
+  const row = el('tb-ad-target-row'), sel = el('tb-ad-target'), note = el('tb-ad-org-note');
+  if (row) row.style.display = orgIsOtherChannel() ? '' : 'none';
+  if (sel) {
+    const o = sel.querySelector('option[value="org"]');
+    if (o && _orgAds.channel) o.textContent = 'Our channel (' + (_orgAds.channel.displayName || _orgAds.channel.login) + ')';
+    const m = sel.querySelector('option[value="mine"]');
+    if (m) m.textContent = _orgAds.mine ? 'My channel (' + _orgAds.mine + ')' : 'My channel';
+    if (document.activeElement !== sel) sel.value = adTarget();
+  }
+  // Signed in to an org whose channel is not set up for ads yet: say what to do, in the menu.
+  if (note) { note.textContent = (!_orgAds.available && _orgAds.signedIn && _orgAds.why) ? _orgAds.why : ''; note.style.display = note.textContent ? '' : 'none'; }
+  const snz = el('tb-ad-snooze');
+  if (snz) snz.disabled = adTarget() === 'org' && !_orgAds.canSnooze;
+  // Our channel's schedule drives the chip when ads go there.
+  if (adTarget() === 'org' && _orgAds.schedule) {
+    _adState.nextAdAt = _orgAds.schedule.nextAdAt ? new Date(_orgAds.schedule.nextAdAt).getTime() : 0;
+    _adState.prerollUntil = _orgAds.schedule.prerollFreeSeconds ? Date.now() + _orgAds.schedule.prerollFreeSeconds * 1000 : 0;
+  }
+}
+async function refreshOrgAds(fresh) {
+  try {
+    const r = await fetch('http://127.0.0.1:3000/api/twitch/ad/org-status' + (fresh ? '?fresh=1' : ''));
+    const d = await r.json();
+    Object.assign(_orgAds, d || {}, { checkedAt: Date.now(), signedIn: !/^Sign in/.test((d && d.why) || '') });
+  } catch (e) { /* app server not up yet: try again next tick */ }
+  renderAdTarget();
+}
+el('tb-ad-target')?.addEventListener('change', function () { _adTargetPick = this.value; renderAdTarget(); });
+el('tb-adtimer')?.addEventListener('click', () => { if (Date.now() - _orgAds.checkedAt > 10000) refreshOrgAds(false); });
+setTimeout(() => refreshOrgAds(false), 4000);
+setInterval(() => { if (!document.hidden) refreshOrgAds(false); }, 60000);
+
+// ── Between series: a one-click ad break ──────────────────────────────────────
+// When a series is decided, a small bar offers an ad break on the channel the menu targets. It is
+// an offer only: nothing runs until the producer clicks (ads never auto-play), and it does not
+// appear while ads are switched off.
+let _seriesDoneKey = '', _seriesDoneAt = 0, _adBreakDismissed = '';
+const _adLenLabel = (n) => (n < 120 ? n + 's' : (n / 60) + 'm');
+function seriesDecided(d) {
+  const s = (d && d.series) || {};
+  const need = Math.max(1, Math.ceil((Number(d && d.bestOf) || 3) / 2));
+  const b = Number(s.blue) || 0, o = Number(s.orange) || 0;
+  if (Math.max(b, o) < need) return null;
+  const teams = d.teams || {};
+  const w = teams[b > o ? 'blue' : 'orange'] || {};
+  return { key: [b, o, (teams.blue && teams.blue.name) || '', (teams.orange && teams.orange.name) || ''].join('|'), winner: w.name || '' };
+}
+function adBreakBar() {
+  let bar = el('adbreak-bar');
+  if (bar) return bar;
+  bar = document.createElement('div');
+  bar.id = 'adbreak-bar';
+  bar.className = 'adbreak-bar';
+  bar.setAttribute('role', 'region');
+  bar.setAttribute('aria-label', 'Ad break');
+  bar.hidden = true;
+  bar.innerHTML = '<span class="adbreak-txt" id="adbreak-txt"></span>'
+    + '<span class="adbreak-lens">' + [60, 90, 120, 180].map((n) => '<button type="button" class="adbreak-len" data-len="' + n + '">' + _adLenLabel(n) + '</button>').join('') + '</span>'
+    + '<button type="button" class="adbreak-snooze" id="adbreak-snooze">Snooze</button>'
+    + '<button type="button" class="adbreak-close" id="adbreak-close">Not now</button>';
+  document.body.appendChild(bar);
+  bar.addEventListener('click', (e) => {
+    const len = e.target.closest('[data-len]');
+    const target = adTarget(), on = adTargetName();
+    if (len) {
+      if (!adsAreEnabled()) { showToast('Ads are turned off', '#c53030', 3000); return; }
+      const n = Number(len.dataset.len) || 90;
+      _adState.adBreak = true; _adState.adBreakEndsAt = Date.now() + n * 1000; renderAdChip();
+      _adPost('/api/twitch/ad/run', { length: n, target }, 'Running a ' + _adLenLabel(n) + ' ad break' + (on ? ' on ' + on : ''), '#9147ff');
+    } else if (e.target.closest('#adbreak-snooze')) {
+      _adPost('/api/twitch/ad/snooze', target === 'org' ? { target } : null, 'Snoozed the next ad' + (on ? ' on ' + on : ''), '#4ade80');
+    } else if (!e.target.closest('#adbreak-close')) return;
+    _adBreakDismissed = _seriesDoneKey;
+    bar.hidden = true;
+  });
+  return bar;
+}
+setInterval(() => {
+  const d = currentState;
+  if (!d) return;
+  const done = seriesDecided(d);
+  if (!done) { _seriesDoneKey = ''; const b0 = el('adbreak-bar'); if (b0) b0.hidden = true; return; }
+  if (done.key !== _seriesDoneKey) { _seriesDoneKey = done.key; _seriesDoneAt = Date.now(); }
+  const canRun = adsAreEnabled() && (adTarget() === 'org' ? _orgAds.available : !!(d.twitch && d.twitch.connected));
+  // Offered for five minutes after the series ends, unless already answered.
+  const show = canRun && _adBreakDismissed !== _seriesDoneKey && Date.now() - _seriesDoneAt < 5 * 60 * 1000 && !_adState.adBreak;
+  const bar = show ? adBreakBar() : el('adbreak-bar');
+  if (!bar) return;
+  if (show) {
+    const t = el('adbreak-txt');
+    if (t) t.textContent = (done.winner ? done.winner + ' take the series. ' : 'Series over. ') + 'Ad break on ' + (adTargetName() || 'your channel') + '?';
+    const sz = el('adbreak-snooze'); if (sz) sz.hidden = adTarget() === 'org' && !_orgAds.canSnooze;
+  }
+  bar.hidden = !show;
+}, 1000);
 
 // Ads on/off — server-backed gate (state.twitch.adsEnabled). When off, runCommercial is blocked
 // server-side, the Play button is disabled, and the chip shows "OFF". Synced from broadcast state.

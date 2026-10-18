@@ -126,6 +126,10 @@
         <span class="tb-stat tb-adstat tb-clickable" id="tb-adtimer" title="Twitch ads — click for controls" style="opacity:0.6;"><b id="tb-adtimer-n">—</b><span class="tb-adstat-lbl" id="tb-adtimer-lbl">AD</span></span>
         <div class="tb-ad-menu" id="tb-ad-menu" style="display:none;">
           <div class="tb-ad-menu-row"><span class="tb-ad-menu-lbl">Allow ads</span><label class="switch"><input type="checkbox" id="tb-ad-enabled"><span class="slider"></span></label></div>
+          <div class="tb-ad-menu-row" id="tb-ad-target-row" style="display:none;" title="Our channel runs through the website with the channel owner's permission, so editors can run its ads"><span class="tb-ad-menu-lbl">Run on</span>
+            <select id="tb-ad-target" class="tb-ad-sel"><option value="org">Our channel</option><option value="mine">My channel</option></select>
+          </div>
+          <div class="tb-ad-menu-note" id="tb-ad-org-note" style="display:none;"></div>
           <div class="tb-ad-menu-row"><span class="tb-ad-menu-lbl">Ad length</span>
             <select id="tb-ad-length" class="tb-ad-sel"><option value="30">30s</option><option value="60">1m</option><option value="90">1m 30s</option><option value="120">2m</option><option value="150">2m 30s</option><option value="180">3m</option></select>
           </div>

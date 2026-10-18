@@ -11903,3 +11903,21 @@ body.gfx-board-open { overflow: hidden; }
 .sw-setup-card .btn { align-self: flex-start; }
 .sw-tag { margin-left: 6px; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--surface3, rgba(255,255,255,.08)); color: var(--muted); }
 @media (max-width: 720px) { .sw-fields { grid-template-columns: 1fr; } }
+
+/* Between series: one-click ad break offer (app/17-twitch-games-chat.js adBreakBar). Sits above the
+   program bar; an offer only, it never runs an ad by itself. */
+.adbreak-bar { position: fixed; left: 50%; bottom: 76px; transform: translateX(-50%); z-index: 9000;
+  display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; white-space: nowrap; max-width: calc(100vw - 32px);
+  padding: 8px 10px 8px 14px; border-radius: 12px; background: #17131f; border: 1px solid rgba(145,71,255,.55);
+  box-shadow: 0 10px 30px rgba(0,0,0,.45); color: #ece9f5; font-size: 13px; font-weight: 600; }
+.adbreak-bar[hidden] { display: none; }
+.adbreak-txt { margin-right: 4px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.adbreak-lens { display: inline-flex; gap: 4px; }
+.adbreak-len { height: 30px; min-width: 44px; padding: 0 10px; border-radius: 8px; border: 0; background: #9147ff; color: #fff; font: inherit; font-weight: 700; cursor: pointer; }
+.adbreak-len:hover { filter: brightness(1.12); }
+.adbreak-snooze, .adbreak-close { height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--white-a12, rgba(255,255,255,.12)); background: transparent; color: #cfcbe0; font: inherit; cursor: pointer; }
+.adbreak-snooze:hover, .adbreak-close:hover { color: #fff; background: rgba(255,255,255,.06); }
+.adbreak-snooze[hidden] { display: none; }
+.tb-ad-menu-note { font-size: 11px; line-height: 1.4; color: var(--muted); padding: 0 2px 4px; max-width: 240px; }
+.tb-ad-btn:disabled { opacity: .5; cursor: not-allowed; }
+#tb-ad-target-row .tb-ad-menu-lbl { white-space: nowrap; }

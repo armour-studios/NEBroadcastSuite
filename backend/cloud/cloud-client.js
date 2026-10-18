@@ -281,6 +281,12 @@ async function addOrgSeat(orgId, { userId, role }) { _require(); try { const { d
 async function removeOrgSeat(orgId, seatId) { _require(); try { await _client().delete(`/api/orgs/${encodeURIComponent(orgId)}/broadcast-seats/${encodeURIComponent(seatId)}`); return true; } catch (e) { throw _err(e); } }
 
 // ── Camera sessions (website-hosted masked VDO links — see /cameras/[token]) ──
+// Twitch ads on the org's own channel (website lib/studio/twitch-ads.ts). Twitch only accepts the
+// broadcaster's token for ads, so an editor producing on the org channel asks the backend, which
+// holds the channel owner's token. GET -> { channel:{login,displayName}|null, why, canSnooze, schedule }.
+async function orgAdsStatus(orgId) { _require(); try { const { data } = await _client().get(`/api/orgs/${encodeURIComponent(orgId)}/twitch-ads`); return data; } catch (e) { throw _err(e); } }
+async function orgAdRun(orgId, length) { _require(); try { const { data } = await _client().post(`/api/orgs/${encodeURIComponent(orgId)}/twitch-ads`, { action: 'run', length }); return data; } catch (e) { throw _err(e); } }
+async function orgAdSnooze(orgId) { _require(); try { const { data } = await _client().post(`/api/orgs/${encodeURIComponent(orgId)}/twitch-ads`, { action: 'snooze' }); return data; } catch (e) { throw _err(e); } }
 async function listCameraFeeds(orgId) { _require(); try { const { data } = await _client().get(`/api/orgs/${encodeURIComponent(orgId)}/camera-sessions/active-feeds`); return data.feeds || []; } catch (e) { throw _err(e); } }
 
 // ── Pulse multiview (the org's live games — see overlay/pulse.html) ──────────
@@ -549,6 +555,7 @@ module.exports = {
   listProfiles, getProfile, saveProfile, deleteProfile, shareProfile,
   listOrgSeats, addOrgSeat, removeOrgSeat,
   listCameraFeeds,
+  orgAdsStatus, orgAdRun, orgAdSnooze,
   getMultiview, publishObservedGame, stopObservedGame,
   listStationFeeds,
   listStations,

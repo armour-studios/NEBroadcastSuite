@@ -4,14 +4,14 @@
 // read and written through ctx (twitchClient).
 let
   app, bridgeClients, broadcast, broadcastFullState, buildLiveState, chatManager,
-  saveTwitchData, state;
+  cloud, saveTwitchData, state;
 let ctx;
 
 module.exports = function registerTwitchChannelRoutes(c) {
   ctx = c;
   ({
     app, bridgeClients, broadcast, broadcastFullState, buildLiveState, chatManager,
-    saveTwitchData, state
+    cloud, saveTwitchData, state
   } = c);
 
   // ── Twitch Channel Management ─────────────────────────────────────────────
@@ -205,6 +205,15 @@ module.exports = function registerTwitchChannelRoutes(c) {
 
   // POST /api/twitch/ad/snooze — snooze the next scheduled ad
   app.post('/api/twitch/ad/snooze', async (req, res) => {
+    if (req.body && req.body.target === 'org') {
+      const orgId = orgIdForAds();
+      if (!orgId) return res.status(400).json({ error: 'Sign in with your organization to snooze its ads' });
+      try {
+        const out = await cloud.orgAdSnooze(orgId);
+        _orgAdsCache = null;
+        return res.json({ success: true, snooze: out, channel: out.channel });
+      } catch (e) { return res.status(e.status || 500).json({ error: e.message }); }
+    }
     if (!ctx.twitchClient || !state.twitch.connected) return res.status(400).json({ error: 'Twitch not connected' });
     try {
       console.log('[Twitch] Snoozing next ad');
@@ -220,9 +229,21 @@ module.exports = function registerTwitchChannelRoutes(c) {
   app.post('/api/twitch/ad/run', async (req, res) => {
     // Ads are producer-action ONLY: reject anything originating from the flow engine.
     if (req.headers['x-ne-flow']) return res.status(403).json({ error: 'Ads cannot be triggered by automations' });
-    if (!ctx.twitchClient || !state.twitch.connected) return res.status(400).json({ error: 'Twitch not connected' });
     if (state.twitch.adsEnabled === false) return res.status(409).json({ error: 'Ads are turned off' });
     const length = [30, 60, 90, 120, 150, 180].includes(Number(req.body && req.body.length)) ? Number(req.body.length) : 30;
+    // The organization's channel: run through the website with the channel owner's token (Twitch
+    // refuses an editor's own token for ads). Same gates as below: producer click only, ads on.
+    if (req.body && req.body.target === 'org') {
+      const orgId = orgIdForAds();
+      if (!orgId) return res.status(400).json({ error: 'Sign in with your organization to run its ads' });
+      try {
+        console.log('[Twitch] Running', length + 's commercial on the organization channel');
+        const out = await cloud.orgAdRun(orgId, length);
+        _orgAdsCache = null;
+        return res.json({ success: true, ad: out, channel: out.channel });
+      } catch (e) { return res.status(e.status || 500).json({ error: e.message }); }
+    }
+    if (!ctx.twitchClient || !state.twitch.connected) return res.status(400).json({ error: 'Twitch not connected' });
     try {
       console.log('[Twitch] Running', length + 's commercial');
       const result = await ctx.twitchClient.runCommercial(state.twitch.channelId, length);
@@ -230,6 +251,25 @@ module.exports = function registerTwitchChannelRoutes(c) {
     } catch (e) {
       console.error('[Twitch] runCommercial error:', e.message);
       res.status(500).json({ error: e.response?.data?.message || e.message });
+    }
+  });
+
+  // GET /api/twitch/ad/org-status — can this desk run ads on its organization's channel?
+  // { available, channel:{login,displayName}|null, why, canSnooze, schedule, mine } where mine is the
+  // login this app's Twitch connection uses, so the panel can tell "my channel" from "our channel".
+  // Cached briefly: the panel asks when the ad menu opens and once a minute.
+  app.get('/api/twitch/ad/org-status', async (req, res) => {
+    const mine = String(state.twitch.displayName || '').toLowerCase();
+    const orgId = orgIdForAds();
+    if (!orgId) return res.json({ available: false, channel: null, why: 'Sign in with your organization to run ads on its channel.', mine });
+    if (_orgAdsCache && _orgAdsCache.orgId === orgId && Date.now() - _orgAdsCache.at < 15000 && !req.query.fresh) return res.json({ ..._orgAdsCache.data, mine });
+    try {
+      const d = await cloud.orgAdsStatus(orgId);
+      const data = { available: !!d.channel, channel: d.channel || null, why: d.why || '', canSnooze: !!d.canSnooze, schedule: d.schedule || null };
+      _orgAdsCache = { orgId, at: Date.now(), data };
+      res.json({ ...data, mine });
+    } catch (e) {
+      res.json({ available: false, channel: null, why: e.status === 403 ? e.message : 'Could not reach the website to check the channel.', mine });
     }
   });
 
@@ -243,3 +283,13 @@ module.exports = function registerTwitchChannelRoutes(c) {
     res.json({ success: true, adsEnabled: enabled });
   });
 };
+
+// The signed-in organization (not the personal "user:<id>" workspace), or ''.
+let _orgAdsCache = null;
+function orgIdForAds() {
+  try {
+    if (!cloud || !cloud.authed()) return '';
+    const id = (cloud.getSession() || {}).workspaceId;
+    return id && !String(id).startsWith('user:') ? String(id) : '';
+  } catch (e) { return ''; }
+}
