@@ -257,6 +257,7 @@
     { n: 'Diagnostics / show timeline', w: 'Settings', k: 'diagnostics timeline log logs what happened debug stuck scene frozen wrong score troubleshoot problems errors health status history', to: { settings: 'diagnostics' } },
     { n: 'Appearance & Accent', w: 'Settings', k: 'theme colour color accent appearance dark light mode skin brand look', to: { settings: 'appearance', flash: 'settings-appearance' } },
     { n: 'Broadcast Defaults', w: 'Settings', k: 'default best of series overlay font clock defaults auto reload', to: { settings: 'broadcast', flash: 'settings-broadcast-defaults' } },
+    { n: 'Apex official results (EA stats token)', w: 'Game setup', k: 'apex stats token ea tournament codes post game results official placement kills seatlon algs', to: { game: 'apex:match', flash: 'apex-postgame' } },
     { n: 'Rocket League Automation', w: 'Settings', k: 'rl rocket league kickoff scene scoreboard replay transitions stats api pause auto save replay clip each goal post game cut casters after scoreboard', to: { game: 'rocket-league:automation' } },
     { n: 'Replays & Clips', w: 'Settings', k: 'replay buffer clips montage encoder folders staging', to: { settings: 'replays', flash: 'set-sec-replays' } },
     { n: 'Brand Kits', w: 'Settings', k: 'brand kit sponsors packages logo colours colors', to: { settings: 'brandkits', flash: 'set-sec-brandkits' } },
