@@ -317,6 +317,42 @@
     /* ── Stat columns (hidden unless .has-stats) ─────────────────────────── */
     .lh-sc { display: none; align-self: stretch; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
     .lh-rows.has-stats .lh-sc { display: flex; }
+
+    /* ── Fit: a roster longer than the screen steps down until it fits (fitRows below) ──
+       compact = shorter cards without socials / custom field; snug = shorter, name + real name;
+       tight = shorter still, name only;
+       two-col = tight cards in two columns. The left panel and the header never change. */
+    .lh-rows.is-compact, .lh-rows.is-tight { gap: 8px; }
+    .lh-rows.is-compact .lh-row { min-height: 104px; }
+    .lh-rows.is-compact .lh-hdr, .lh-rows.is-compact .lh-row { grid-template-columns: 6px 104px 1fr auto; }
+    .lh-rows.is-compact.has-stats .lh-hdr, .lh-rows.is-compact.has-stats .lh-row { grid-template-columns: 6px 104px 1fr auto 62px 62px 62px 76px; }
+    .lh-rows.is-compact .lh-avatar-wrap { width: 104px; height: 104px; }
+    .lh-rows.is-compact .lh-pname { font-size: 28px; }
+    .lh-rows.is-compact .lh-name-block { padding: 10px 18px; gap: 6px; }
+    .lh-rows.is-compact :is(.lh-socials-row, .lh-custom-row) { display: none; }
+
+    .lh-rows.is-snug { gap: 8px; }
+    .lh-rows.is-snug .lh-row { min-height: 92px; }
+    .lh-rows.is-snug .lh-hdr, .lh-rows.is-snug .lh-row { grid-template-columns: 6px 92px 1fr auto; }
+    .lh-rows.is-snug.has-stats .lh-hdr, .lh-rows.is-snug.has-stats .lh-row { grid-template-columns: 6px 92px 1fr auto 58px 58px 58px 72px; }
+    .lh-rows.is-snug .lh-avatar-wrap { width: 92px; height: 92px; }
+    .lh-rows.is-snug .lh-pname { font-size: 26px; }
+    .lh-rows.is-snug .lh-name-block { padding: 8px 18px; gap: 4px; }
+    .lh-rows.is-snug :is(.lh-socials-row, .lh-custom-row, .lh-country-row) { display: none; }
+
+    .lh-rows.is-tight .lh-row { min-height: 78px; }
+    .lh-rows.is-tight .lh-hdr, .lh-rows.is-tight .lh-row { grid-template-columns: 6px 78px 1fr auto; }
+    .lh-rows.is-tight.has-stats .lh-hdr, .lh-rows.is-tight.has-stats .lh-row { grid-template-columns: 6px 78px 1fr auto 56px 56px 56px 68px; }
+    .lh-rows.is-tight .lh-avatar-wrap { width: 78px; height: 78px; }
+    .lh-rows.is-tight .lh-avatar .init-text { font-size: 26px; }
+    .lh-rows.is-tight .lh-pname { font-size: 24px; }
+    .lh-rows.is-tight .lh-name-block { padding: 8px 16px; gap: 4px; }
+    .lh-rows.is-tight :is(.lh-socials-row, .lh-custom-row, .lh-realname, .lh-country-row) { display: none; }
+
+    .lh-rows.is-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; max-width: 1300px; }
+    .lh-rows.is-two-col .lh-hdr, .lh-rows.is-two-col .lh-sc { display: none; }
+    .lh-rows.is-two-col.has-stats .lh-row { grid-template-columns: 6px 78px 1fr auto; }
+    .lh-right-lbl.is-two-col { max-width: 1300px; }
     .lh-sc.col-g   { background: rgba(244,208,64,.08); border-left: 1px solid rgba(244,208,64,.12); }
     .lh-sc.col-a   { background: rgba(147,197,253,.07); border-left: 1px solid rgba(147,197,253,.1); }
     .lh-sc.col-s   { background: rgba(110,231,183,.07); border-left: 1px solid rgba(110,231,183,.1); }
@@ -758,7 +794,27 @@
           + sc('col-gpg', hs ? evSt.gpg     : '—', 'GPG');
         rows.appendChild(row);
       });
+      fitRows();
     }
+
+    // A roster that does not fit the screen (8 players at full size need ~1,200px) used to spill off
+    // the top and bottom. Step down one density at a time until it fits; re-check once fonts load,
+    // since the name font changes line heights.
+    const FIT_STEPS = [[], ['is-compact'], ['is-snug'], ['is-tight'], ['is-tight', 'is-two-col']];
+    function fitRows() {
+      const right = rows.parentElement, lbl = el('lh-right-lbl');
+      FIT_STEPS.flat().forEach((c) => { rows.classList.remove(c); lbl.classList.remove(c); });
+      const cs = getComputedStyle(right);
+      const avail = right.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)
+        - lbl.offsetHeight - parseFloat(getComputedStyle(lbl).marginBottom);
+      for (const step of FIT_STEPS) {
+        FIT_STEPS.flat().forEach((c) => { rows.classList.remove(c); lbl.classList.remove(c); });
+        step.forEach((c) => { rows.classList.add(c); lbl.classList.add(c); });
+        if (rows.scrollHeight <= avail) return;
+      }
+    }
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (rows.children.length) fitRows(); });
+    window.addEventListener('resize', () => { if (rows.children.length) fitRows(); });
 
     function renderFooter(spons) {
       const sponsors = (spons || []).filter((s) => s && s.logo);
