@@ -472,6 +472,9 @@ async function connect() {
         try { navigator.clipboard.writeText(d.joinUrl).then(done, () => { customPrompt('Camera link', 'Copy this link', d.joinUrl, 'Close'); }); }
         catch (er) { customPrompt('Camera link', 'Copy this link', d.joinUrl, 'Close'); }
       }
+    } else if (msg.type === 'apex-scoring-result') {
+      const d = msg.data || {};
+      showToast(d.message || '', d.ok ? '#22c55e' : '#f56565', d.ok ? 5000 : 8000);
     } else if (msg.type === 'apex-postgame-result') {
       const d = msg.data || {};
       const st = el('apex-pg-status'); if (st) st.textContent = d.message || '';

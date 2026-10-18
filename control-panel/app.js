@@ -24528,6 +24528,21 @@ function applyApexState(data) {
   if (sc && Array.isArray(sc.placementPoints)) {
     apexBuildPlaceGrid(sc.placementPoints);
     const kp = el('apex-kill-pts'); if (kp && document.activeElement !== kp) kp.value = sc.killPoints != null ? sc.killPoints : 1;
+    const kc = el('apex-kill-cap'); if (kc && document.activeElement !== kc) kc.value = sc.killCap || 0;
+    // Presets: ALGS (built in) + the producer's leagues; the current table's name is selected.
+    const ps = el('apex-preset');
+    if (ps && document.activeElement !== ps) {
+      const names = ['ALGS'].concat((apex.scoringPresets || []).map((p) => p.name));
+      const cur = sc.name || 'ALGS';
+      const sig = names.join('|') + '#' + cur;
+      if (ps._sig !== sig) {
+        ps._sig = sig;
+        ps.innerHTML = names.map((n) => '<option value="' + esc(n) + '">' + esc(n) + (n === 'ALGS' ? ' (built in)' : '') + '</option>').join('')
+          + (names.indexOf(cur) < 0 ? '<option value="' + esc(cur) + '">' + esc(cur) + ' (not saved)</option>' : '');
+        ps.value = cur;
+      }
+      const del = el('apex-preset-delete'); if (del) del.disabled = cur === 'ALGS' || names.indexOf(cur) < 0;
+    }
   }
   // Event branding
   const ev = apex.event || {};
@@ -24603,13 +24618,37 @@ function wireApexScoring() {
   if (saveSc) saveSc.addEventListener('click', () => {
     const placementPoints = Array.from(document.querySelectorAll('#apex-place-grid .apex-pp')).sort((a, b) => a.dataset.i - b.dataset.i).map((i) => +i.value || 0);
     const killPoints = +(el('apex-kill-pts') || {}).value || 0;
-    send('apex_set_scoring', { placementPoints, killPoints });
+    const killCap = +(el('apex-kill-cap') || {}).value || 0;
+    send('apex_set_scoring', { placementPoints, killPoints, killCap });
     const st = el('apex-scoring-status'); if (st) { st.textContent = 'Saved.'; st.style.color = '#86efac'; setTimeout(() => st.textContent = '', 1500); }
   });
   const resetSc = el('apex-reset-scoring');
   if (resetSc) resetSc.addEventListener('click', () => {
-    send('apex_set_scoring', { placementPoints: [12,9,7,5,4,3,3,2,2,2,1,1,1,1,1,0,0,0,0,0], killPoints: 1 });
+    send('apex_scoring_preset', { op: 'apply', name: 'ALGS' });
     _apexPlaceGridBuilt = false;
+  });
+  // Scoring presets: switch league, save the table under a name, delete one, or paste rules text.
+  el('apex-preset')?.addEventListener('change', function () { send('apex_scoring_preset', { op: 'apply', name: this.value }); _apexPlaceGridBuilt = false; });
+  el('apex-preset-save')?.addEventListener('click', () => {
+    const cur = ((currentState.apex || {}).scoring || {}).name || '';
+    customPrompt('Save scoring preset', 'Name this scoring table (for example the league or series). The same name replaces it.', cur && cur !== 'ALGS' ? cur : '', 'Save').then((v) => {
+      if (v == null || !String(v).trim()) return;
+      // Save what is on screen first, so unsaved edits are part of the preset.
+      el('apex-save-scoring')?.click();
+      setTimeout(() => send('apex_scoring_preset', { op: 'save', name: String(v).trim() }), 150);
+    });
+  });
+  el('apex-preset-delete')?.addEventListener('click', () => {
+    const n = (el('apex-preset') || {}).value;
+    if (!n || n === 'ALGS') return;
+    appConfirm('Delete the scoring preset "' + n + '"? Games already played keep their results; standings use whatever table is selected.', 'Delete').then((ok) => { if (ok) send('apex_scoring_preset', { op: 'delete', name: n }); });
+  });
+  el('apex-preset-paste')?.addEventListener('click', () => {
+    customPrompt('Paste scoring rules', 'Paste the league\'s scoring lines, for example:  Kills = 1pt   1st place = 12pts   6th-10th Place = 3pts', '', 'Fill table').then((v) => {
+      if (v == null || !String(v).trim()) return;
+      _apexPlaceGridBuilt = false;
+      send('apex_set_scoring', { text: String(v), name: 'Custom' });
+    });
   });
   const saveEv = el('apex-save-event');
   if (saveEv) saveEv.addEventListener('click', () => send('apex_set_event', {
@@ -35188,6 +35227,9 @@ async function connect() {
         try { navigator.clipboard.writeText(d.joinUrl).then(done, () => { customPrompt('Camera link', 'Copy this link', d.joinUrl, 'Close'); }); }
         catch (er) { customPrompt('Camera link', 'Copy this link', d.joinUrl, 'Close'); }
       }
+    } else if (msg.type === 'apex-scoring-result') {
+      const d = msg.data || {};
+      showToast(d.message || '', d.ok ? '#22c55e' : '#f56565', d.ok ? 5000 : 8000);
     } else if (msg.type === 'apex-postgame-result') {
       const d = msg.data || {};
       const st = el('apex-pg-status'); if (st) st.textContent = d.message || '';

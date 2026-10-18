@@ -1013,7 +1013,8 @@ let state = {
     winners: [],
     // ALGS scoring config (editable) + series accumulation. Team identity (logo/abbrev) is
     // resolved client-side from the team library; teamMap holds producer overrides (liveKey -> saved team name).
-    scoring: { placementPoints: [12, 9, 7, 5, 4, 3, 3, 2, 2, 2, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0], killPoints: 1 },
+    scoring: { placementPoints: [12, 9, 7, 5, 4, 3, 3, 2, 2, 2, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0], killPoints: 1, killCap: 0, name: 'ALGS' },
+    scoringPresets: [],             // [{ name, placementPoints, killPoints, killCap }]: each league's own table, one click to switch
     games: [],                      // completed-game snapshots (survives a mid-series restart)
     teamMap: {},                    // { normalizedLiveApiName: savedTeamName } manual identity overrides
     event: { title: '', match: '', split: '' },   // broadcast branding shown top-left
@@ -4880,7 +4881,10 @@ function loadState() {
         if (a.scoring && Array.isArray(a.scoring.placementPoints)) {
           state.apex.scoring.placementPoints = a.scoring.placementPoints.map((n) => Math.max(0, Math.round(Number(n) || 0)));
           state.apex.scoring.killPoints = Math.max(0, Number(a.scoring.killPoints) || 0);
+          state.apex.scoring.killCap = Math.max(0, Math.round(Number(a.scoring.killCap) || 0));
+          state.apex.scoring.name = String(a.scoring.name || '').slice(0, 60);
         }
+        if (Array.isArray(a.scoringPresets)) state.apex.scoringPresets = a.scoringPresets.filter((p) => p && p.name && Array.isArray(p.placementPoints)).slice(0, 50);
         if (a.teamMap && typeof a.teamMap === 'object') state.apex.teamMap = a.teamMap;
         if (a.event && typeof a.event === 'object') state.apex.event = { title: String(a.event.title || ''), match: String(a.event.match || ''), split: String(a.event.split || '') };
         if (Array.isArray(a.games)) state.apex.games = a.games;
@@ -4938,7 +4942,7 @@ function buildSaveSnapshot() {
       liveMatch: (state.br.live && state.br.live.match) || 1
     },
     pointMatrices: state.pointMatrices || [],
-    apex: { scoring: state.apex && state.apex.scoring, teamMap: (state.apex && state.apex.teamMap) || {}, event: (state.apex && state.apex.event) || {}, games: (state.apex && state.apex.games) || [], port: (state.apex && state.apex.port) || 7777 },
+    apex: { scoring: state.apex && state.apex.scoring, scoringPresets: (state.apex && state.apex.scoringPresets) || [], teamMap: (state.apex && state.apex.teamMap) || {}, event: (state.apex && state.apex.event) || {}, games: (state.apex && state.apex.games) || [], port: (state.apex && state.apex.port) || 7777 },
     // Settings only. gepData/data are live payloads from a spectator client or MC server —
     // restoring a stale scoreboard on boot would be worse than starting empty.
     r6: { autoScore: !!(state.r6 && state.r6.autoScore) },

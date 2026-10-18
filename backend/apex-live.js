@@ -149,11 +149,44 @@ const DEFAULT_SCORING = {
   placementPoints: [12, 9, 7, 5, 4, 3, 3, 2, 2, 2, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0],
   killPoints: 1,
 };
-// Points a squad earns in ONE game from a finishing placement (1-based) + kill count.
+// Points a squad earns in ONE game from a finishing placement (1-based) + kill count. killCap
+// (optional, per game) limits how many kills score: some leagues cap kill points.
 function gamePoints(placement, kills, scoring) {
   const s = scoring || DEFAULT_SCORING;
   const pp = (placement >= 1 && placement <= s.placementPoints.length) ? (s.placementPoints[placement - 1] || 0) : 0;
-  return pp + (kills || 0) * (s.killPoints || 0);
+  const k = s.killCap > 0 ? Math.min(kills || 0, s.killCap) : (kills || 0);
+  return pp + k * (s.killPoints || 0);
+}
+
+// A league's scoring rules pasted as text -> a scoring table. Reads lines the way rulebooks
+// write them:  "Kills = 1pt", "1st place = 12pts", "6th-10th Place = 3pts", "11 - 15: 2",
+// "16th to 20th place = 1 pt", "Kill cap: 6". Places not mentioned score 0.
+// Returns { placementPoints[20], killPoints, killCap, matched } (matched = lines understood).
+function parseScoringText(text, size) {
+  const n = Math.max(1, Math.min(60, size || 20));
+  const placementPoints = new Array(n).fill(0);
+  let killPoints = null, killCap = 0, matched = 0;
+  // A single-line paste (an input box turns line breaks into spaces): start a new rule before each
+  // ordinal place, each "kills" and each "kill cap".
+  String(text || '').replace(/\s+(?=\d+\s*(?:st|nd|rd|th)\b|kills?\b|kill\s*cap\b|\d+\.\s)/gi, '\n').split(/\r?\n|;|,(?=\s*\d)/).forEach((line) => {
+    const l = line.toLowerCase().replace(/[–—]/g, '-').trim();
+    if (!l) return;
+    const val = (l.match(/(?:=|:|-\s*(?=\d+\s*(?:pts?|points?)\b)|\bis\b)\s*(\d+(?:\.\d+)?)\s*(?:pts?|points?)?\s*(?:each|per kill)?\s*\.?$/) || [])[1];
+    if (/kill\s*cap|cap(?:ped)?\s*(?:at|kills)|max(?:imum)?\s*(?:of\s*)?\d*\s*kills/.test(l)) {
+      const c = (l.match(/(\d+)/) || [])[1]; if (c) { killCap = Number(c); matched++; } return;
+    }
+    if (/\bkills?\b|elimination|\bkos?\b/.test(l) && val != null) { killPoints = Number(val); matched++; return; }
+    const range = l.match(/^\D*?(\d+)\s*(?:st|nd|rd|th)?(?:\s*place)?\s*(?:-|to|through|thru)\s*(\d+)\s*(?:st|nd|rd|th)?/);
+    const one = l.match(/^\D*?(\d+)\s*(?:st|nd|rd|th)(?:\s*place)?\b|^\D*?place\s*(\d+)\b|^\s*(\d+)\s*(?:=|:)/);
+    if (val == null) return;
+    let a = 0, b = 0;
+    if (range) { a = Number(range[1]); b = Number(range[2]); }
+    else if (one) { a = b = Number(one[1] || one[2] || one[3]); }
+    if (!a || !b || b < a) return;
+    for (let p = a; p <= Math.min(b, n); p++) placementPoints[p - 1] = Number(val);
+    matched++;
+  });
+  return { placementPoints, killPoints: killPoints == null ? 1 : killPoints, killCap, matched };
 }
 
 // Stable per-team identity key across games (the org, not the lobby slot). teamName is
@@ -465,7 +498,7 @@ function createServer({ port = 7777, host = '127.0.0.1', onFrame, onStatus, onRa
 module.exports = {
   buildConfig, writeConfig, launchOptions, defaultConfigDir,
   eventType, eventBody, normPlayer, playerKey, teamKeyOf,
-  DEFAULT_SCORING, gamePoints, computeStandings,
+  DEFAULT_SCORING, gamePoints, computeStandings, parseScoringText,
   initialState, applyEvent, resetForNewGame, finalizeGame, toBroadcast,
   createServer,
 };

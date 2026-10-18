@@ -48,3 +48,18 @@ ok(hz.seriesPoints === 29 && nl.seriesPoints === 22 && hz.rank === 1, 'official 
   ok(err && /stats token/.test(err.message), 'a malformed token is refused without calling EA');
   console.log('apex-postgame: all ' + pass + ' checks passed');
 })().catch((e) => { console.error(e); process.exit(1); });
+
+// League scoring: rules pasted as text fill the table (multi-line or squashed onto one line).
+{
+  const t = 'Kills = 1pt\n1st place = 12pts\n2nd place = 9pts\n3rd place = 7pts\n4th place = 5pts\n5th Place = 4pts\n6th-10th Place = 3pts\n11th-15th Place = 2pts\n16th-20th Place = 1pt\n2. this series is not using the ALGS scoring system';
+  const want = '12,9,7,5,4,3,3,3,3,3,2,2,2,2,2,1,1,1,1,1';
+  const r = apexLive.parseScoringText(t, 20);
+  if (r.placementPoints.join(',') !== want || r.killPoints !== 1) throw new Error('Fall Duos rules: ' + JSON.stringify(r));
+  const r1 = apexLive.parseScoringText(t.replace(/\n/g, ' '), 20);
+  if (r1.placementPoints.join(',') !== want) throw new Error('one-line paste: ' + JSON.stringify(r1));
+  const cap = apexLive.parseScoringText('Kills = 2 pts each\nKill cap: 6\n1st = 10', 20);
+  if (cap.killPoints !== 2 || cap.killCap !== 6 || cap.placementPoints[0] !== 10) throw new Error('kill cap: ' + JSON.stringify(cap));
+  if (apexLive.gamePoints(1, 9, { placementPoints: [10], killPoints: 2, killCap: 6 }) !== 22) throw new Error('kill cap scores at most the cap');
+  if (apexLive.parseScoringText('nothing useful here', 20).matched !== 0) throw new Error('junk matches nothing');
+  console.log('apex scoring text: ok');
+}

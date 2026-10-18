@@ -729,12 +729,50 @@ if (!Array.isArray(lg.brSeries)) lg.brSeries = [];
   },
 
   // ── Apex LiveAPI producer controls ───────────────────────────────────────
+  // The points table. Also takes a league's rules pasted as text ({ text }), and a name.
   apex_set_scoring(msg, ws) {
     const d = msg.data || {};
-    if (Array.isArray(d.placementPoints)) state.apex.scoring.placementPoints = d.placementPoints.map((n) => Math.max(0, Math.round(Number(n) || 0)));
-    if (d.killPoints != null) state.apex.scoring.killPoints = Math.max(0, Number(d.killPoints) || 0);
+    const sc = state.apex.scoring;
+    if (typeof d.text === 'string') {
+      const r = apexLive.parseScoringText(d.text, (sc.placementPoints || []).length || 20);
+      if (!r.matched) { sendWs(ws, { type: 'apex-scoring-result', data: { ok: false, message: 'No scoring lines found. Write them like "1st place = 12pts", "6th-10th place = 3pts", "Kills = 1pt".' } }); return; }
+      sc.placementPoints = r.placementPoints; sc.killPoints = r.killPoints; sc.killCap = r.killCap; sc.name = String(d.name || 'Custom').slice(0, 60);
+      sendWs(ws, { type: 'apex-scoring-result', data: { ok: true, message: 'Read ' + r.matched + ' scoring line' + (r.matched === 1 ? '' : 's') + '. Check the table, then save it as a preset.', fromText: true } });
+    }
+    if (Array.isArray(d.placementPoints)) sc.placementPoints = d.placementPoints.map((n) => Math.max(0, Math.round(Number(n) || 0)));
+    if (d.killPoints != null) sc.killPoints = Math.max(0, Number(d.killPoints) || 0);
+    if (d.killCap != null) sc.killCap = Math.max(0, Math.round(Number(d.killCap) || 0));
+    if (typeof d.name === 'string' && typeof d.text !== 'string') sc.name = d.name.slice(0, 60);
     recomputeApexBroadcast();
     saveAppState();
+    broadcastFullState();
+  },
+
+  // Named scoring presets: every league scores differently. Save the current table under a name
+  // (same name replaces), apply one, or delete one. 'ALGS' is built in and always available.
+  apex_scoring_preset(msg, ws) {
+    const d = msg.data || {};
+    const name = String(d.name || '').trim().slice(0, 60);
+    const list = state.apex.scoringPresets = Array.isArray(state.apex.scoringPresets) ? state.apex.scoringPresets : [];
+    const sc = state.apex.scoring;
+    const at = list.findIndex((p) => p.name.toLowerCase() === name.toLowerCase());
+    if (d.op === 'save') {
+      if (!name || /^algs$/i.test(name)) { sendWs(ws, { type: 'apex-scoring-result', data: { ok: false, message: name ? 'ALGS is built in: pick another name.' : 'Give the preset a name.' } }); return; }
+      const p = { name, placementPoints: sc.placementPoints.slice(), killPoints: sc.killPoints, killCap: sc.killCap || 0 };
+      if (at >= 0) list[at] = p; else list.push(p);
+      sc.name = name;
+    } else if (d.op === 'apply') {
+      const p = /^algs$/i.test(name) ? Object.assign({ name: 'ALGS', killCap: 0 }, apexLive.DEFAULT_SCORING) : list[at];
+      if (!p) return;
+      sc.placementPoints = p.placementPoints.slice(); sc.killPoints = p.killPoints; sc.killCap = p.killCap || 0; sc.name = p.name;
+    } else if (d.op === 'delete') {
+      if (at < 0) return;
+      list.splice(at, 1);
+    } else return;
+    recomputeApexBroadcast();
+    saveAppState();
+    broadcastFullState();
+    sendWs(ws, { type: 'apex-scoring-result', data: { ok: true, message: d.op === 'save' ? 'Saved "' + name + '".' : d.op === 'apply' ? 'Scoring set to "' + sc.name + '". Standings updated.' : 'Deleted "' + name + '".' } });
   },
 
   apex_set_teammap(msg, ws) {
